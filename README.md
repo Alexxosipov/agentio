@@ -157,7 +157,7 @@ The full manual for the people running the cycle is installed as `docs/AUTONOMOU
 
 ## Security
 
-- Headless agents run with `--permission-mode dontAsk`: only the commands allowed in `.claude/settings.json` run; `git push` to the base branch, force pushes, history rewrites, `composer require` and similar are denied. `.claude/agent-settings.json` forbids the agents to edit their own settings, hooks and loop scripts.
+- Headless agents run with `--permission-mode dontAsk`: only the commands allowed in `.claude/settings.json` run; `git push` to the base branch, force pushes, history rewrites, `composer require` and similar are denied. The loop passes these rules together with `.claude/agent-settings.json` through `--settings`, because Claude Code ignores the allow rules of a project directory whose workspace trust was never accepted, and every new epic worktree is such a directory. `.claude/agent-settings.json` forbids the agents to edit their own settings, hooks, loop scripts and `.agentio.json`.
 - `.claude/hooks/guard-bash.php` is a second line of defence for every Bash command: protected branches, destructive commands outside the project, access to secrets and to the token in the environment.
 - The YouTrack token is read only from the environment or `.env`; it is passed to the loop in its environment and to the agents' MCP config by reference (`${YOUTRACK_TOKEN}`), never written into files, logs or comments. `.env.example` gets an empty `YOUTRACK_TOKEN=`.
 - Agents commit only the files of their task (`scripts/agent-commit.sh`) and never merge into the base branch; humans accept epics (unless you choose `auto-merge`).

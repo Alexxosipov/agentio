@@ -84,6 +84,19 @@ it('keeps loop.pid while running and plan-<ID>.pid while planning', function () 
         ->and(file_get_contents($logs.'/plan-XY-1.log'))->toContain('/plan XY-1', 'claude -p /plan XY-1');
 });
 
+it('passes the project permission rules to headless sessions, which ignore them in untrusted directories', function () {
+    $project = projectWithInstalledStubs(['XY-1']);
+
+    $process = runInstalledLoop($project, '--once');
+    $arguments = (string) file_get_contents($project.'/storage/logs/agents/plan-XY-1.log');
+    preg_match('/ --settings (\{.*\}) --output-format /', $arguments, $match);
+    $settings = json_decode($match[1] ?? '', true, flags: JSON_THROW_ON_ERROR);
+
+    expect($process->getExitCode())->toBe(0, $process->getErrorOutput())
+        ->and($settings['permissions']['allow'])->toContain('Bash(php scripts/yt.php *)', 'Bash(scripts/agent-commit.sh *)')
+        ->and($settings['permissions']['deny'])->toContain('Bash(git push --force*)', 'Edit(scripts/agent-loop.sh)', 'Edit(scripts/yt.php)', 'Edit(.claude/hooks/**)');
+});
+
 it('refuses to start a second loop in the same checkout', function () {
     $project = projectWithInstalledStubs();
     mkdir($project.'/storage/logs/agents', 0777, true);

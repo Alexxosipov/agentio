@@ -10,7 +10,10 @@
             "Edit(scripts/agent-loop.sh)",
             "Edit(scripts/epic-worktree.sh)",
             "Edit(scripts/agent-commit.sh)",
-            "Edit(scripts/run-tests.sh)"
+            "Edit(scripts/run-tests.sh)",
+            "Edit(scripts/yt.php)",
+            "Edit(scripts/agent-log.php)",
+            "Edit(.agentio.json)"
         ]
     }
 }

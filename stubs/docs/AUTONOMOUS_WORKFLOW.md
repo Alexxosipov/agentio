@@ -591,12 +591,12 @@ git branch -d epic/{{project}}-2-<slug>                      # по желани
 
 ## 8. Безопасность
 
-- **Режим разрешений.** Headless-агенты запускаются с `--permission-mode dontAsk`. Им разрешено только то, что перечислено в `.claude/settings.json` → `permissions.allow`; остальное отклоняется без вопроса. Там же список `deny`:
+- **Режим разрешений.** Headless-агенты запускаются с `--permission-mode dontAsk`. Им разрешено только то, что перечислено в `.claude/settings.json` → `permissions.allow`; остальное отклоняется без вопроса. Цикл передаёт эти правила вместе с `.claude/agent-settings.json` через `--settings`: в каталоге, которому не подтверждено доверие (а новый worktree эпика всегда такой), Claude Code игнорирует `allow` из `.claude/settings.json` проекта — запреты и хуки действуют в любом случае. Там же список `deny`:
   - `git push --force`, push в `{{base_branch}}`/`main`/`master`/`HEAD`;
   - `reset --hard`, `clean`, `rebase`, `checkout {{base_branch}}`, `worktree remove`;
   - `composer require/remove/update`, `bun add/remove/update`, `npm install <пакет>/uninstall/update`, `sudo`;
   - чтение `.env.production`/`.env.staging`, `~/.claude.json`, `~/.ssh`, `~/.config/gh`.
-- **Самозащита.** `.claude/agent-settings.json` запрещает агентам править свои настройки (`.claude/settings*.json`, `agent-settings.json`, `agents-mcp.json`), хуки и скрипты цикла (`agent-loop.sh`, `epic-worktree.sh`, `agent-commit.sh`, `run-tests.sh`).
+- **Самозащита.** `.claude/agent-settings.json` запрещает агентам править свои настройки (`.claude/settings*.json`, `agent-settings.json`, `agents-mcp.json`, `.agentio.json`), хуки и скрипты цикла (`agent-loop.sh`, `epic-worktree.sh`, `agent-commit.sh`, `run-tests.sh`, `yt.php`, `agent-log.php`).
 - **Хук `.claude/hooks/guard-bash.php`** (PreToolUse для Bash) — второй рубеж. Он запрещает:
   - push в защищённые ветки, force/mirror push, push и удаление веток кроме `epic/*`;
   - `reset --hard`, `clean`, `stash`, переписывание истории, `checkout`/`restore` всего дерева, `worktree remove/prune`;

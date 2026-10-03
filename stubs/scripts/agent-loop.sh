@@ -91,14 +91,36 @@ running_epics() {
 
 running_count() { running_epics | grep -c . ; }
 
+# Settings of a headless session: .claude/agent-settings.json plus the permission rules of .claude/settings.json.
+# Claude Code ignores the allow rules of .claude/settings.json in a directory whose workspace trust was never
+# accepted (every new epic worktree), so they are passed with --settings; deny rules and hooks apply either way.
+session_settings() {
+    php -r '
+        $read = function (string $file): array {
+            $data = json_decode((string) @file_get_contents($file), true);
+            return is_array($data) ? $data : [];
+        };
+        $settings = $read($argv[1]."/.claude/agent-settings.json");
+        $project = $read($argv[1]."/.claude/settings.json");
+        foreach (["allow", "deny"] as $list) {
+            $rules = array_merge((array) ($project["permissions"][$list] ?? []), (array) ($settings["permissions"][$list] ?? []));
+            if ($rules !== []) {
+                $settings["permissions"][$list] = array_values(array_unique($rules, SORT_REGULAR));
+            }
+        }
+        echo json_encode($settings, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+    ' "$1"
+}
+
 claude_headless() {
-    local dir="$1" logfile="$2" prompt="$3"
+    local dir="$1" logfile="$2" prompt="$3" settings
+    settings="$(session_settings "$dir")"
     (
         cd "$dir" || exit 1
         exec setsid "$CLAUDE_BIN" -p "$prompt" \
             --permission-mode dontAsk \
             --strict-mcp-config --mcp-config "$dir/.claude/agents-mcp.json" \
-            --settings "$dir/.claude/agent-settings.json" \
+            --settings "$settings" \
             --output-format stream-json --verbose \
             ${CLAUDE_MODEL:+--model "$CLAUDE_MODEL"} \
             </dev/null >>"$logfile" 2>&1
