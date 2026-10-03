@@ -1,0 +1,16 @@
+{
+    "$schema": "https://json.schemastore.org/claude-code-settings.json",
+    "permissions": {
+        "deny": [
+            "Edit(.claude/settings.json)",
+            "Edit(.claude/settings.local.json)",
+            "Edit(.claude/agent-settings.json)",
+            "Edit(.claude/agents-mcp.json)",
+            "Edit(.claude/hooks/**)",
+            "Edit(scripts/agent-loop.sh)",
+            "Edit(scripts/epic-worktree.sh)",
+            "Edit(scripts/agent-commit.sh)",
+            "Edit(scripts/run-tests.sh)"
+        ]
+    }
+}

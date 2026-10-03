@@ -1,0 +1,18 @@
+{
+    "mcpServers": {
+        "youtrack": {
+            "type": "http",
+            "url": "${YOUTRACK_URL}/mcp",
+            "headers": {
+                "Authorization": "Bearer ${YOUTRACK_TOKEN}"
+            }
+        },
+        "laravel-boost": {
+            "command": "php",
+            "args": [
+                "artisan",
+                "boost:mcp"
+            ]
+        }
+    }
+}
