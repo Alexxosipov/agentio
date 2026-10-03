@@ -619,20 +619,20 @@ git branch -d epic/{{project}}-2-<slug>                      # по желани
   - `git push --force`, push в `{{base_branch}}`/`main`/`master`/`HEAD`;
   - `reset --hard`, `clean`, `rebase`, `checkout {{base_branch}}`, `worktree remove`;
   - `composer require/remove/update`, `bun add/remove/update`, `npm install <пакет>/uninstall/update`, `sudo`;
-  - чтение `.env.production`/`.env.staging`, `~/.claude.json`, `~/.ssh`, `~/.config/gh`.
+  - чтение `.env` и `.claude/settings.local.json` (в них токен YouTrack; соединение `scripts/yt.php` читает сам), `.env.production`/`.env.staging`, `~/.claude.json`, `~/.ssh`, `~/.config/gh`.
 - **Самозащита.** `.claude/agent-settings.json` запрещает агентам править свои настройки (`.claude/settings*.json`, `agent-settings.json`, `agents-mcp.json`, `.agentio.json`), хуки и скрипты цикла (`agent-loop.sh`, `epic-worktree.sh`, `agent-commit.sh`, `run-tests.sh`, `yt.php`, `agent-log.php`).
 - **Хук `.claude/hooks/guard-bash.php`** (PreToolUse для Bash) — второй рубеж. Он запрещает:
   - push в защищённые ветки, force/mirror push, push и удаление веток кроме `epic/*`;
   - `reset --hard`, `clean`, `stash`, переписывание истории, `checkout`/`restore` всего дерева, `worktree remove/prune`;
   - `rm`/`mv`/`chmod`/`find -delete` вне каталога проекта (и разрешённых `additionalDirectories`) и внутри `.git`;
   - `git -C` вне проекта;
-  - чтение секретов;
-  - вывод `$YOUTRACK_TOKEN`, `ANTHROPIC_*`, `printenv`, `env`;
+  - чтение секретов, в том числе `.env`, `.claude/settings.local.json` и `php artisan config:show agentio` (настройки приложения агенты смотрят в `.env.example`, `config/*` и `config:show <ключ>`);
+  - любое упоминание `YOUTRACK_TOKEN`, вывод `ANTHROPIC_*`, `printenv`, `env`;
   - `sudo` и разрушительные системные команды.
 - **Зависимости.** Новые пакеты агентам запрещены: они спрашивают через `[AGENT:BLOCKED]`.
 - **Коммиты.** Агенты коммитят только свои файлы через `scripts/agent-commit.sh`, а `git add -A`/`.` и `commit -a` запрещены правилами процесса.
-- **Изоляция окружения.** Каждый worktree получает свой `.env` из `.env.example` (локальное окружение, свой `APP_KEY`, своя SQLite-БД). Главный `.env` агенты не используют.
-- **Токены.** `YOUTRACK_TOKEN` живёт только в окружении или в `.env` (он не коммитится; в `.env.example` переменная пустая). `scripts/yt.php` и `.claude/agents-mcp.json` (через `${YOUTRACK_TOKEN}`) читают его сами, в репозиторий, логи и комментарии он не попадает. Ваш интерактивный MCP хранит токен в `~/.claude.json`. Скомпрометированный токен отзовите в Profile → Account Security → Tokens.
+- **Изоляция окружения.** Каждый worktree получает свой `.env` из `.env.example` (локальное окружение, свой `APP_KEY`, своя SQLite-БД). Главный `.env` агенты не используют и не читают.
+- **Токены.** `YOUTRACK_TOKEN` живёт только в окружении или в `.env` (он не коммитится; в `.env.example` переменная пустая). `scripts/yt.php` и `.claude/agents-mcp.json` (через `${YOUTRACK_TOKEN}`) читают его сами, в репозиторий, логи и комментарии он не попадает. Для интерактивного `claude` он лежит ещё в блоке `env` файла `.claude/settings.local.json` (не коммитится). Скомпрометированный токен отзовите в Profile → Account Security → Tokens.
 
 ---
 

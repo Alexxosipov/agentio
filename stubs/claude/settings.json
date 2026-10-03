@@ -120,6 +120,10 @@
             "Read(./.env.staging)",
             "Read(**/.env.production)",
             "Read(**/.env.staging)",
+            "Read(./.env)",
+            "Read(**/.env)",
+            "Read(./.claude/settings.local.json)",
+            "Read(**/.claude/settings.local.json)",
             "Read(~/.claude.json)",
             "Read(~/.ssh/**)",
             "Read(~/.config/gh/**)"

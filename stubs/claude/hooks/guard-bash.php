@@ -95,7 +95,11 @@ if (preg_match('/\.env\.(production|prod|staging)\b|\.claude\.json|\.ssh\/|id_(r
     deny('access to secrets or production environment files is not allowed.');
 }
 
-if (preg_match('/\$\{?(YOUTRACK_TOKEN|ANTHROPIC_API_KEY|ANTHROPIC_AUTH_TOKEN)\b|\bprintenv\b|(^|[;&|]\s*)(env|set|export -p)\s*($|[;&|])|\/proc\/[0-9a-z]+\/environ/', $command) === 1) {
+if (preg_match('/settings\.local\.json|(^|[\s\'"=<>\/:])\.env(?![\w.-])|config:show\s+[\'"]?agentio(\.youtrack(\.token)?)?([\s\'";|&]|$)/i', $command) === 1) {
+    deny('.env and .claude/settings.local.json hold the YouTrack token: use .env.example, the config files or php artisan config:show <key>; scripts/yt.php reads the connection itself.');
+}
+
+if (preg_match('/\$\{?(ANTHROPIC_API_KEY|ANTHROPIC_AUTH_TOKEN)\b|\bYOUTRACK_TOKEN\b|\bprintenv\b|(^|[;&|]\s*)(env|set|export -p)\s*($|[;&|])|\/proc\/[0-9a-z]+\/environ/', $command) === 1) {
     deny('reading credentials from the environment is not allowed; scripts/yt.php reads them itself.');
 }
 

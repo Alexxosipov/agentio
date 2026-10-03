@@ -97,6 +97,47 @@ it('passes the project permission rules to headless sessions, which ignore them 
         ->and($settings['permissions']['deny'])->toContain('Bash(git push --force*)', 'Edit(scripts/agent-loop.sh)', 'Edit(scripts/yt.php)', 'Edit(.claude/hooks/**)');
 });
 
+it('keeps the files with the YouTrack token away from the agents', function () {
+    $project = projectWithInstalledStubs();
+    $secrets = ['Read(./.env)', 'Read(**/.env)', 'Read(./.claude/settings.local.json)', 'Read(**/.claude/settings.local.json)'];
+
+    foreach (['.claude/settings.json', '.claude/agent-settings.json'] as $file) {
+        expect(json_decode((string) file_get_contents($project.'/'.$file), true)['permissions']['deny'])->toContain(...$secrets);
+    }
+
+    $decision = function (string $command) use ($project): string {
+        $process = new Process([PHP_BINARY, $project.'/.claude/hooks/guard-bash.php'], $project, ['CLAUDE_PROJECT_DIR' => $project]);
+        $process->setInput((string) json_encode(['tool_input' => ['command' => $command], 'cwd' => $project]));
+        $process->mustRun();
+
+        return (string) (json_decode($process->getOutput(), true)['hookSpecificOutput']['permissionDecision'] ?? 'allow');
+    };
+
+    foreach ([
+        'cat .env',
+        'grep TOKEN ./.env',
+        'head -5 /srv/app/.env',
+        'cat .claude/settings.local.json',
+        'php artisan config:show agentio',
+        'php artisan config:show agentio.youtrack',
+        'php artisan config:show agentio.youtrack.token',
+        "php artisan tinker --execute 'echo env(\"YOUTRACK_TOKEN\");'",
+    ] as $command) {
+        expect($decision($command))->toBe('deny', $command);
+    }
+
+    foreach ([
+        'cat .env.example',
+        'git diff -- .env.example',
+        'php artisan config:show app.url',
+        'php artisan config:show agentio.youtrack.project',
+        'php scripts/yt.php context XY-1',
+        'ls -la .envrc',
+    ] as $command) {
+        expect($decision($command))->toBe('allow', $command);
+    }
+});
+
 it('refuses to start a second loop in the same checkout', function () {
     $project = projectWithInstalledStubs();
     mkdir($project.'/storage/logs/agents', 0777, true);
