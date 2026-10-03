@@ -18,7 +18,7 @@ allowed-tools: Bash(php scripts/yt.php *) mcp__youtrack__*
    - Если у идеи уже есть эпики (`relates to`) и `[AGENT:DONE]` от планирования — это повторный запуск. Сверь состояние с процедурой ниже и доделай недостающее, ничего не дублируя.
 2. **Примени скилл `project-manager`** (вызови его через Skill) и пройди его процедуру планирования целиком:
    - захват идеи → требования;
-   - **`system-analyst`** (Skill) → сводка влияния и статьи;
+   - **`system-analyst`** (Skill) → статьи модулей и фич, карта модулей, сводка влияния;
    - эпики → **`laravel-architect`** (Skill) для каждого эпика → проект, ADR, порядок реализации;
    - декомпозиция STORY/TASK → зависимости (включая пересечения по файлам);
    - `php scripts/yt.php validate <IDEA>` → Ready (`php scripts/yt.php set-state <ID> Ready`) → `[AGENT:DONE]` → `release --state=Done`.

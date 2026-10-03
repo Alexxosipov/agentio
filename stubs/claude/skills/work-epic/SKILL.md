@@ -23,7 +23,7 @@ git rev-parse --show-toplevel # путь worktree
 
 ## 1. Контекст и захват
 
-1. `php scripts/yt.php context $ARGUMENTS` и `php scripts/yt.php tree $ARGUMENTS`. Прочитай статью проекта эпика и ADR (ссылки в описании).
+1. `php scripts/yt.php context $ARGUMENTS` и `php scripts/yt.php tree $ARGUMENTS`. Прочитай статью проекта эпика, ADR и статьи фич (ссылки в описании эпика).
 2. `php scripts/yt.php claim $ARGUMENTS` (ветка и worktree — из git; не используй `$(...)` в командах: в автономном режиме они отклоняются).
    - `LOST` (код 3) → остановись: эпиком владеет другой агент.
    - `RESUMED` → это продолжение после обрыва, выполни шаг 2.

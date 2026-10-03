@@ -10,7 +10,7 @@ YouTrack — единственный источник правды: задач�
 
 Инструменты:
 - MCP `youtrack` (`mcp__youtrack__*`) — чтение и запись задач, комментариев, связей, меток, статей.
-- `php scripts/yt.php <command>` — детерминированные вычисления: готовность, дерево эпика, валидация графа, захват и освобождение, **смена статуса** (`set-state`), полный контекст. Нужны `YOUTRACK_URL` и `YOUTRACK_TOKEN` в окружении. Справка: `php scripts/yt.php help`.
+- `php scripts/yt.php <command>` — детерминированные вычисления: готовность, дерево эпика, валидация графа, захват и освобождение, **смена статуса** (`set-state`), полный контекст, дерево базы знаний (`kb-tree`). Нужны `YOUTRACK_URL` и `YOUTRACK_TOKEN` в окружении. Справка: `php scripts/yt.php help`.
 
 Если правило ниже и поведение `scripts/yt.php` расходятся, прав скрипт. Расхождение оформи комментарием `[AGENT:DECISION]` в задаче.
 
@@ -157,16 +157,15 @@ php scripts/yt.php claim {{project}}-42 --plan="<кратко план>"
 | Статья | ID |
 |---|---|
 | Обзор продукта | {{kb.overview}} |
-| Системная аналитика (корень) | {{kb.analysis}} |
-| 1. Бизнес-контекст и цели · 2. Пользователи, роли и сценарии · 3. Функциональные требования и бизнес-правила | {{kb.analysis.business}} · {{kb.analysis.users}} · {{kb.analysis.functional}} |
-| 4. Данные · 5. Интеграции и интерфейсы · 6. НФТ · 7. Ограничения, допущения и риски | {{kb.analysis.data}} · {{kb.analysis.integrations}} · {{kb.analysis.nfr}} · {{kb.analysis.constraints}} |
+| Системная аналитика (корень, карта модулей) · Общие требования | {{kb.analysis}} · {{kb.analysis.common}} |
+| Модули и их фичи (требования, бизнес-правила, логическая модель данных) | дочерние статьи корня аналитики: `php scripts/yt.php kb-tree {{kb.analysis}}` |
 | Архитектура (корень) · обзор · модель данных | {{kb.architecture}} · {{kb.architecture.overview}} · {{kb.architecture.data_model}} |
 | ADR (корень) · ADR-001 Базовые архитектурные решения | {{kb.adr}} · {{kb.adr.001}} |
 | Процесс разработки | {{kb.process}} |
 | Руководство по автоматизации (для человека; копия — `docs/AUTONOMOUS_WORKFLOW.md`) | {{kb.guide}} |
 | Глоссарий | {{kb.glossary}} |
 
-Новые статьи (проекты эпиков, новые ADR) создаются дочерними к соответствующему корню.
+Дерево статей с ID — `php scripts/yt.php kb-tree [<ID статьи>] [--depth=N] [--json]` (без аргумента — вся база знаний проекта); ID статей не угадывай. Новые статьи создаются сразу под родителем: `create_article(project="{{project}}", summary=…, content=…, parentArticle=<ID родителя>)` — модули и фичи аналитики (скилл `system-analyst`), проекты эпиков и новые ADR (скилл `laravel-architect`). Статью не на своём месте переносит `update_article(articleId, parentArticleId=<ID>)`.
 
 ## Чек-лист самопроверки
 

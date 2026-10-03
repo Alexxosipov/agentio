@@ -34,7 +34,7 @@ worktree: `/abs/path/to/worktree`
 **Отвергнуто:**
 - Spatie Media Library — новая зависимость ради одного поля.
 - Хранение в БД (blob) — нагрузка на БД, нет CDN.
-**Влияние:** миграция `add_avatar_path_to_users_table`, статья «Модель данных» обновлена.
+**Влияние:** миграция `add_avatar_path_to_users_table`, статьи «Модель данных» и фичи «Профиль и аватар» ({{project}}-A-…) обновлены.
 ```
 
 ## [AGENT:BLOCKED]

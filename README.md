@@ -12,7 +12,7 @@
 
 Autonomous agentic development cycle for Laravel: YouTrack as the source of truth, Claude Code as PM, analyst, architect, developer and reviewer.
 
-A human files an idea in YouTrack and accepts the result. Everything in between is done by Claude Code agents: requirements (project manager), system analysis in 7 layers (analyst), the design of each epic (architect), stories and tasks with dependencies, code and tests (developer subagents, in parallel when files do not overlap), story reviews (reviewer) and a full test run. Every epic is worked on in its own git worktree and branch `epic/<ID>-<slug>`; YouTrack is the only source of truth, so work resumes from any point after a crash.
+A human files an idea in YouTrack and accepts the result. Everything in between is done by Claude Code agents: requirements (project manager), system analysis kept per product module and feature (analyst), the design of each epic (architect), stories and tasks with dependencies, code and tests (developer subagents, in parallel when files do not overlap), story reviews (reviewer) and a full test run. Every epic is worked on in its own git worktree and branch `epic/<ID>-<slug>`; YouTrack is the only source of truth, so work resumes from any point after a crash.
 
 The package installs the whole setup into a Laravel project — skills, subagents, permission settings and a guard hook for Claude Code, the loop scripts, the `CLAUDE.md` rules and a user manual — configures the YouTrack project, runs the loop and shows its state in the terminal and in a dashboard.
 
@@ -102,9 +102,26 @@ The command is idempotent and safe to rerun after updating the package: a file w
 - the `State` field (Backlog, Analysis, Ready, In Progress, Review, Blocked, Done) — when the project already has a `State` field with another bundle, only the missing values are added to it;
 - the `Type` field (Idea, Epic, Story, Task) and the `Stage` field (Backlog, Develop, Review, Test, Staging, Done — the Kanban columns, derived from State by `scripts/yt.php`);
 - the `idea` and `agent-claimed` tags and the `KEY: …` saved searches;
-- the knowledge base tree: product overview, system analysis with its 7 layers, architecture (overview, data model, ADR, ADR-001), development process, the automation guide (a copy of `docs/AUTONOMOUS_WORKFLOW.md`) and the glossary. New articles are short templates; existing articles with the same title are not changed.
+- the knowledge base tree: product overview, system analysis (the root with the module map and «Общие требования»), architecture (overview, data model, ADR, ADR-001), development process, the automation guide (a copy of `docs/AUTONOMOUS_WORKFLOW.md`) and the glossary. New articles are short templates; existing articles with the same title are not changed.
 
 The article ids are written to `.agentio.json` and into the installed skills.
+
+### Knowledge base
+
+The system analysis is kept as a tree of product modules and their features, not as one article per analysis layer:
+
+```
+Системная аналитика        root: the method in short and the module map (module → article → features)
+├── Общие требования       roles and permissions, cross-cutting non-functional requirements, external systems, global constraints
+├── Пользователи           a module: purpose, scope, roles, features, entity index, dependencies on other modules
+│   ├── Регистрация        a feature: goal, scenarios, FR/BR, data model, interfaces, NFR, risks — only what applies
+│   └── Профиль и аватар
+└── …
+```
+
+`--youtrack` creates only the root and «Общие требования»; the `system-analyst` skill adds modules and features as the product grows (a small change edits an existing feature article, a new capability becomes a new feature article, a new product area becomes a module and a row in the module map). An entity is described in full once, in the feature that introduced it; the architect's data model article links to it. `php scripts/yt.php kb-tree [<ARTICLE>] [--depth=N] [--json]` prints the tree with article ids; agents create articles under their parent with the `create_article` tool of the YouTrack MCP server (`parentArticle`).
+
+Projects set up by an earlier version have the seven layer articles («1. Бизнес-контекст и цели» … «7. Ограничения, допущения и риски») under «Системная аналитика». Rerunning `agentio:install --youtrack` deletes, renames and moves nothing: it only adds «Общие требования» under the existing root. The layer articles stay as a read-only archive — the analyst moves their content into feature articles whenever it works on the corresponding feature, and rewrites the root (module map plus a list of the archived layer articles) the first time it runs. The old skill file `.claude/skills/system-analyst/layers.md` is no longer used; delete it after updating.
 
 ## Running the loop
 
