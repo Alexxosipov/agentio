@@ -734,8 +734,24 @@ switch ($command) {
         $epic = $positional[1] ?? fail('Usage: tree <EPIC-ID>');
         $graph = Graph::project();
         $nodes = [];
+        // Depth first, children by number: every task right under its story.
+        $order = [];
+        $visit = function (string $id) use (&$visit, &$order, $graph): void {
+            if (in_array($id, $order, true)) {
+                return;
+            }
 
-        foreach ([$epic, ...$graph->descendants($epic)] as $id) {
+            $order[] = $id;
+            $children = related($graph->get($id), RELATION_PARENT_FOR);
+            usort($children, fn (string $a, string $b): int => (int) substr(strrchr($a, '-') ?: '', 1) <=> (int) substr(strrchr($b, '-') ?: '', 1));
+
+            foreach ($children as $child) {
+                $visit($child);
+            }
+        };
+        $visit($epic);
+
+        foreach ($order as $id) {
             $issue = $graph->get($id);
             $nodes[] = [
                 'id' => $id,
