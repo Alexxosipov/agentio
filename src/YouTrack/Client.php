@@ -318,7 +318,34 @@ final readonly class Client
      */
     public function customFields(): array
     {
-        return $this->paginate('admin/customFieldSettings/customFields', ['fields' => 'id,name,fieldType(id)']);
+        return $this->paginate('admin/customFieldSettings/customFields', [
+            'fields' => 'id,name,fieldType(id),fieldDefaults(bundle(id)),instances(project(id),bundle(id))',
+        ]);
+    }
+
+    /**
+     * Point a project custom field to another bundle, e.g. bundle type "StateBundle".
+     *
+     * @return array<array-key, mixed>
+     *
+     * @throws YouTrackException
+     */
+    public function setProjectFieldBundle(string $projectId, string $projectFieldId, string $type, string $bundleId, string $bundleType): array
+    {
+        return $this->post('admin/projects/'.rawurlencode($projectId).'/customFields/'.rawurlencode($projectFieldId), [
+            '$type' => $type,
+            'bundle' => ['id' => $bundleId, '$type' => $bundleType],
+        ], ['fields' => 'id,$type,field(id,name),bundle(id,name)']);
+    }
+
+    /**
+     * Whether the project has at least one issue.
+     *
+     * @throws YouTrackException
+     */
+    public function projectHasIssues(string $shortName): bool
+    {
+        return $this->get('issues', ['query' => 'project: '.$shortName, 'fields' => 'id', '$top' => 1]) !== [];
     }
 
     /**

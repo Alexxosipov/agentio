@@ -240,6 +240,7 @@ php artisan agentio:run --dry-run  # что запустил бы цикл; ни
 
 - **State**: Backlog, Analysis, Ready, In Progress, Review, Blocked, Done.
 - **Type**: Idea, Epic, Story, Task.
+- Наборы значений (bundle) State и Type, общие с другими проектами или выдаваемые YouTrack каждому новому проекту по умолчанию, команда не меняет: пустой проект переводится на собственные наборы «{{project}} States» / «{{project}} Types», для проекта с задачами выводится предупреждение.
 - **Stage**: Backlog, Develop, Review, Test, Staging, Done. Выводится из State, по умолчанию Backlog.
 - Метки: `idea`, `agent-claimed`.
 - Связи: `Depend` (depends on / is required for), `Subtask` (subtask of / parent for), `Relates`.

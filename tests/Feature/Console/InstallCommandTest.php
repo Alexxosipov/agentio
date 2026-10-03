@@ -52,6 +52,7 @@ function fakeYouTrackAdminApi(array $state = []): void
         'tags' => [],
         'queries' => [],
         'articles' => [],
+        'issues' => [],
         ...$state,
     ];
     $sequence = 100;
@@ -74,6 +75,7 @@ function fakeYouTrackAdminApi(array $state = []): void
             $get && $path === 'tags' => $page($state['tags']),
             $get && $path === 'savedQueries' => $page($state['queries']),
             $get && $path === 'articles' => $page($state['articles']),
+            $get && $path === 'issues' => Http::response($state['issues']),
             $path === 'articles' => (function () use (&$state, $body) {
                 $number = count($state['articles']) + 1;
                 $article = ['id' => '186-'.$number, 'idReadable' => 'XY-A-'.$number, 'summary' => $body['summary'], 'project' => ['shortName' => 'XY']];
@@ -501,6 +503,56 @@ it('attaches existing global fields and bundles found by name', function () {
         && str_contains($request->url(), 'admin/projects/0-9/customFields')
         && ($request->data()['field'] ?? null) === ['id' => 'f-state'] && $request['bundle']['id'] === 'b-1');
     Http::assertNotSent(fn (Request $request): bool => $request->method() === 'POST' && str_contains($request->url(), 'customFields') && ($request['name'] ?? null) === 'State');
+});
+
+it('gives a new project bundles of its own instead of changing the shared default bundles', function () {
+    $project = hostProject();
+    fakeYouTrackAdminApi([
+        'projectFields' => [
+            ['id' => 'pf-state', '$type' => 'StateProjectCustomField', 'field' => ['name' => 'State'], 'bundle' => ['id' => 'b-default', 'name' => 'States', '$type' => 'StateBundle']],
+            ['id' => 'pf-type', '$type' => 'EnumProjectCustomField', 'field' => ['name' => 'Type'], 'bundle' => ['id' => 'b-types', 'name' => 'Types', '$type' => 'EnumBundle']],
+        ],
+        'bundles' => [
+            'state' => [['id' => 'b-default', 'name' => 'States', 'values' => [['name' => 'Open'], ['name' => 'Fixed']]]],
+            'enum' => [
+                ['id' => 'b-types', 'name' => 'Types', 'values' => [['name' => 'Bug'], ['name' => 'Task']]],
+                ['id' => 'b-xy', 'name' => 'XY Types', 'values' => [['name' => 'Idea'], ['name' => 'Epic'], ['name' => 'Story']]],
+            ],
+        ],
+        'fields' => [
+            ['id' => 'f-state', 'name' => 'State', 'fieldType' => ['id' => 'state[1]'], 'fieldDefaults' => ['bundle' => ['id' => 'b-default']], 'instances' => [['project' => ['id' => '0-9'], 'bundle' => ['id' => 'b-default']]]],
+            ['id' => 'f-type', 'name' => 'Type', 'fieldType' => ['id' => 'enum[1]'], 'fieldDefaults' => ['bundle' => null], 'instances' => [['project' => ['id' => '0-9'], 'bundle' => ['id' => 'b-types']], ['project' => ['id' => '0-1'], 'bundle' => ['id' => 'b-types']]]],
+        ],
+    ]);
+
+    $this->artisan('agentio:install', ['--no-interaction' => true, '--project' => 'XY', '--youtrack' => true])
+        ->expectsOutputToContain('switch from the shared bundle States to XY States')
+        ->expectsOutputToContain('switch from the shared bundle Types to XY Types')
+        ->assertSuccessful();
+
+    $writes = collect(youTrackWrites())->map(fn (Request $request): string => (strtok($request->url(), '?') ?: '').' '.json_encode($request->data()));
+
+    expect($writes->filter(fn (string $write): bool => str_contains($write, 'b-default') || str_contains($write, 'b-types/')))->toBeEmpty()
+        ->and($writes->implode("\n"))->toContain(
+            'admin/customFieldSettings/bundles/state {"name":"XY States"',
+            'admin/customFieldSettings/bundles/enum/b-xy/values {"name":"Task"}',
+            'admin/projects/0-9/customFields/pf-state {"$type":"StateProjectCustomField","bundle":{"id":"new-',
+            'admin/projects/0-9/customFields/pf-type {"$type":"EnumProjectCustomField","bundle":{"id":"b-xy","$type":"EnumBundle"}}',
+        );
+});
+
+it('only warns about a shared bundle when the project already has issues', function () {
+    hostProject();
+    fakeYouTrackAdminApi([
+        'projectFields' => [['id' => 'pf-state', 'field' => ['name' => 'State'], 'bundle' => ['id' => 'b-default', 'name' => 'States', '$type' => 'StateBundle']]],
+        'bundles' => ['state' => [['id' => 'b-default', 'name' => 'States', 'values' => [['name' => 'Open']]]], 'enum' => []],
+        'fields' => [['id' => 'f-state', 'name' => 'State', 'fieldType' => ['id' => 'state[1]'], 'fieldDefaults' => ['bundle' => ['id' => 'b-default']], 'instances' => []]],
+        'issues' => [['id' => '2-1']],
+    ]);
+
+    $this->artisan('agentio:install', ['--no-interaction' => true, '--project' => 'XY', '--youtrack' => true, '--dry-run' => true])
+        ->expectsOutputToContain('bundle States is shared with other projects (or is the default of new projects), so it is not changed')
+        ->assertSuccessful();
 });
 
 it('fails when YouTrack is not configured or the project does not exist', function () {

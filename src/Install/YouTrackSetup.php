@@ -15,7 +15,9 @@ use Obrazmisli\Agentio\YouTrack\YouTrackException;
  * with their bundles, the idea / agent-claimed tags, the "<KEY>: …" saved searches and the knowledge base
  * tree. Everything is looked up by name first (an article preferably under its expected parent); existing
  * entities are never deleted, renamed or moved, an existing bundle only gets the missing values and an
- * existing article is never changed, so the articles of an older tree stay where they are.
+ * existing article is never changed, so the articles of an older tree stay where they are. A bundle the
+ * project shares with other projects, or the default bundle new projects get, is never changed: an empty
+ * project is switched to a bundle of its own ("<KEY> States"), a project with issues gets a warning.
  */
 final class YouTrackSetup
 {
@@ -82,9 +84,9 @@ final class YouTrackSetup
         $types = array_map(fn (IssueType $type): array => ['name' => $type->value], IssueType::cases());
         $stages = array_map(fn (string $stage): array => ['name' => $stage, 'isResolved' => $stage === 'Done'], self::STAGES);
 
-        $this->ensureField($projectId, $fields, 'State', 'state', $project.' States', $states);
-        $this->ensureField($projectId, $fields, 'Type', 'enum', $project.' Types', $types);
-        $this->ensureField($projectId, $fields, 'Stage', 'state', $project.' Stages', $stages);
+        $this->ensureField($project, $projectId, $fields, 'State', 'state', $project.' States', $states);
+        $this->ensureField($project, $projectId, $fields, 'Type', 'enum', $project.' Types', $types);
+        $this->ensureField($project, $projectId, $fields, 'Stage', 'state', $project.' Stages', $stages);
 
         $this->ensureTags([Tag::Idea->value, Tag::Claimed->value]);
         $this->ensureSavedSearches(self::savedSearches($project));
@@ -107,7 +109,7 @@ final class YouTrackSetup
      *
      * @throws YouTrackException
      */
-    private function ensureField(string $projectId, array $projectFields, string $name, string $kind, string $bundleName, array $values): void
+    private function ensureField(string $project, string $projectId, array $projectFields, string $name, string $kind, string $bundleName, array $values): void
     {
         $bundleType = $kind === 'state' ? 'StateBundle' : 'EnumBundle';
         $attached = $projectFields[$name] ?? null;
@@ -121,21 +123,32 @@ final class YouTrackSetup
                 return;
             }
 
-            $this->record('field', $name, SetupStatus::Exists, 'bundle '.(string) ($bundle['name'] ?? $bundle['id']));
-            $this->ensureBundleValues($kind, $this->findBundle($kind, 'id', $bundle['id']) ?? $bundle, $values);
+            $current = (string) ($bundle['name'] ?? $bundle['id']);
+
+            if (! $this->isShared($name, $projectId, $bundle['id'])) {
+                $this->record('field', $name, SetupStatus::Exists, 'bundle '.$current);
+                $this->ensureBundleValues($kind, $this->findBundle($kind, 'id', $bundle['id']) ?? $bundle, $values);
+
+                return;
+            }
+
+            if (! is_string($attached['id'] ?? null) || $this->client->projectHasIssues($project)) {
+                $this->record('field', $name, SetupStatus::Warning, "bundle {$current} is shared with other projects (or is the default of new projects), so it is not changed: give the project a bundle of its own with the values ".implode(', ', array_column($values, 'name')));
+
+                return;
+            }
+
+            $own = $this->ensureBundle($kind, $bundleName, $values);
+            $this->record('field', $name, SetupStatus::Update, "switch from the shared bundle {$current} to {$bundleName}");
+
+            if (! $this->dryRun && is_string($own['id'] ?? null)) {
+                $this->client->setProjectFieldBundle($projectId, $attached['id'], (string) ($attached['$type'] ?? ucfirst($kind).'ProjectCustomField'), $own['id'], $bundleType);
+            }
 
             return;
         }
 
-        $bundle = $this->findBundle($kind, 'name', $bundleName);
-
-        if ($bundle === null) {
-            $this->record('bundle', $bundleName, SetupStatus::Create, $kind.': '.implode(', ', array_column($values, 'name')));
-            $bundle = $this->dryRun ? [] : $this->client->createBundle($kind, $bundleName, $values);
-        } else {
-            $this->record('bundle', $bundleName, SetupStatus::Exists);
-            $this->ensureBundleValues($kind, $bundle, $values);
-        }
+        $bundle = $this->ensureBundle($kind, $bundleName, $values);
 
         $field = $this->globalField($name);
         $fieldType = $kind.'[1]';
@@ -156,6 +169,53 @@ final class YouTrackSetup
         if (! $this->dryRun && is_string($field['id'] ?? null) && is_string($bundle['id'] ?? null)) {
             $this->client->attachCustomField($projectId, $field['id'], ucfirst($kind).'ProjectCustomField', $bundle['id'], $bundleType);
         }
+    }
+
+    /**
+     * Find the bundle by name and add the missing values, or create it.
+     *
+     * @param  'state'|'enum'  $kind
+     * @param  list<array<string, mixed>>  $values
+     * @return array<array-key, mixed>
+     *
+     * @throws YouTrackException
+     */
+    private function ensureBundle(string $kind, string $bundleName, array $values): array
+    {
+        $bundle = $this->findBundle($kind, 'name', $bundleName);
+
+        if ($bundle === null) {
+            $this->record('bundle', $bundleName, SetupStatus::Create, $kind.': '.implode(', ', array_column($values, 'name')));
+
+            return $this->dryRun ? [] : $this->client->createBundle($kind, $bundleName, $values);
+        }
+
+        $this->record('bundle', $bundleName, SetupStatus::Exists);
+        $this->ensureBundleValues($kind, $bundle, $values);
+
+        return $bundle;
+    }
+
+    /**
+     * Whether another project uses the bundle for the field, or new projects get it by default.
+     *
+     * @throws YouTrackException
+     */
+    private function isShared(string $fieldName, string $projectId, string $bundleId): bool
+    {
+        $field = $this->globalField($fieldName) ?? [];
+
+        if (is_array($field['fieldDefaults'] ?? null) && is_array($field['fieldDefaults']['bundle'] ?? null) && ($field['fieldDefaults']['bundle']['id'] ?? null) === $bundleId) {
+            return true;
+        }
+
+        foreach (is_array($field['instances'] ?? null) ? $field['instances'] : [] as $instance) {
+            if (is_array($instance) && ($instance['bundle']['id'] ?? null) === $bundleId && ($instance['project']['id'] ?? null) !== $projectId) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**

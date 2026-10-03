@@ -184,13 +184,28 @@ it('reads project settings, bundles, tags, saved searches and articles', functio
     });
 })->with([
     'project custom fields' => [fn (Client $client): array => $client->projectCustomFields('0-3'), 'admin/projects/0-3/customFields', []],
-    'custom fields' => [fn (Client $client): array => $client->customFields(), 'admin/customFieldSettings/customFields', ['fields' => 'id,name,fieldType(id)']],
+    'custom fields' => [fn (Client $client): array => $client->customFields(), 'admin/customFieldSettings/customFields', ['fields' => 'id,name,fieldType(id),fieldDefaults(bundle(id)),instances(project(id),bundle(id))']],
     'state bundles' => [fn (Client $client): array => $client->bundles('state'), 'admin/customFieldSettings/bundles/state', []],
     'tags' => [fn (Client $client): array => $client->tags('agent'), 'tags', ['query' => 'agent', 'fields' => 'id,name']],
     'all tags' => [fn (Client $client): array => $client->tags(), 'tags', ['fields' => 'id,name']],
     'saved queries' => [fn (Client $client): array => $client->savedQueries(), 'savedQueries', ['fields' => 'id,name,query']],
     'articles' => [fn (Client $client): array => $client->articles('project: TP'), 'articles', ['query' => 'project: TP']],
     'all articles' => [fn (Client $client): array => $client->articles(), 'articles', ['fields' => Client::ARTICLE_FIELDS]],
+]);
+
+it('tells whether a project has issues', function (array $issues, bool $expected) {
+    Http::fake(['*' => Http::response($issues)]);
+
+    expect(client()->projectHasIssues('XY'))->toBe($expected);
+
+    Http::assertSent(function (Request $request): bool {
+        parse_str((string) parse_url($request->url(), PHP_URL_QUERY), $sent);
+
+        return parse_url($request->url(), PHP_URL_PATH) === '/api/issues' && $sent['query'] === 'project: XY' && $sent['$top'] === '1';
+    });
+})->with([
+    'empty' => [[], false],
+    'with issues' => [[['id' => '2-1']], true],
 ]);
 
 it('reads a single article', function () {
@@ -239,6 +254,11 @@ it('creates YouTrack settings for the installer', function (Closure $call, strin
         fn (Client $client): array => $client->attachCustomField('0-3', '161-3', 'UserProjectCustomField'),
         'admin/projects/0-3/customFields',
         ['$type' => 'UserProjectCustomField', 'field' => ['id' => '161-3'], 'canBeEmpty' => true],
+    ],
+    'bundle of a project field' => [
+        fn (Client $client): array => $client->setProjectFieldBundle('0-3', '189-18', 'StateProjectCustomField', '165-8', 'StateBundle'),
+        'admin/projects/0-3/customFields/189-18',
+        ['$type' => 'StateProjectCustomField', 'bundle' => ['id' => '165-8', '$type' => 'StateBundle']],
     ],
     'bundle' => [
         fn (Client $client): array => $client->createBundle('state', 'TP States', [['name' => 'Done', 'isResolved' => true]]),
