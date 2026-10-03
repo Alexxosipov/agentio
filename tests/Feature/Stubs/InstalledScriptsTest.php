@@ -199,15 +199,26 @@ it('runs the configured test commands', function () {
 it('prepares an epic worktree without a frontend toolchain', function () {
     $project = projectWithInstalledStubs();
     file_put_contents($project.'/composer.json', json_encode(['name' => 'acme/app', 'require' => new stdClass]));
-    file_put_contents($project.'/.env.example', "APP_NAME=Acme\nDB_CONNECTION=mysql\n");
+    file_put_contents($project.'/.env.example', "APP_NAME=Acme\nAPP_KEY=\nDB_CONNECTION=mysql\n");
     file_put_contents($project.'/package.json', json_encode(['scripts' => ['dev' => 'vite']]));
     file_put_contents($project.'/scripts/yt.php', "<?php echo 'profile-page', PHP_EOL;");
+    // Like Laravel: key:generate looks for the current (inherited) key in .env and gives up when it is not there.
+    file_put_contents($project.'/artisan', <<<'PHP'
+        <?php
+        if (($argv[1] ?? '') === 'key:generate') {
+            if (getenv('APP_KEY') !== false) {
+                fwrite(STDERR, "Unable to set application key.\n");
+                exit(0);
+            }
+            file_put_contents('.env', preg_replace('/^APP_KEY=.*$/m', 'APP_KEY=base64:generated', (string) file_get_contents('.env')));
+        }
+        PHP);
 
     foreach ([['init', '-q', '-b', 'main'], ['add', '-A'], ['-c', 'user.name=t', '-c', 'user.email=t@example.com', 'commit', '-qm', 'init']] as $git) {
         (new Process(['git', ...$git], $project))->mustRun();
     }
 
-    $process = new Process([$project.'/scripts/epic-worktree.sh', 'XY-12'], $project, ['WORKTREES_DIR' => $project.'/worktrees', 'COMPOSER_HOME' => $project.'/.composer'], null, 120);
+    $process = new Process([$project.'/scripts/epic-worktree.sh', 'XY-12'], $project, ['WORKTREES_DIR' => $project.'/worktrees', 'COMPOSER_HOME' => $project.'/.composer', 'APP_KEY' => 'base64:inherited'], null, 120);
     $process->run();
     $worktree = realpath($project.'/worktrees').'/XY-12';
 
@@ -215,7 +226,7 @@ it('prepares an epic worktree without a frontend toolchain', function () {
         ->and(trim($process->getOutput()))->toEndWith($worktree)
         ->and($process->getErrorOutput())->toContain('no bun.lock or package-lock.json: frontend steps skipped', 'environment ready')
         ->and((new Process(['git', 'branch', '--show-current'], $worktree))->mustRun()->getOutput())->toBe("epic/XY-12-profile-page\n")
-        ->and(file_get_contents($worktree.'/.env'))->toContain('APP_URL=http://localhost:8112', 'DB_CONNECTION=sqlite', 'DB_DATABASE='.$worktree.'/database/database.sqlite', 'SESSION_COOKIE=xy_12_session')
+        ->and(file_get_contents($worktree.'/.env'))->toContain('APP_URL=http://localhost:8112', 'DB_CONNECTION=sqlite', 'DB_DATABASE='.$worktree.'/database/database.sqlite', 'SESSION_COOKIE=xy_12_session', 'APP_KEY=base64:generated')
         ->and($worktree.'/database/database.sqlite')->toBeFile()
         ->and($worktree.'/vendor/autoload.php')->toBeFile();
 

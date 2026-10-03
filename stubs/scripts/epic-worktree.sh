@@ -113,7 +113,12 @@ composer install --no-interaction --prefer-dist --no-progress >&2
 
 if [[ -f artisan ]]; then
     if [[ -f .env ]] && ! grep -qE '^APP_KEY=.+' .env; then
-        php artisan key:generate --no-interaction --force >&2
+        # An APP_KEY inherited from the environment makes key:generate look for that key in .env and give up.
+        env -u APP_KEY php artisan key:generate --no-interaction --force >&2
+        if ! grep -qE '^APP_KEY=.+' .env; then
+            log "could not generate APP_KEY in $dir/.env"
+            exit 1
+        fi
     fi
     php artisan migrate --force --no-interaction >&2
     php artisan storage:link --no-interaction >&2 || true
