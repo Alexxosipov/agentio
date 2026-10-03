@@ -15,9 +15,14 @@ use Obrazmisli\Agentio\Dashboard\StatusPresenter;
 /**
  * The JSON endpoints the dashboard polls. YouTrack failures never fail a response:
  * every payload that needs YouTrack carries a "youtrack" block with the connection state.
+ * The YouTrack token never leaves the server: should a session log or an error message
+ * contain it, it is replaced with "[redacted]".
  */
 final class ApiController
 {
+    /** Shorter "tokens" (test values, placeholders) are not worth redacting and would mangle ordinary text. */
+    private const int MIN_SECRET_LENGTH = 8;
+
     public function status(StatusPresenter $presenter): JsonResponse
     {
         return self::json($presenter->present());
@@ -60,6 +65,13 @@ final class ApiController
      */
     private static function json(array $data, int $status = 200): JsonResponse
     {
-        return new JsonResponse($data, $status, ['Cache-Control' => 'no-store'], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        $response = new JsonResponse($data, $status, ['Cache-Control' => 'no-store'], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        $token = config('agentio.youtrack.token');
+
+        if (is_string($token) && strlen($token) >= self::MIN_SECRET_LENGTH) {
+            $response->setContent(str_replace($token, '[redacted]', (string) $response->getContent()));
+        }
+
+        return $response;
     }
 }

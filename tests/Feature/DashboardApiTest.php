@@ -338,6 +338,24 @@ it('caches YouTrack responses between polls', function () {
     expect(count(Http::recorded()))->toBe($sent);
 });
 
+it('never shows the YouTrack token', function () {
+    $logs = dashboardEnvironment();
+    runningLoopLogs($logs);
+    config(['agentio.youtrack.token' => 'perm-c2VjcmV0.dG9rZW4=']);
+    app()->forgetInstance(Client::class);
+    file_put_contents($logs.'/TP-2.log', json_encode(['type' => 'assistant', 'message' => ['content' => [
+        ['type' => 'tool_use', 'name' => 'Bash', 'input' => ['command' => 'curl -H "Authorization: Bearer perm-c2VjcmV0.dG9rZW4=" https://yt.example.com/api/issues']],
+    ]]])."\n", FILE_APPEND);
+    Http::fake(['yt.example.com/*' => Http::response(['error_description' => 'Bad token perm-c2VjcmV0.dG9rZW4='], 401)]);
+
+    $sessions = $this->getJson('/agentio/api/sessions')->assertOk();
+    $status = $this->getJson('/agentio/api/status')->assertOk();
+
+    expect($sessions->getContent().$status->getContent())->not->toContain('perm-c2VjcmV0')
+        ->and(collect($sessions->json('sessions.0.events'))->pluck('text')->last())->toContain('Bearer [redacted]')
+        ->and($status->json('youtrack.error'))->toBe('YouTrack GET issues failed with HTTP 401: Bad token [redacted]');
+});
+
 it('requires authorization for the API', function () {
     dashboardEnvironment(configured: false);
     app()->detectEnvironment(fn (): string => 'production');
