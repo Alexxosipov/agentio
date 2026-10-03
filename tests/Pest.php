@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use Illuminate\Filesystem\Filesystem;
 use Illuminate\Support\Str;
 use Obrazmisli\Agentio\Agentio;
 use Obrazmisli\Agentio\Process\ReadinessGraph;
@@ -100,6 +101,22 @@ function temporaryDirectory(): string
 
         rmdir($directory);
     });
+
+    return $directory;
+}
+
+/**
+ * A fresh temporary host project used as the application base path (config, storage and the installed
+ * files live in it), removed with everything inside after the test.
+ */
+function hostProject(): string
+{
+    $directory = sys_get_temp_dir().DIRECTORY_SEPARATOR.'agentio-host-'.Str::random(12);
+    mkdir($directory, 0777, true);
+
+    app()->setBasePath($directory);
+
+    test()->beforeApplicationDestroyed(fn () => (new Filesystem)->deleteDirectory($directory));
 
     return $directory;
 }

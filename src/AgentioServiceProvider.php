@@ -9,6 +9,7 @@ use Illuminate\Contracts\Foundation\Application;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\ServiceProvider;
+use Obrazmisli\Agentio\Console\Commands\InstallCommand;
 use Obrazmisli\Agentio\Dashboard\YouTrackSource;
 use Obrazmisli\Agentio\Http\Middleware\Authorize;
 use Obrazmisli\Agentio\Process\StageMap;
@@ -64,6 +65,10 @@ final class AgentioServiceProvider extends ServiceProvider
         if (! $this->app->runningInConsole()) {
             return;
         }
+
+        $this->commands([
+            InstallCommand::class,
+        ]);
 
         $this->publishes([
             __DIR__.'/../config/agentio.php' => config_path('agentio.php'),
