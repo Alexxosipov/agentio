@@ -93,7 +93,9 @@ it('passes the project permission rules to headless sessions, which ignore them 
     $settings = json_decode($match[1] ?? '', true, flags: JSON_THROW_ON_ERROR);
 
     expect($process->getExitCode())->toBe(0, $process->getErrorOutput())
-        ->and($settings['permissions']['allow'])->toContain('Bash(php scripts/yt.php *)', 'Bash(scripts/agent-commit.sh *)')
+        ->and($settings['permissions']['allow'])->toContain('Bash(php scripts/yt.php *)', 'Bash(scripts/agent-commit.sh *)', 'Edit(./**)')
+        // "/**" is relative to the main checkout in a git worktree: it would not let the agents edit the epic worktree.
+        ->and($settings['permissions']['allow'])->not->toContain('Edit(/**)')
         ->and($settings['permissions']['deny'])->toContain('Bash(git push --force*)', 'Edit(scripts/agent-loop.sh)', 'Edit(scripts/yt.php)', 'Edit(.claude/hooks/**)');
 });
 

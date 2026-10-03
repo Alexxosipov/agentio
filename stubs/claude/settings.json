@@ -3,7 +3,7 @@
     "permissions": {
         "allow": [
             "Read",
-            "Edit(/**)",
+            "Edit(./**)",
             "Glob",
             "Grep",
             "Skill",
