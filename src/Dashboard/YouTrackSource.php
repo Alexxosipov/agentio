@@ -17,8 +17,8 @@ use Obrazmisli\Agentio\YouTrack\YouTrackException;
 
 /**
  * YouTrack data for the dashboard: the IssueRepository behind a short cache, so that polling
- * browsers do not hit YouTrack on every request. Failures are cached as well (for the same time)
- * and reported through health() instead of breaking the page.
+ * browsers do not hit YouTrack on every request. Failures are cached as well (for at least
+ * FAILURE_TTL seconds) and reported through health() instead of breaking the page.
  *
  * Entries are stored as serialized strings and restored with an explicit list of allowed classes:
  * cache stores of applications with `cache.serializable_classes` = false (the Laravel 13 default)
@@ -26,6 +26,12 @@ use Obrazmisli\Agentio\YouTrack\YouTrackException;
  */
 final class YouTrackSource
 {
+    /**
+     * Minimum seconds a failure is cached: an unreachable YouTrack answers only after its timeouts and retries,
+     * which should not hold up every poll of every open dashboard.
+     */
+    public const int FAILURE_TTL = 30;
+
     /** Classes a cached YouTrack answer may contain. */
     private const array CACHED_CLASSES = [Issue::class, Comment::class, AgentComment::class, CarbonImmutable::class];
 
@@ -245,7 +251,7 @@ final class YouTrackSource
                 $envelope = ['error' => $exception->getMessage(), 'status' => $exception->status];
             }
 
-            Cache::put($cacheKey, serialize($envelope), $this->ttl);
+            Cache::put($cacheKey, serialize($envelope), isset($envelope['error']) ? max($this->ttl, self::FAILURE_TTL) : $this->ttl);
         }
 
         if (is_string($envelope['error'] ?? null)) {

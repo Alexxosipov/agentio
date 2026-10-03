@@ -114,7 +114,8 @@ return [
     | "viewAgentio" gate: always in the local environment, otherwise to the
     | listed emails. Override it with Agentio::auth(fn ($request) => ...).
     | The page polls its JSON endpoints every "poll" seconds; YouTrack
-    | responses are cached for "cache" seconds (0 disables the cache).
+    | responses are cached for "cache" seconds (0 disables the cache; failures
+    | are cached for at least 30 seconds).
     |
     */
 

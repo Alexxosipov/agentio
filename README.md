@@ -153,7 +153,7 @@ Every issue id links to YouTrack. Without YouTrack (not configured or not reacha
 | `/agentio/api/loop-log` | The last lines of `loop.log` |
 | `/agentio/api/epics/{id}` | One epic or idea in detail (404 when YouTrack does not know the issue) |
 
-The data comes from YouTrack (cached for `AGENTIO_UI_CACHE` seconds, so polling browsers do not hit YouTrack on every request) and from the files the loop writes to `AGENTIO_LOGS_PATH` (pid files, `loop.log`, stream-json session logs) plus the `.agent-stop` flag. The YouTrack token never reaches the browser: should a session log or an error message contain it, it is replaced with `[redacted]`.
+The data comes from YouTrack (cached for `AGENTIO_UI_CACHE` seconds, so polling browsers do not hit YouTrack on every request; a failure is cached for at least 30 seconds, so an unreachable YouTrack does not hold up every poll) and from the files the loop writes to `AGENTIO_LOGS_PATH` (pid files, `loop.log`, stream-json session logs) plus the `.agent-stop` flag. The YouTrack token never reaches the browser: should a session log or an error message contain it, it is replaced with `[redacted]`.
 
 ### Access
 

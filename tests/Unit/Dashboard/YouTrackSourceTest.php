@@ -40,13 +40,25 @@ it('remembers the first failure and returns the fallback', function () {
         ->and($source->health())->toBe(['configured' => true, 'ok' => false, 'error' => 'first']);
 });
 
-it('caches answers and failures for the configured time', function () {
-    Http::fake(['yt.example.com/api/issues?*' => Http::response(['error_description' => 'Server down'], 503)]);
+it('caches answers for the configured time and failures for at least half a minute', function () {
+    Http::fake(['yt.example.com/api/issues?*' => Http::sequence()
+        ->push(['error_description' => 'Server down'], 503)
+        ->push([apiIssue('TP-1', ['Type' => 'Epic', 'State' => 'Ready'])])
+        ->push([])]);
 
     expect(fn () => source()->issues())->toThrow(YouTrackException::class, 'Server down');
+    $this->travel(YouTrackSource::FAILURE_TTL - 1)->seconds();
     expect(fn () => source()->issues())->toThrow(YouTrackException::class, 'Server down');
-
     Http::assertSentCount(1);
+
+    $this->travel(2)->seconds();
+    expect(source()->issues())->toHaveCount(1);
+    $this->travel(4)->seconds();
+    expect(source()->issues())->toHaveCount(1);
+    $this->travel(2)->seconds();
+    expect(source()->issues())->toBe([]);
+
+    Http::assertSentCount(3);
 });
 
 it('restores cached issues from a store that does not unserialize objects (Laravel 13 default)', function () {
