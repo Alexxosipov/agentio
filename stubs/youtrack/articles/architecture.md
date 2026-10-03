@@ -1,3 +1,3 @@
-> Заготовка, созданная `php artisan agentio:install --youtrack`. Ведёт скилл `laravel-architect`.
+> Создана `php artisan agentio:install --youtrack`. Ведёт скилл `laravel-architect`.
 
 Архитектура продукта. Дочерние статьи: «Архитектура: обзор», «Модель данных», «ADR» и проекты эпиков (`Эпик <ID>: <название>`).

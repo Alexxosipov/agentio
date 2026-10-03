@@ -1,4 +1,4 @@
-> Заготовка, созданная `php artisan agentio:install --youtrack`. Ведёт скилл `system-analyst` (правила и шаблоны статей — `.claude/skills/system-analyst`).
+> Создана `php artisan agentio:install --youtrack`. Ведёт скилл `system-analyst` (правила и шаблоны статей — `.claude/skills/system-analyst`).
 
 Системная аналитика продукта, разложенная по модулям и фичам:
 
