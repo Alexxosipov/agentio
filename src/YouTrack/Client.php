@@ -285,23 +285,28 @@ final readonly class Client
     public function projectCustomFields(string $projectId): array
     {
         return $this->paginate('admin/projects/'.rawurlencode($projectId).'/customFields', [
-            'fields' => 'id,$type,canBeEmpty,emptyFieldText,field(id,name,fieldType(id)),bundle(id,name,$type)',
+            'fields' => 'id,$type,canBeEmpty,emptyFieldText,field(id,name,fieldType(id)),bundle(id,name,$type),defaultValues(id,name)',
         ]);
     }
 
     /**
-     * Attach a global custom field to a project, e.g. type "StateProjectCustomField" with bundle type "StateBundle".
+     * Attach a global custom field to a project, e.g. type "StateProjectCustomField" with bundle type "StateBundle",
+     * optionally with a default value (an element of the bundle).
      *
      * @return array<array-key, mixed>
      *
      * @throws YouTrackException
      */
-    public function attachCustomField(string $projectId, string $fieldId, string $type, ?string $bundleId = null, ?string $bundleType = null, bool $canBeEmpty = true): array
+    public function attachCustomField(string $projectId, string $fieldId, string $type, ?string $bundleId = null, ?string $bundleType = null, bool $canBeEmpty = true, ?string $defaultValueId = null): array
     {
         $body = ['$type' => $type, 'field' => ['id' => $fieldId], 'canBeEmpty' => $canBeEmpty];
 
         if ($bundleId !== null) {
             $body['bundle'] = array_filter(['id' => $bundleId, '$type' => $bundleType], fn (?string $value): bool => $value !== null);
+        }
+
+        if ($defaultValueId !== null) {
+            $body['defaultValues'] = [array_filter(['id' => $defaultValueId, '$type' => $bundleType === null ? null : $bundleType.'Element'], fn (?string $value): bool => $value !== null)];
         }
 
         return $this->post('admin/projects/'.rawurlencode($projectId).'/customFields', $body, [
@@ -324,18 +329,18 @@ final readonly class Client
     }
 
     /**
-     * Point a project custom field to another bundle, e.g. bundle type "StateBundle".
+     * Change the settings of a project custom field, e.g. its bundle, default values or canBeEmpty.
      *
+     * @param  array<string, mixed>  $changes
      * @return array<array-key, mixed>
      *
      * @throws YouTrackException
      */
-    public function setProjectFieldBundle(string $projectId, string $projectFieldId, string $type, string $bundleId, string $bundleType): array
+    public function updateProjectCustomField(string $projectId, string $projectFieldId, string $type, array $changes): array
     {
-        return $this->post('admin/projects/'.rawurlencode($projectId).'/customFields/'.rawurlencode($projectFieldId), [
-            '$type' => $type,
-            'bundle' => ['id' => $bundleId, '$type' => $bundleType],
-        ], ['fields' => 'id,$type,field(id,name),bundle(id,name)']);
+        return $this->post('admin/projects/'.rawurlencode($projectId).'/customFields/'.rawurlencode($projectFieldId), ['$type' => $type, ...$changes], [
+            'fields' => 'id,$type,canBeEmpty,field(id,name),bundle(id,name),defaultValues(id,name)',
+        ]);
     }
 
     /**

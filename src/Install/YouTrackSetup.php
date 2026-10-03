@@ -18,6 +18,8 @@ use Obrazmisli\Agentio\YouTrack\YouTrackException;
  * existing article is never changed, so the articles of an older tree stay where they are. A bundle the
  * project shares with other projects, or the default bundle new projects get, is never changed: an empty
  * project is switched to a bundle of its own ("<KEY> States"), a project with issues gets a warning.
+ * New issues default to State Backlog, Type Task and Stage Backlog when the field has no default among
+ * the cycle's values.
  */
 final class YouTrackSetup
 {
@@ -84,9 +86,9 @@ final class YouTrackSetup
         $types = array_map(fn (IssueType $type): array => ['name' => $type->value], IssueType::cases());
         $stages = array_map(fn (string $stage): array => ['name' => $stage, 'isResolved' => $stage === 'Done'], self::STAGES);
 
-        $this->ensureField($project, $projectId, $fields, 'State', 'state', $project.' States', $states);
-        $this->ensureField($project, $projectId, $fields, 'Type', 'enum', $project.' Types', $types);
-        $this->ensureField($project, $projectId, $fields, 'Stage', 'state', $project.' Stages', $stages);
+        $this->ensureField($project, $projectId, $fields, 'State', 'state', $project.' States', $states, State::Backlog->value);
+        $this->ensureField($project, $projectId, $fields, 'Type', 'enum', $project.' Types', $types, IssueType::Task->value);
+        $this->ensureField($project, $projectId, $fields, 'Stage', 'state', $project.' Stages', $stages, self::STAGES[0]);
 
         $this->ensureTags([Tag::Idea->value, Tag::Claimed->value]);
         $this->ensureSavedSearches(self::savedSearches($project));
@@ -109,9 +111,10 @@ final class YouTrackSetup
      *
      * @throws YouTrackException
      */
-    private function ensureField(string $project, string $projectId, array $projectFields, string $name, string $kind, string $bundleName, array $values): void
+    private function ensureField(string $project, string $projectId, array $projectFields, string $name, string $kind, string $bundleName, array $values, string $default): void
     {
         $bundleType = $kind === 'state' ? 'StateBundle' : 'EnumBundle';
+        $fieldType = ucfirst($kind).'ProjectCustomField';
         $attached = $projectFields[$name] ?? null;
 
         if ($attached !== null) {
@@ -127,7 +130,9 @@ final class YouTrackSetup
 
             if (! $this->isShared($name, $projectId, $bundle['id'])) {
                 $this->record('field', $name, SetupStatus::Exists, 'bundle '.$current);
-                $this->ensureBundleValues($kind, $this->findBundle($kind, 'id', $bundle['id']) ?? $bundle, $values);
+                $full = $this->findBundle($kind, 'id', $bundle['id']) ?? $bundle;
+                $full['values'] = $this->ensureBundleValues($kind, $full, $values);
+                $this->ensureDefault($projectId, $attached, $name, $full, $values, $default, $bundleType);
 
                 return;
             }
@@ -142,7 +147,14 @@ final class YouTrackSetup
             $this->record('field', $name, SetupStatus::Update, "switch from the shared bundle {$current} to {$bundleName}");
 
             if (! $this->dryRun && is_string($own['id'] ?? null)) {
-                $this->client->setProjectFieldBundle($projectId, $attached['id'], (string) ($attached['$type'] ?? ucfirst($kind).'ProjectCustomField'), $own['id'], $bundleType);
+                $type = (string) ($attached['$type'] ?? $fieldType);
+                // Without clearing the default first, YouTrack copies the old default value into the new bundle.
+                $this->client->updateProjectCustomField($projectId, $attached['id'], $type, ['defaultValues' => [], 'canBeEmpty' => true]);
+                $this->client->updateProjectCustomField($projectId, $attached['id'], $type, [
+                    'bundle' => ['id' => $own['id'], '$type' => $bundleType],
+                    'defaultValues' => $this->defaultValues($own, $default, $bundleType),
+                    'canBeEmpty' => false,
+                ]);
             }
 
             return;
@@ -151,24 +163,70 @@ final class YouTrackSetup
         $bundle = $this->ensureBundle($kind, $bundleName, $values);
 
         $field = $this->globalField($name);
-        $fieldType = $kind.'[1]';
+        $globalType = $kind.'[1]';
 
-        if ($field !== null && ($field['fieldType']['id'] ?? null) !== $fieldType) {
-            $this->record('field', $name, SetupStatus::Warning, sprintf('a global field of type %s exists, expected %s; not attached', (string) ($field['fieldType']['id'] ?? '?'), $fieldType));
+        if ($field !== null && ($field['fieldType']['id'] ?? null) !== $globalType) {
+            $this->record('field', $name, SetupStatus::Warning, sprintf('a global field of type %s exists, expected %s; not attached', (string) ($field['fieldType']['id'] ?? '?'), $globalType));
 
             return;
         }
 
         if ($field === null) {
-            $this->record('field', $name.' (global)', SetupStatus::Create, $fieldType);
-            $field = $this->dryRun ? [] : $this->client->createCustomField($name, $fieldType);
+            $this->record('field', $name.' (global)', SetupStatus::Create, $globalType);
+            $field = $this->dryRun ? [] : $this->client->createCustomField($name, $globalType);
         }
 
-        $this->record('field', $name, SetupStatus::Create, 'attach to the project with bundle '.$bundleName);
+        $this->record('field', $name, SetupStatus::Create, "attach to the project with bundle {$bundleName}, default {$default}");
 
         if (! $this->dryRun && is_string($field['id'] ?? null) && is_string($bundle['id'] ?? null)) {
-            $this->client->attachCustomField($projectId, $field['id'], ucfirst($kind).'ProjectCustomField', $bundle['id'], $bundleType);
+            $defaultId = $this->defaultValues($bundle, $default, $bundleType)[0]['id'] ?? null;
+            $this->client->attachCustomField($projectId, $field['id'], $fieldType, $bundle['id'], $bundleType, $defaultId === null, $defaultId);
         }
+    }
+
+    /**
+     * Make new issues get the cycle's default value when the field's default is not one of the cycle's values.
+     *
+     * @param  array<array-key, mixed>  $attached  The project custom field
+     * @param  array<array-key, mixed>  $bundle  Its bundle with the values
+     * @param  list<array<string, mixed>>  $values
+     *
+     * @throws YouTrackException
+     */
+    private function ensureDefault(string $projectId, array $attached, string $name, array $bundle, array $values, string $default, string $bundleType): void
+    {
+        $current = array_map(
+            fn (mixed $value): string => is_array($value) && is_string($value['name'] ?? null) ? $value['name'] : '',
+            is_array($attached['defaultValues'] ?? null) ? $attached['defaultValues'] : [],
+        );
+
+        if ($current !== [] && array_diff($current, array_column($values, 'name')) === []) {
+            return;
+        }
+
+        $this->record('field', $name, SetupStatus::Update, sprintf('default value %s → %s', $current === [] ? 'none' : implode(', ', $current), $default));
+        $defaults = $this->defaultValues($bundle, $default, $bundleType);
+
+        if (! $this->dryRun && is_string($attached['id'] ?? null) && $defaults !== []) {
+            $this->client->updateProjectCustomField($projectId, $attached['id'], (string) ($attached['$type'] ?? ''), ['defaultValues' => $defaults]);
+        }
+    }
+
+    /**
+     * The element of the bundle with that name, as the defaultValues of a project custom field.
+     *
+     * @param  array<array-key, mixed>  $bundle
+     * @return list<array{id: string, '$type': string}>
+     */
+    private function defaultValues(array $bundle, string $name, string $bundleType): array
+    {
+        foreach (is_array($bundle['values'] ?? null) ? $bundle['values'] : [] as $value) {
+            if (is_array($value) && ($value['name'] ?? null) === $name && is_string($value['id'] ?? null)) {
+                return [['id' => $value['id'], '$type' => $bundleType.'Element']];
+            }
+        }
+
+        return [];
     }
 
     /**
@@ -191,7 +249,7 @@ final class YouTrackSetup
         }
 
         $this->record('bundle', $bundleName, SetupStatus::Exists);
-        $this->ensureBundleValues($kind, $bundle, $values);
+        $bundle['values'] = $this->ensureBundleValues($kind, $bundle, $values);
 
         return $bundle;
     }
@@ -221,15 +279,14 @@ final class YouTrackSetup
     /**
      * @param  array<array-key, mixed>  $bundle
      * @param  list<array<string, mixed>>  $values
+     * @return list<mixed> The values of the bundle, the added ones included
      *
      * @throws YouTrackException
      */
-    private function ensureBundleValues(string $kind, array $bundle, array $values): void
+    private function ensureBundleValues(string $kind, array $bundle, array $values): array
     {
-        $present = array_map(
-            fn (mixed $value): string => is_array($value) && is_string($value['name'] ?? null) ? $value['name'] : '',
-            is_array($bundle['values'] ?? null) ? $bundle['values'] : [],
-        );
+        $all = is_array($bundle['values'] ?? null) ? array_values($bundle['values']) : [];
+        $present = array_map(fn (mixed $value): string => is_array($value) && is_string($value['name'] ?? null) ? $value['name'] : '', $all);
         $bundleName = (string) ($bundle['name'] ?? $bundle['id'] ?? '');
 
         foreach ($values as $value) {
@@ -240,9 +297,11 @@ final class YouTrackSetup
             $this->record('bundle', $bundleName, SetupStatus::Update, 'add value '.(string) $value['name']);
 
             if (! $this->dryRun && is_string($bundle['id'] ?? null)) {
-                $this->client->addBundleValue($kind, $bundle['id'], $value);
+                $all[] = $this->client->addBundleValue($kind, $bundle['id'], $value);
             }
         }
+
+        return $all;
     }
 
     /**

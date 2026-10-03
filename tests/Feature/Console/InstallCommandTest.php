@@ -83,7 +83,11 @@ function fakeYouTrackAdminApi(array $state = []): void
 
                 return Http::response($article);
             })(),
-            default => Http::response(['id' => 'new-'.(++$sequence), 'name' => $body['name'] ?? null, 'values' => $body['values'] ?? []]),
+            default => Http::response([
+                'id' => 'new-'.(++$sequence),
+                'name' => $body['name'] ?? null,
+                'values' => array_map(fn (array $value): array => [...$value, 'id' => 'val-'.$value['name']], $body['values'] ?? []),
+            ]),
         };
     });
 }
@@ -413,7 +417,10 @@ it('sets up an empty YouTrack project and records the knowledge base ids', funct
         && $request['values'][6] === ['name' => 'Done', 'isResolved' => true]
         && $request['values'][0] === ['name' => 'Backlog', 'isResolved' => false]);
     Http::assertSent(fn (Request $request): bool => str_ends_with(strtok($request->url(), '?') ?: '', 'admin/projects/0-9/customFields')
-        && ($request->data()['$type'] ?? null) === 'StateProjectCustomField' && $request['bundle']['$type'] === 'StateBundle');
+        && ($request->data()['$type'] ?? null) === 'StateProjectCustomField' && $request['bundle']['$type'] === 'StateBundle'
+        && $request['canBeEmpty'] === false && $request['defaultValues'] === [['id' => 'val-Backlog', '$type' => 'StateBundleElement']]);
+    Http::assertSent(fn (Request $request): bool => str_ends_with(strtok($request->url(), '?') ?: '', 'admin/projects/0-9/customFields')
+        && ($request->data()['$type'] ?? null) === 'EnumProjectCustomField' && $request['defaultValues'] === [['id' => 'val-Task', '$type' => 'EnumBundleElement']]);
     Http::assertSent(fn (Request $request): bool => str_ends_with(strtok($request->url(), '?') ?: '', 'savedQueries')
         && ($request->data()['name'] ?? null) === 'XY: готовые эпики' && $request['query'] === 'project: XY Type: Epic State: Ready tag: -{agent-claimed}');
 
@@ -536,9 +543,40 @@ it('gives a new project bundles of its own instead of changing the shared defaul
         ->and($writes->implode("\n"))->toContain(
             'admin/customFieldSettings/bundles/state {"name":"XY States"',
             'admin/customFieldSettings/bundles/enum/b-xy/values {"name":"Task"}',
+            'admin/projects/0-9/customFields/pf-state {"$type":"StateProjectCustomField","defaultValues":[],"canBeEmpty":true}',
             'admin/projects/0-9/customFields/pf-state {"$type":"StateProjectCustomField","bundle":{"id":"new-',
-            'admin/projects/0-9/customFields/pf-type {"$type":"EnumProjectCustomField","bundle":{"id":"b-xy","$type":"EnumBundle"}}',
+            '"defaultValues":[{"id":"val-Backlog","$type":"StateBundleElement"}],"canBeEmpty":false}',
+            'admin/projects/0-9/customFields/pf-type {"$type":"EnumProjectCustomField","bundle":{"id":"b-xy","$type":"EnumBundle"},"defaultValues":[{"id":"new-',
         );
+});
+
+it('makes new issues start in Backlog when the default of a field is not one of the cycle values', function () {
+    hostProject();
+    $states = array_map(fn (string $name): array => ['id' => 's-'.$name, 'name' => $name], ['Backlog', 'Analysis', 'Ready', 'In Progress', 'Review', 'Blocked', 'Done', 'Submitted']);
+    fakeYouTrackAdminApi([
+        'projectFields' => [
+            ['id' => 'pf-state', '$type' => 'StateProjectCustomField', 'field' => ['name' => 'State'], 'bundle' => ['id' => 'b-state', 'name' => 'XY States', '$type' => 'StateBundle'], 'defaultValues' => [['name' => 'Submitted']]],
+            ['id' => 'pf-type', '$type' => 'EnumProjectCustomField', 'field' => ['name' => 'Type'], 'bundle' => ['id' => 'b-type', 'name' => 'XY Types', '$type' => 'EnumBundle'], 'defaultValues' => [['name' => 'Story']]],
+            ['id' => 'pf-stage', '$type' => 'StateProjectCustomField', 'field' => ['name' => 'Stage'], 'bundle' => ['id' => 'b-stage', 'name' => 'XY Stages', '$type' => 'StateBundle'], 'defaultValues' => []],
+        ],
+        'bundles' => [
+            'state' => [['id' => 'b-state', 'name' => 'XY States', 'values' => $states], ['id' => 'b-stage', 'name' => 'XY Stages', 'values' => [['name' => 'Develop']]]],
+            'enum' => [['id' => 'b-type', 'name' => 'XY Types', 'values' => array_map(fn (string $name): array => ['id' => 't-'.$name, 'name' => $name], ['Idea', 'Epic', 'Story', 'Task'])]],
+        ],
+    ]);
+
+    $this->artisan('agentio:install', ['--no-interaction' => true, '--project' => 'XY', '--youtrack' => true])
+        ->expectsOutputToContain('default value Submitted → Backlog')
+        ->expectsOutputToContain('default value none → Backlog')
+        ->doesntExpectOutputToContain('default value Story')
+        ->assertSuccessful();
+
+    $writes = collect(youTrackWrites())->map(fn (Request $request): string => (strtok($request->url(), '?') ?: '').' '.json_encode($request->data()))->implode("\n");
+
+    expect($writes)->toContain(
+        'admin/projects/0-9/customFields/pf-state {"$type":"StateProjectCustomField","defaultValues":[{"id":"s-Backlog","$type":"StateBundleElement"}]}',
+        'admin/projects/0-9/customFields/pf-stage {"$type":"StateProjectCustomField","defaultValues":[{"id":"new-',
+    )->not->toContain('pf-type');
 });
 
 it('only warns about a shared bundle when the project already has issues', function () {

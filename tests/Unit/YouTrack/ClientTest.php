@@ -255,10 +255,15 @@ it('creates YouTrack settings for the installer', function (Closure $call, strin
         'admin/projects/0-3/customFields',
         ['$type' => 'UserProjectCustomField', 'field' => ['id' => '161-3'], 'canBeEmpty' => true],
     ],
-    'bundle of a project field' => [
-        fn (Client $client): array => $client->setProjectFieldBundle('0-3', '189-18', 'StateProjectCustomField', '165-8', 'StateBundle'),
+    'project field settings' => [
+        fn (Client $client): array => $client->updateProjectCustomField('0-3', '189-18', 'StateProjectCustomField', ['bundle' => ['id' => '165-8', '$type' => 'StateBundle'], 'canBeEmpty' => false]),
         'admin/projects/0-3/customFields/189-18',
-        ['$type' => 'StateProjectCustomField', 'bundle' => ['id' => '165-8', '$type' => 'StateBundle']],
+        ['$type' => 'StateProjectCustomField', 'bundle' => ['id' => '165-8', '$type' => 'StateBundle'], 'canBeEmpty' => false],
+    ],
+    'project field with a default value' => [
+        fn (Client $client): array => $client->attachCustomField('0-3', '161-12', 'StateProjectCustomField', '165-6', 'StateBundle', false, '166-1'),
+        'admin/projects/0-3/customFields',
+        ['$type' => 'StateProjectCustomField', 'field' => ['id' => '161-12'], 'canBeEmpty' => false, 'bundle' => ['id' => '165-6', '$type' => 'StateBundle'], 'defaultValues' => [['id' => '166-1', '$type' => 'StateBundleElement']]],
     ],
     'bundle' => [
         fn (Client $client): array => $client->createBundle('state', 'TP States', [['name' => 'Done', 'isResolved' => true]]),

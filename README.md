@@ -142,6 +142,7 @@ The command is idempotent and safe to rerun after updating the package: a file w
 
 - the `State` field (Backlog, Analysis, Ready, In Progress, Review, Blocked, Done) — when the project already has a `State` field with a bundle of its own, only the missing values are added to it. A bundle shared with other projects, or the default bundle that YouTrack gives every new project (a project created from the default template has those for `State` and `Type`), is never changed: a project without issues is switched to its own `KEY States` / `KEY Types` bundle, a project with issues gets a warning;
 - the `Type` field (Idea, Epic, Story, Task) and the `Stage` field (Backlog, Develop, Review, Test, Staging, Done — the Kanban columns, derived from State by `scripts/yt.php`);
+- default values for new issues: State `Backlog`, Type `Task`, Stage `Backlog` — set when the field is attached or switched, and whenever the field's default is not one of the cycle's values (YouTrack's `Submitted` would hide an idea from the loop);
 - the `idea` and `agent-claimed` tags and the `KEY: …` saved searches;
 - the knowledge base tree: product overview, system analysis (the root with the module map and «Общие требования»), architecture (overview, data model, ADR, ADR-001), development process, the automation guide (a copy of `docs/AUTONOMOUS_WORKFLOW.md`) and the glossary. New articles are short templates; existing articles with the same title are not changed.
 
