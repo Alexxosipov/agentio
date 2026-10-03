@@ -17,7 +17,8 @@ This repository is a Laravel package. Keep the package focused, idiomatic, and e
 - Static analysis: `composer analyse`
 - Pest tests: `composer test:unit`
 - Workbench build: `composer build`
-- Workbench server: `composer serve`
+- Workbench server: `composer serve` (dashboard at http://127.0.0.1:8000/agentio). The served app does not see shell variables: put `YOUTRACK_URL`, `YOUTRACK_TOKEN`, `AGENTIO_PROJECT` and `AGENTIO_LOGS_PATH` into `workbench/.env` (copy of `workbench/.env.example`, git-ignored); `composer clear` removes the copy testbench makes of it.
+- Never put a real YouTrack token into tests (use `Http::fake()`) or committed files.
 
 ## Local Skills
 

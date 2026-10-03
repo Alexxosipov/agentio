@@ -25,6 +25,16 @@ The package installs the whole setup into a Laravel project — skills, subagent
 
 `php artisan agentio:install` checks all of this and tells you what is missing.
 
+## Quick start
+
+1. Install the package as a dev dependency: `composer require obrazmisli/agentio --dev`.
+2. Install the cycle into the project (the project must be a git repository): `php artisan agentio:install --project=ABC`, where `ABC` is the short name of your YouTrack project.
+3. Put the connection into `.env`: `YOUTRACK_URL=https://example.youtrack.cloud`, `YOUTRACK_TOKEN=perm-...` (never commit it), `AGENTIO_PROJECT=ABC`.
+4. Configure the YouTrack project: `php artisan agentio:install --youtrack --dry-run` shows the plan, `php artisan agentio:install --youtrack` applies it and writes the knowledge base article ids into the installed skills.
+5. Commit the installed files to the base branch (`.claude/`, `scripts/`, `docs/`, `CLAUDE.md`, `.gitignore`, `.env.example`, `.agentio.json`, `config/agentio.php`): epic worktrees are created from it.
+6. File an idea in YouTrack (Type `Idea` or the `idea` tag, State `Backlog`), check what the loop would do with `php artisan agentio:run --dry-run`, then start it: `php artisan agentio:run`.
+7. Watch the agents at `/agentio` or with `php artisan agentio:status`, answer `[AGENT:BLOCKED]` comments, and accept epics that reach `Review` by merging their `epic/<ID>-<slug>` branch.
+
 ## Installation
 
 ```bash
@@ -120,9 +130,34 @@ The YouTrack part shows counts by Type × State, ideas waiting for planning, rea
 
 ## Dashboard
 
-The process dashboard is served at `/agentio` (`AGENTIO_UI_PATH`, `AGENTIO_UI_DOMAIN`, disabled with `AGENTIO_UI_ENABLED=false`): the loop and its sessions, what each agent is doing, the pipeline of every idea and epic, blocked issues and the `[AGENT:*]` feed, with links to YouTrack. It needs no frontend build in the host project; publish the views with `php artisan vendor:publish --tag=agentio-views` to customise them.
+The process dashboard is served at `/agentio` (`AGENTIO_UI_PATH`, `AGENTIO_UI_DOMAIN`, disabled with `AGENTIO_UI_ENABLED=false`). It is a Blade page with the package's own script and stylesheet (served by the package, no CDN, no frontend build in the host project) that polls JSON endpoints every `AGENTIO_UI_POLL` seconds and pauses while the browser tab is hidden. Publish the view with `php artisan vendor:publish --tag=agentio-views` to customise it.
 
-In the `local` environment everyone may open it; elsewhere only the emails listed in `AGENTIO_ALLOWED_EMAILS` (comma separated). Define your own `viewAgentio` gate, or replace the check entirely:
+Screens:
+
+- **Overview** (`#/`): the loop status in the header (running / stopping / stopped, live sessions, merge policy, YouTrack connection); *who works now* — every live Claude Code session with its issue, pipeline stage, the tasks being worked on, its latest tool calls, subagents and messages, plus the issues claimed by agents and the last finished sessions with their cost and duration; the *pipeline* of every idea and epic through the stages Idea → Requirements and analysis → Architecture → Decomposition → Development → Story review → Acceptance → Done, with task progress and the reason of a blocked item (its last `[AGENT:BLOCKED]`); the `[AGENT:*]` *event feed*; the tail of `loop.log`.
+- **Kanban** (`#/board`): every issue of the project in a column per State, filtered by epic, type or text, with claims and unmet dependencies.
+- **Loop log** (`#/log`): the last lines of `loop.log`.
+- **Epic** (`#/epic/<ID>`): the stage and progress of an epic (or an idea), its STORY → TASK tree with readiness and dependencies, the progress of each story, the tasks ready to be taken, the tasks waiting for dependencies and the `[AGENT:*]` feed of the whole tree.
+
+Every issue id links to YouTrack. Without YouTrack (not configured or not reachable) the page keeps showing the local sessions and the loop log and says what is missing.
+
+| Endpoint (GET) | Returns |
+|---|---|
+| `/agentio` | The page |
+| `/agentio/assets/app.css`, `/agentio/assets/app.js` | The stylesheet and the script (cached forever with their `?v=` content hash) |
+| `/agentio/api/status` | Project, loop status and pid, stop flag, live sessions count, merge policy, logs directory, YouTrack connection |
+| `/agentio/api/sessions` | Live sessions with their issue, stage, current tasks and latest events; recently finished sessions; claimed issues |
+| `/agentio/api/pipeline` | Ideas and epics with their pipeline stage, progress and blocking reason |
+| `/agentio/api/board` | Kanban columns by State and the list of epics |
+| `/agentio/api/events` | The latest `[AGENT:*]` comments of the project |
+| `/agentio/api/loop-log` | The last lines of `loop.log` |
+| `/agentio/api/epics/{id}` | One epic or idea in detail (404 when YouTrack does not know the issue) |
+
+The data comes from YouTrack (cached for `AGENTIO_UI_CACHE` seconds, so polling browsers do not hit YouTrack on every request) and from the files the loop writes to `AGENTIO_LOGS_PATH` (pid files, `loop.log`, stream-json session logs) plus the `.agent-stop` flag. The YouTrack token never reaches the browser: should a session log or an error message contain it, it is replaced with `[redacted]`.
+
+### Access
+
+Every route of the dashboard, the assets included, goes through the `ui.middleware` (`web` by default) and the `viewAgentio` gate. In the `local` environment everyone may open it; elsewhere only an authenticated user whose email is listed in `AGENTIO_ALLOWED_EMAILS` (comma separated), everybody else gets 403. To change the rule, define your own `viewAgentio` gate in a service provider, or replace the check entirely with `Agentio::auth()` (`Agentio::auth(null)` restores the gate):
 
 ```php
 use Illuminate\Http\Request;
@@ -135,21 +170,31 @@ if (class_exists(Agentio::class)) {
 
 ## Configuration
 
-Publish the config with `php artisan vendor:publish --tag=agentio-config` (`agentio:install` does it for you). The most used settings:
+Publish the config with `php artisan vendor:publish --tag=agentio-config` (`agentio:install` does it for you). Everything can be set from `.env`:
 
-| Variable | Default | Meaning |
-|---|---|---|
-| `YOUTRACK_URL`, `YOUTRACK_TOKEN` | — | YouTrack instance and permanent token (read only from the environment) |
-| `AGENTIO_PROJECT` | `TP` | YouTrack project short name |
-| `AGENTIO_BASE_BRANCH` | `main` | Base branch of the epic branches |
-| `AGENTIO_MERGE_POLICY` | `MERGE_POLICY:` line of `CLAUDE.md` | `local-branch`, `pull-request` or `auto-merge` |
-| `AGENTIO_MAX_PARALLEL`, `AGENTIO_MAX_PARALLEL_TASKS` | 2, 2 | Epics at the same time; task subagents per epic |
-| `AGENTIO_INTERVAL` | 300 | Seconds between passes |
-| `AGENTIO_WORKTREES_PATH` | `../worktrees` | Where epic worktrees are created |
-| `AGENTIO_CLAUDE_BIN` | `claude` | Claude Code executable |
-| `AGENTIO_TEST_COMMAND` | `php artisan test --compact` | Narrow test run of `scripts/run-tests.sh` (gets its arguments) |
-| `AGENTIO_FULL_TEST_COMMAND` | `composer test` (when defined) | Full quality gate (`RUN_TESTS_FULL=1 scripts/run-tests.sh`) |
-| `AGENTIO_UI_*`, `AGENTIO_ALLOWED_EMAILS` | | Dashboard path, domain, polling, access |
+| Variable | Config key | Default | Meaning |
+|---|---|---|---|
+| `YOUTRACK_URL`, `YOUTRACK_TOKEN` | `youtrack.url`, `youtrack.token` | — | YouTrack instance and permanent token (read only from the environment) |
+| `AGENTIO_PROJECT` | `youtrack.project` | `TP` | YouTrack project short name (also read by `scripts/yt.php` from `.env`) |
+| `AGENTIO_YOUTRACK_TIMEOUT` | `youtrack.timeout` | 30 | Seconds per YouTrack request |
+| `AGENTIO_YOUTRACK_RETRIES` | `youtrack.retries` | 2 | Retries of a request after a connection error, a 5xx or a 429 |
+| `AGENTIO_BASE_BRANCH` | `base_branch` | `main` | Base branch of the epic branches |
+| `AGENTIO_MERGE_POLICY` | `merge_policy` | the `MERGE_POLICY:` line of `CLAUDE.md` | `local-branch`, `pull-request` or `auto-merge` |
+| `AGENTIO_MAX_PARALLEL`, `AGENTIO_MAX_PARALLEL_TASKS` | `max_parallel`, `max_parallel_tasks` | 2, 2 | Epics at the same time; task subagents per epic |
+| `AGENTIO_INTERVAL` | `interval` | 300 | Seconds between passes of the loop |
+| `AGENTIO_WORKTREES_PATH` | `worktrees_path` | `../worktrees` | Where epic worktrees are created |
+| `AGENTIO_CLAUDE_BIN` | `claude_binary` | `claude` | Claude Code executable |
+| `AGENTIO_TEST_COMMAND` | `tests.command` | `php artisan test --compact` | Narrow test run of `scripts/run-tests.sh` (gets its arguments) |
+| `AGENTIO_FULL_TEST_COMMAND` | `tests.full_command` | `composer test` (when defined) | Full quality gate (`RUN_TESTS_FULL=1 scripts/run-tests.sh`) |
+| `AGENTIO_LOGS_PATH` | `logs_path` | `storage/logs/agents` | Where the loop writes `loop.log`, `loop.pid`, `<ID>.pid`/`<ID>.log` (epic sessions) and `plan-<ID>.pid`/`plan-<ID>.log` (planning sessions); `agentio:run` passes it to the loop, the dashboard and `agentio:status` read it |
+| `AGENTIO_TIMEZONE` | `timezone` | the machine's time zone | Time zone of the local timestamps the loop writes (`loop.log`, session headers); detected from `$TZ`, `/etc/timezone` or `/etc/localtime` when empty |
+| — | `stage_map` | see the file | State → Stage map of the Kanban board field |
+| `AGENTIO_UI_ENABLED` | `ui.enabled` | `true` | Register the dashboard routes |
+| `AGENTIO_UI_PATH`, `AGENTIO_UI_DOMAIN` | `ui.path`, `ui.domain` | `agentio`, — | Where the dashboard is mounted |
+| — | `ui.middleware` | `['web']` | Middleware of the dashboard routes (the `viewAgentio` check is always added) |
+| `AGENTIO_UI_POLL` | `ui.poll` | 5 | Seconds between the page's requests |
+| `AGENTIO_UI_CACHE` | `ui.cache` | 5 | Seconds YouTrack answers are cached for the dashboard (0 disables the cache) |
+| `AGENTIO_ALLOWED_EMAILS` | `ui.allowed_emails` | — | Emails allowed to open the dashboard outside the `local` environment |
 
 `scripts/epic-worktree.sh` prepares each worktree with its own `.env` (SQLite database, cache/queue/session prefixes, `APP_URL` port), `composer install`, migrations and — when there is a `bun.lock` or `package-lock.json` and a `build` script — the frontend build. Add project-specific steps (seeders, services) in an executable `scripts/epic-worktree.local.sh`.
 
@@ -168,6 +213,10 @@ The full manual for the people running the cycle is installed as `docs/AUTONOMOU
 ```bash
 composer test
 ```
+
+`composer test` runs PHPStan, Pint, the 100 % type coverage check and the Pest suite (YouTrack is always faked there).
+
+To work on the dashboard, run it in the workbench application with `composer serve` (http://127.0.0.1:8000/agentio). The served workbench app does not see the variables of your shell: copy `workbench/.env.example` to `workbench/.env` (git-ignored) and fill in `YOUTRACK_URL`, `YOUTRACK_TOKEN`, `AGENTIO_PROJECT` and `AGENTIO_LOGS_PATH` (e.g. the `storage/logs/agents` directory of a project that runs the loop). `composer serve` refreshes the workbench copy of that file on every start; `composer clear` removes it.
 
 ## Changelog
 

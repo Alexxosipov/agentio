@@ -67,6 +67,7 @@
         ],
         "serve": [
             "Composer\\Config::disableProcessTimeout",
+            "@clear",
             "@build",
             "@php vendor/bin/testbench serve --ansi"
         ],

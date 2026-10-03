@@ -10,7 +10,7 @@ use Carbon\CarbonImmutable;
  * Local state of the autonomous loop, read from the files scripts/agent-loop.sh keeps in the logs directory:
  *
  * - loop.log            the loop's own log ("[Y-m-d H:i:s] message");
- * - loop.pid            pid of the running loop process (written by agentio:run);
+ * - loop.pid            pid of the running loop process (kept by scripts/agent-loop.sh while it runs);
  * - <ID>.pid / <ID>.log epic sessions (/work-epic), <ID>.restarts their restart counter;
  * - plan-<ID>.pid / plan-<ID>.log planning sessions (/plan);
  * - .agent-stop         in the project root: the loop exits after the current step.
