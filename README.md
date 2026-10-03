@@ -40,9 +40,28 @@ php artisan vendor:publish --tag="agentio-config"
 php artisan vendor:publish --tag="agentio-views"
 ```
 
-## Usage
+## Configuration
 
-<!-- Add a basic usage example here. -->
+Set the YouTrack connection in `.env` (the token is only read from the environment):
+
+```dotenv
+YOUTRACK_URL=https://example.youtrack.cloud
+YOUTRACK_TOKEN=
+AGENTIO_PROJECT=TP
+```
+
+Other settings (`AGENTIO_BASE_BRANCH`, `AGENTIO_MERGE_POLICY`, `AGENTIO_MAX_PARALLEL`, `AGENTIO_MAX_PARALLEL_TASKS`, `AGENTIO_INTERVAL`, `AGENTIO_WORKTREES_PATH`, `AGENTIO_CLAUDE_BIN`, `AGENTIO_UI_*`) are documented in `config/agentio.php`. When `AGENTIO_MERGE_POLICY` is empty, the `MERGE_POLICY:` line of the project's `CLAUDE.md` is used.
+
+## Dashboard Authorization
+
+The dashboard is served at `/agentio`. In the `local` environment everyone may open it; elsewhere only the emails listed in `AGENTIO_ALLOWED_EMAILS` (comma separated) may. Define your own `viewAgentio` gate, or replace the check entirely:
+
+```php
+use Illuminate\Http\Request;
+use Obrazmisli\Agentio\Agentio;
+
+Agentio::auth(fn (Request $request): bool => $request->user()?->isAdmin() === true);
+```
 
 ## Changelog
 

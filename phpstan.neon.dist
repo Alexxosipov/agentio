@@ -4,4 +4,6 @@ parameters:
         - src
         - config
         - routes
+    configDirectories:
+        - config
     tmpDir: build/phpstan

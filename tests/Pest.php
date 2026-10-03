@@ -3,11 +3,14 @@
 declare(strict_types=1);
 
 use Illuminate\Support\Str;
+use Obrazmisli\Agentio\Agentio;
 use Obrazmisli\Agentio\Process\ReadinessGraph;
 use Obrazmisli\Agentio\Tests\TestCase;
 use Obrazmisli\Agentio\YouTrack\Issue;
 
-uses(TestCase::class)->in(__DIR__);
+uses(TestCase::class)
+    ->afterEach(fn () => Agentio::auth(null))
+    ->in(__DIR__);
 
 /**
  * An issue in the shape the YouTrack REST API returns it (Client::ISSUE_FIELDS).

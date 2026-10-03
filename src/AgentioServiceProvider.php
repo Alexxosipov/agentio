@@ -4,10 +4,18 @@ declare(strict_types=1);
 
 namespace Obrazmisli\Agentio;
 
+use Illuminate\Contracts\Auth\Authenticatable;
+use Illuminate\Contracts\Foundation\Application;
+use Illuminate\Support\Facades\Gate;
+use Illuminate\Support\Facades\Route;
 use Illuminate\Support\ServiceProvider;
-use Obrazmisli\Agentio\Console\Commands\AgentioCommand;
+use Obrazmisli\Agentio\Http\Middleware\Authorize;
+use Obrazmisli\Agentio\Process\StageMap;
+use Obrazmisli\Agentio\Runtime\LoopState;
+use Obrazmisli\Agentio\YouTrack\Client;
+use Obrazmisli\Agentio\YouTrack\IssueRepository;
 
-class AgentioServiceProvider extends ServiceProvider
+final class AgentioServiceProvider extends ServiceProvider
 {
     /**
      * Register any application services.
@@ -16,7 +24,26 @@ class AgentioServiceProvider extends ServiceProvider
     {
         $this->mergeConfigFrom(__DIR__.'/../config/agentio.php', 'agentio');
 
-        $this->app->singleton(Agentio::class);
+        $this->app->singleton(Client::class, fn (Application $app): Client => new Client(
+            url: $this->configString('agentio.youtrack.url'),
+            token: $this->configString('agentio.youtrack.token'),
+            timeout: (int) config('agentio.youtrack.timeout', 30),
+            retries: (int) config('agentio.youtrack.retries', 2),
+        ));
+
+        $this->app->singleton(IssueRepository::class, fn (Application $app): IssueRepository => new IssueRepository(
+            $app->make(Client::class),
+            $this->configString('agentio.youtrack.project') ?? 'TP',
+        ));
+
+        $this->app->singleton(LoopState::class, fn (Application $app): LoopState => new LoopState(
+            $this->configString('agentio.logs_path') ?? storage_path('logs/agents'),
+            base_path('.agent-stop'),
+        ));
+
+        $this->app->singleton(StageMap::class, fn (Application $app): StageMap => new StageMap(
+            array_filter((array) config('agentio.stage_map', []), is_string(...)),
+        ));
     }
 
     /**
@@ -24,7 +51,8 @@ class AgentioServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
-        $this->loadRoutesFrom(__DIR__.'/../routes/agentio.php');
+        $this->defineGate();
+        $this->registerRoutes();
 
         $this->loadViewsFrom(__DIR__.'/../resources/views', 'agentio');
 
@@ -39,9 +67,39 @@ class AgentioServiceProvider extends ServiceProvider
         $this->publishes([
             __DIR__.'/../resources/views' => resource_path('views/vendor/agentio'),
         ], ['agentio', 'agentio-views']);
+    }
 
-        $this->commands([
-            AgentioCommand::class,
-        ]);
+    /**
+     * The "viewAgentio" gate: everyone in the local environment, otherwise the emails in agentio.ui.allowed_emails.
+     * An application may define its own gate or replace the whole check with Agentio::auth().
+     */
+    private function defineGate(): void
+    {
+        if (Gate::has('viewAgentio')) {
+            return;
+        }
+
+        Gate::define('viewAgentio', fn (?Authenticatable $user = null): bool => $this->app->environment('local')
+            || ($user !== null && in_array(data_get($user, 'email'), (array) config('agentio.ui.allowed_emails', []), true)));
+    }
+
+    private function registerRoutes(): void
+    {
+        if (! (bool) config('agentio.ui.enabled', true)) {
+            return;
+        }
+
+        Route::group([
+            'domain' => $this->configString('agentio.ui.domain'),
+            'prefix' => $this->configString('agentio.ui.path') ?? 'agentio',
+            'middleware' => [...(array) config('agentio.ui.middleware', ['web']), Authorize::class],
+        ], fn () => $this->loadRoutesFrom(__DIR__.'/../routes/web.php'));
+    }
+
+    private function configString(string $key): ?string
+    {
+        $value = config($key);
+
+        return is_string($value) && $value !== '' ? $value : null;
     }
 }
