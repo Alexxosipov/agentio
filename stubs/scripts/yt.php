@@ -694,6 +694,7 @@ switch ($command) {
                 echo $idea['id'].' '.$idea['summary'].PHP_EOL;
             }
         });
+
         break;
 
     case 'ready-epics':
@@ -711,6 +712,7 @@ switch ($command) {
                 echo $epic['id'].' '.$epic['slug'].' ready-tasks='.implode(',', $epic['readyTasks']).' '.$epic['summary'].PHP_EOL;
             }
         });
+
         break;
 
     case 'claimed-epics':
@@ -725,6 +727,7 @@ switch ($command) {
                 echo $epic['id'].' '.$epic['state'].' owner='.($epic['owner'] ?? '-').' '.$epic['summary'].PHP_EOL;
             }
         });
+
         break;
 
     case 'tree':
@@ -758,6 +761,7 @@ switch ($command) {
                 echo $indent.line($node, $flags).PHP_EOL;
             }
         });
+
         break;
 
     case 'ready-tasks':
@@ -770,6 +774,7 @@ switch ($command) {
                 echo $task['id'].' (story '.($task['story'] ?? '-').') '.$task['summary'].PHP_EOL;
             }
         });
+
         break;
 
     case 'blocked':
@@ -802,6 +807,7 @@ switch ($command) {
                 echo '  '.$item['id'].' '.$item['summary'].' <- '.implode(', ', $item['waitsFor']).PHP_EOL;
             }
         });
+
         break;
 
     case 'status':
@@ -839,6 +845,7 @@ switch ($command) {
                 }
             }
         });
+
         break;
 
     case 'validate':
@@ -941,6 +948,7 @@ switch ($command) {
                 echo PHP_EOL.'--- '.$comment['issue'].' @ '.gmdate('Y-m-d H:i', intdiv($comment['created'], 1000)).' UTC'.PHP_EOL.trim($comment['text']).PHP_EOL;
             }
         });
+
         break;
 
     case 'claim':
@@ -970,6 +978,7 @@ switch ($command) {
         }
 
         output(['claimed' => true, 'owner' => $owner, 'resumed' => $current !== null], $json, fn (array $result) => print ($result['resumed'] ? 'RESUMED' : 'CLAIMED')." {$id} as {$owner}".PHP_EOL);
+
         break;
 
     case 'release':
@@ -983,6 +992,7 @@ switch ($command) {
         setState($id, $state);
         removeTag($id, TAG_CLAIMED);
         echo "RELEASED {$id} -> {$state}".PHP_EOL;
+
         break;
 
     case 'set-state':
@@ -995,6 +1005,7 @@ switch ($command) {
 
         $stage = setState($id, $state);
         output(['id' => $id, 'state' => $state, 'stage' => $stage], $json, fn (array $result) => print "STATE {$id} -> {$state}".($stage === null ? '' : " (Stage {$stage})").PHP_EOL);
+
         break;
 
     case 'sync-stage':
@@ -1002,6 +1013,7 @@ switch ($command) {
 
         if (! projectHasStage()) {
             output(['stageField' => false, 'dryRun' => $dryRun, 'checked' => 0, 'changes' => []], $json, fn () => print 'Project '.PROJECT.' has no '.STAGE_FIELD.' field: nothing to sync'.PHP_EOL);
+
             break;
         }
 
@@ -1030,6 +1042,7 @@ switch ($command) {
 
             echo sprintf('%d issue(s) checked, %d %s', $result['checked'], count($result['changes']), $result['dryRun'] ? 'would be fixed (dry run)' : 'fixed').PHP_EOL;
         });
+
         break;
 
     case 'kb-tree':
@@ -1059,10 +1072,12 @@ switch ($command) {
                 $print($node, 0);
             }
         });
+
         break;
 
     case 'slug':
         echo slug(getIssue($positional[1] ?? fail('Usage: slug <ID>'))['summary']).PHP_EOL;
+
         break;
 
     default:

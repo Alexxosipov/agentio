@@ -246,6 +246,32 @@ it('removes files of a previous install that are no longer part of the package u
         ->assertSuccessful();
 });
 
+it('keeps the installed PHP scripts out of the project Pint config', function () {
+    $project = hostProject();
+    file_put_contents($project.'/pint.json', json_encode(['preset' => 'laravel', 'notPath' => ['tests/TestCase.php']]));
+
+    $this->artisan('agentio:install', ['--no-interaction' => true, '--project' => 'XY'])
+        ->expectsOutputToContain('notPath: scripts/agent-log.php, scripts/yt.php')
+        ->assertSuccessful();
+
+    expect(json_decode((string) file_get_contents($project.'/pint.json'), true))->toBe([
+        'preset' => 'laravel',
+        'notPath' => ['tests/TestCase.php', 'scripts/agent-log.php', 'scripts/yt.php'],
+    ]);
+
+    $this->artisan('agentio:install', ['--no-interaction' => true])->doesntExpectOutputToContain('notPath')->assertSuccessful();
+
+    file_put_contents($project.'/pint.json', '{ invalid');
+
+    $this->artisan('agentio:install', ['--no-interaction' => true])->expectsOutputToContain('pint.json: not valid JSON, left as is')->assertSuccessful();
+
+    unlink($project.'/pint.json');
+
+    $this->artisan('agentio:install', ['--no-interaction' => true])->doesntExpectOutputToContain('pint.json')->assertSuccessful();
+
+    expect($project.'/pint.json')->not->toBeFile();
+});
+
 it('restores the executable bit of an unchanged script', function () {
     $project = hostProject();
     $this->artisan('agentio:install', ['--no-interaction' => true, '--project' => 'XY'])->assertSuccessful();

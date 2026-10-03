@@ -127,7 +127,7 @@ return [
         'poll' => (int) env('AGENTIO_UI_POLL', 5),
         'cache' => (int) env('AGENTIO_UI_CACHE', 5),
         'allowed_emails' => array_values(array_filter(array_map(
-            'trim',
+            trim(...),
             explode(',', (string) env('AGENTIO_ALLOWED_EMAILS', '')),
         ))),
     ],

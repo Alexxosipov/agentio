@@ -86,6 +86,12 @@ final class Installer
             }
         }
 
+        $pint = $this->excludeFromPint(array_keys($stubFiles));
+
+        if ($pint !== null) {
+            $changes[] = $pint;
+        }
+
         $changes[] = $this->mergeSettings();
         $changes[] = $this->mergeMcpJson();
         $changes[] = $this->updateClaudeMarkdown();
@@ -272,6 +278,40 @@ final class Installer
             rmdir($this->path($relative));
             $relative = dirname($relative);
         }
+    }
+
+    /**
+     * Keep the installed PHP scripts (outside dot directories) out of the project's Pint: they belong to agentio,
+     * the project's rules may differ, and a reformatted script would look edited locally and stop being updated.
+     * Only an existing pint.json gets "notPath" entries.
+     *
+     * @param  list<string>  $installed
+     */
+    private function excludeFromPint(array $installed): ?FileChange
+    {
+        $target = $this->path('pint.json');
+
+        if (! is_file($target)) {
+            return null;
+        }
+
+        $config = json_decode((string) file_get_contents($target), true);
+
+        if (! is_array($config) || ! is_array($config['notPath'] ?? [])) {
+            return new FileChange('pint.json', FileStatus::Skipped, 'not valid JSON, left as is');
+        }
+
+        $scripts = array_values(array_filter($installed, fn (string $path): bool => str_ends_with($path, '.php') && ! str_starts_with($path, '.')));
+        $missing = array_values(array_diff($scripts, (array) ($config['notPath'] ?? [])));
+
+        if ($missing === []) {
+            return new FileChange('pint.json', FileStatus::Unchanged);
+        }
+
+        $config['notPath'] = [...(array) ($config['notPath'] ?? []), ...$missing];
+        $this->write($target, $this->encode($config), false);
+
+        return new FileChange('pint.json', FileStatus::Updated, 'notPath: '.implode(', ', $missing));
     }
 
     /**

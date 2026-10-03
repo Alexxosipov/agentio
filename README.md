@@ -134,6 +134,7 @@ What it installs (the stubs live in `stubs/`; `{{project}}`, `{{base_branch}}`, 
 - `scripts/` — `agent-loop.sh`, `epic-worktree.sh`, `yt.php`, `agent-commit.sh`, `agent-log.php`, `run-tests.sh`, `php/testing.ini`;
 - `docs/AUTONOMOUS_WORKFLOW.md` — the user manual of the cycle;
 - a block between `<!-- agentio:start -->` and `<!-- agentio:end -->` at the top of `CLAUDE.md` (replaced on reinstall, the rest of the file is untouched);
+- the installed PHP scripts (`scripts/yt.php`, `scripts/agent-log.php`) in `notPath` of an existing `pint.json`: they belong to agentio, the project's Pint rules may differ, and a reformatted script would count as edited locally and no longer be updated;
 - `/.agent-stop`, `/storage/logs/agents`, `/.claude/settings.local.json` and `/.env` in `.gitignore` (an existing entry such as `.env` is not duplicated), `YOUTRACK_URL=`, `YOUTRACK_TOKEN=`, `AGENTIO_PROJECT=` in `.env.example`, and `config/agentio.php` when it is not published yet.
 
 The command is idempotent and safe to rerun after updating the package: a file with the expected content is left alone, a file that still has the content of the previous install is updated, and a file you edited is skipped with a warning (`--force` overwrites it). A file installed by an earlier version whose stub is no longer in the package is removed (`removed`) when you did not edit it; an edited one is kept with a warning, even with `--force`. `.agentio.json` (commit it) remembers the project, the base branch, the knowledge base article ids and the hashes of the installed files.
