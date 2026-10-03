@@ -13,8 +13,9 @@ use Obrazmisli\Agentio\YouTrack\YouTrackException;
 /**
  * Configures a YouTrack project for the autonomous cycle, idempotently: the State, Type and Stage fields
  * with their bundles, the idea / agent-claimed tags, the "<KEY>: …" saved searches and the knowledge base
- * tree. Everything is looked up by name first; existing entities are never deleted or renamed, an existing
- * bundle only gets the missing values and an existing article is never changed.
+ * tree. Everything is looked up by name first (an article preferably under its expected parent); existing
+ * entities are never deleted, renamed or moved, an existing bundle only gets the missing values and an
+ * existing article is never changed, so the articles of an older tree stay where they are.
  */
 final class YouTrackSetup
 {
@@ -249,7 +250,7 @@ final class YouTrackSetup
 
         foreach ($this->client->articles('project: '.$project) as $article) {
             if (is_string($article['summary'] ?? null) && ($article['project']['shortName'] ?? $project) === $project) {
-                $byTitle[$article['summary']] ??= $article;
+                $byTitle[$article['summary']][] = $article;
             }
         }
 
@@ -258,10 +259,15 @@ final class YouTrackSetup
 
         foreach ($this->knowledgeBase->keys() as $key) {
             $title = $this->knowledgeBase->title($key);
-            $article = $byTitle[$title] ?? null;
+            $parent = $this->knowledgeBase->parent($key);
+            $parentId = $parent === null ? null : ($internalIds[$parent] ?? null);
+            $candidates = $byTitle[$title] ?? [];
+            $article = array_values(array_filter(
+                $candidates,
+                fn (array $candidate): bool => ($candidate['parentArticle']['id'] ?? null) === $parentId,
+            ))[0] ?? $candidates[0] ?? null;
 
             if ($article === null) {
-                $parent = $this->knowledgeBase->parent($key);
                 $this->record('article', $title, SetupStatus::Create, $parent === null ? 'top level' : 'under «'.$this->knowledgeBase->title($parent).'»');
 
                 if ($this->dryRun) {
@@ -272,7 +278,7 @@ final class YouTrackSetup
                     $projectId,
                     $title,
                     $this->knowledgeBase->content($key, $placeholders->withKb($ids)),
-                    $parent === null ? null : ($internalIds[$parent] ?? null),
+                    $parentId,
                 );
             } else {
                 $this->record('article', $title, SetupStatus::Exists, (string) ($article['idReadable'] ?? ''));

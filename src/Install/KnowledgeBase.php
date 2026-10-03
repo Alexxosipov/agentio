@@ -8,7 +8,8 @@ namespace Obrazmisli\Agentio\Install;
  * The knowledge base tree the agents rely on (the "{{kb.<key>}}" placeholders of the stubs).
  *
  * Article templates live in stubs/youtrack/articles/<key>.md; the "guide" article is the installed
- * docs/AUTONOMOUS_WORKFLOW.md.
+ * docs/AUTONOMOUS_WORKFLOW.md. Under "Системная аналитика" only the common requirements are created: the
+ * system-analyst skill adds module articles and their feature articles as the product grows.
  */
 final readonly class KnowledgeBase
 {
@@ -20,13 +21,7 @@ final readonly class KnowledgeBase
     public const array ARTICLES = [
         'overview' => ['Обзор продукта', null],
         'analysis' => ['Системная аналитика', null],
-        'analysis.business' => ['1. Бизнес-контекст и цели', 'analysis'],
-        'analysis.users' => ['2. Пользователи, роли и сценарии', 'analysis'],
-        'analysis.functional' => ['3. Функциональные требования и бизнес-правила', 'analysis'],
-        'analysis.data' => ['4. Данные: сущности, атрибуты, связи, жизненный цикл', 'analysis'],
-        'analysis.integrations' => ['5. Интеграции и интерфейсы', 'analysis'],
-        'analysis.nfr' => ['6. Нефункциональные требования', 'analysis'],
-        'analysis.constraints' => ['7. Ограничения, допущения и риски', 'analysis'],
+        'analysis.common' => ['Общие требования', 'analysis'],
         'architecture' => ['Архитектура', null],
         'architecture.overview' => ['Архитектура: обзор', 'architecture'],
         'architecture.data_model' => ['Модель данных', 'architecture'],

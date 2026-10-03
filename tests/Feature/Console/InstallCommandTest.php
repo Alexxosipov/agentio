@@ -371,9 +371,9 @@ it('sets up an empty YouTrack project and records the knowledge base ids', funct
     $guide = $articles->first(fn (Request $request): bool => $request['summary'] === 'Руководство по автоматизации');
 
     expect($articles->first()->data())->not->toHaveKey('parentArticle')
-        ->and($adr['parentArticle'])->toBe(['id' => '186-10'])
-        ->and($adr001['parentArticle'])->toBe(['id' => '186-13'])
-        ->and($guide['parentArticle'])->toBe(['id' => '186-15'])
+        ->and($adr['parentArticle'])->toBe(['id' => '186-4'])
+        ->and($adr001['parentArticle'])->toBe(['id' => '186-7'])
+        ->and($guide['parentArticle'])->toBe(['id' => '186-9'])
         ->and($guide['content'])->toContain('# Руководство по автоматизации разработки', 'проект `XY`')
         ->and($guide['project'])->toBe(['id' => '0-9']);
 
@@ -430,7 +430,7 @@ it('extends existing fields and keeps what the project already has', function ()
     expect($added)->toHaveCount(4)
         ->and($added->every(fn (string $write): bool => str_contains($write, 'bundles/state/b-state/values')))->toBeTrue()
         ->and($added->implode(' '))->toContain('"name":"Analysis"', '"name":"Ready"', '"name":"Review"', '"name":"Blocked"')
-        ->and(Manifest::load($project)->kb['adr.001'])->toBe('XY-A-14');
+        ->and(Manifest::load($project)->kb['adr.001'])->toBe('XY-A-8');
 });
 
 it('attaches existing global fields and bundles found by name', function () {
