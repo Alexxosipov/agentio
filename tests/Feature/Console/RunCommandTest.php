@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use Obrazmisli\Agentio\Runtime\LoopState;
+use Symfony\Component\Process\Process;
 
 /**
  * A host project with a fake scripts/agent-loop.sh that prints its arguments and environment and exits
@@ -152,7 +153,7 @@ it('forwards SIGTERM to the loop and returns its exit code', function () {
         exit($app->make(Illuminate\Contracts\Console\Kernel::class)->handle(new Symfony\Component\Console\Input\ArgvInput(['artisan', 'agentio:run']), new Symfony\Component\Console\Output\ConsoleOutput));
         PHP, var_export(dirname(__DIR__, 3).'/vendor/autoload.php', true)));
 
-    $process = new Symfony\Component\Process\Process([PHP_BINARY, $project.'/artisan.php'], $project, null, null, 30);
+    $process = new Process([PHP_BINARY, $project.'/artisan.php'], $project, null, null, 30);
     $process->start();
     $process->waitUntil(fn (string $type, string $output): bool => str_contains($output, 'loop started'));
     $process->signal(15);

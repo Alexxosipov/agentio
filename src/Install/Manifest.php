@@ -17,7 +17,7 @@ final readonly class Manifest
 
     /**
      * @param  array<string, string>  $kb  Knowledge base key => article id
-     * @param  array<string, string>  $files  Installed path => sha1 of the installed content
+     * @param  array<string, string>  $files  Installed path => sha256 of the installed content
      */
     public function __construct(
         public ?string $project = null,

@@ -140,7 +140,7 @@ final class Installer
         }
 
         $target = $this->path($relative);
-        $hash = sha1($content);
+        $hash = hash('sha256', $content);
 
         if (! is_file($target)) {
             $this->write($target, $content, $executable);
@@ -165,7 +165,7 @@ final class Installer
             return new FileChange($relative, FileStatus::Unchanged);
         }
 
-        $pristine = ($this->previousHashes[$relative] ?? null) === sha1($current);
+        $pristine = ($this->previousHashes[$relative] ?? null) === hash('sha256', $current);
 
         if (! $this->force && ! $pristine) {
             if (isset($this->previousHashes[$relative])) {

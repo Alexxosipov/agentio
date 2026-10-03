@@ -142,7 +142,7 @@ it('installs the stubs with the placeholders rendered', function () {
 
     expect($manifest->project)->toBe('XY')
         ->and($manifest->baseBranch)->toBe('develop')
-        ->and($manifest->files)->toHaveKey('scripts/agent-loop.sh', sha1($files['scripts/agent-loop.sh']));
+        ->and($manifest->files)->toHaveKey('scripts/agent-loop.sh', hash('sha256', $files['scripts/agent-loop.sh']));
 });
 
 it('is idempotent', function () {
@@ -172,7 +172,7 @@ it('keeps locally edited files unless forced and updates files nobody edited', f
         ->assertSuccessful();
 
     expect(file_get_contents($project.'/scripts/run-tests.sh'))->toBe("#!/usr/bin/env bash\necho edited\n")
-        ->and(Manifest::load($project)->files['scripts/run-tests.sh'])->toBe(sha1($stub));
+        ->and(Manifest::load($project)->files['scripts/run-tests.sh'])->toBe(hash('sha256', $stub));
 
     $this->artisan('agentio:install', ['--force' => true])->expectsOutputToContain('overwritten (--force)')->assertSuccessful();
 
@@ -182,7 +182,7 @@ it('keeps locally edited files unless forced and updates files nobody edited', f
     $old = "#!/usr/bin/env bash\necho old release\n";
     file_put_contents($project.'/scripts/run-tests.sh', $old);
     $manifest = Manifest::load($project);
-    $manifest->with(files: [...$manifest->files, 'scripts/run-tests.sh' => sha1($old)])->save($project);
+    $manifest->with(files: [...$manifest->files, 'scripts/run-tests.sh' => hash('sha256', $old)])->save($project);
 
     $this->artisan('agentio:install')->expectsOutputToContain('new version of the stub')->assertSuccessful();
 
