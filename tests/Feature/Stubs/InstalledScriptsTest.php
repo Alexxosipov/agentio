@@ -121,6 +121,22 @@ it('removes a stale planning pid file without treating it as an epic', function 
         ->and(file_get_contents($project.'/storage/logs/agents/loop.log'))->not->toContain('plan-XY-3: session finished');
 });
 
+it('finds session logs in the AGENTIO_LOGS_PATH of the project .env', function () {
+    $project = projectWithInstalledStubs();
+    $logs = $project.'/custom-logs';
+    mkdir($logs);
+    file_put_contents($logs.'/XY-5.log', "===== 2026-10-03 14:00:00 /work-epic XY-5 in /srv =====\n");
+    file_put_contents($project.'/.env', "APP_NAME=Acme\nAGENTIO_LOGS_PATH=\"{$logs}\" # agentio\n");
+
+    $process = new Process([PHP_BINARY, $project.'/scripts/agent-log.php', 'XY-5'], $project, ['AGENT_LOG_DIR' => false, 'AGENTIO_LOGS_PATH' => false]);
+    $missing = new Process([PHP_BINARY, $project.'/scripts/agent-log.php', 'XY-6'], $project, ['AGENT_LOG_DIR' => false, 'AGENTIO_LOGS_PATH' => false]);
+
+    expect($process->run())->toBe(0, $process->getErrorOutput())
+        ->and($process->getOutput())->toContain('/work-epic XY-5')
+        ->and($missing->run())->not->toBe(0)
+        ->and($missing->getOutput().$missing->getErrorOutput())->toContain($logs.'/XY-6.log');
+});
+
 it('runs the configured test commands', function () {
     $project = projectWithInstalledStubs();
     file_put_contents($project.'/composer.json', json_encode(['scripts' => ['test' => 'echo full-gate-from-composer']]));

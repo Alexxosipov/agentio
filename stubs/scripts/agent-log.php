@@ -17,7 +17,32 @@ if ($target === null) {
     exit(64);
 }
 
-$path = is_file($target) ? $target : (getenv('AGENT_LOG_DIR') ?: dirname(__DIR__).'/storage/logs/agents').'/'.$target.'.log';
+/**
+ * The logs directory: $AGENT_LOG_DIR (set by the loop), $AGENTIO_LOGS_PATH, the AGENTIO_LOGS_PATH line of the
+ * project's .env, or storage/logs/agents.
+ */
+function logsDirectory(): string
+{
+    foreach (['AGENT_LOG_DIR', 'AGENTIO_LOGS_PATH'] as $name) {
+        $value = getenv($name);
+
+        if (is_string($value) && $value !== '') {
+            return $value;
+        }
+    }
+
+    $dotenv = dirname(__DIR__).'/.env';
+
+    foreach (is_file($dotenv) ? (file($dotenv, FILE_IGNORE_NEW_LINES) ?: []) : [] as $line) {
+        if (preg_match('/^\s*AGENTIO_LOGS_PATH\s*=\s*(["\']?)(.+?)\1\s*(?:#.*)?$/', $line, $match) === 1) {
+            return $match[2];
+        }
+    }
+
+    return dirname(__DIR__).'/storage/logs/agents';
+}
+
+$path = is_file($target) ? $target : logsDirectory().'/'.$target.'.log';
 $lines = 40;
 $follow = in_array('--follow', $arguments, true);
 

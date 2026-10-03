@@ -186,7 +186,7 @@ Publish the config with `php artisan vendor:publish --tag=agentio-config` (`agen
 | `AGENTIO_CLAUDE_BIN` | `claude_binary` | `claude` | Claude Code executable |
 | `AGENTIO_TEST_COMMAND` | `tests.command` | `php artisan test --compact` | Narrow test run of `scripts/run-tests.sh` (gets its arguments) |
 | `AGENTIO_FULL_TEST_COMMAND` | `tests.full_command` | `composer test` (when defined) | Full quality gate (`RUN_TESTS_FULL=1 scripts/run-tests.sh`) |
-| `AGENTIO_LOGS_PATH` | `logs_path` | `storage/logs/agents` | Where the loop writes `loop.log`, `loop.pid`, `<ID>.pid`/`<ID>.log` (epic sessions) and `plan-<ID>.pid`/`plan-<ID>.log` (planning sessions); `agentio:run` passes it to the loop, the dashboard and `agentio:status` read it |
+| `AGENTIO_LOGS_PATH` | `logs_path` | `storage/logs/agents` | Where the loop writes `loop.log`, `loop.pid`, `<ID>.pid`/`<ID>.log` (epic sessions) and `plan-<ID>.pid`/`plan-<ID>.log` (planning sessions); `agentio:run` passes it to the loop; the dashboard, `agentio:status` and `scripts/agent-log.php` read it |
 | `AGENTIO_TIMEZONE` | `timezone` | the machine's time zone | Time zone of the local timestamps the loop writes (`loop.log`, session headers); detected from `$TZ`, `/etc/timezone` or `/etc/localtime` when empty |
 | — | `stage_map` | see the file | State → Stage map of the Kanban board field |
 | `AGENTIO_UI_ENABLED` | `ui.enabled` | `true` | Register the dashboard routes |
