@@ -11,8 +11,9 @@ use SplFileInfo;
 
 /**
  * Copies the stubs into the host project with the placeholders rendered, and merges the shared files:
- * .claude/settings.json (union of permissions, the guard hook, MCP servers), the agentio block of CLAUDE.md,
- * .gitignore and .env.example lines, and the published config.
+ * .claude/settings.json (union of permissions, the guard hook, MCP servers), the youtrack server of .mcp.json,
+ * the agentio block of CLAUDE.md, .gitignore and .env.example lines, and the published config.
+ * writeEnvironment() records the YouTrack connection in .env and .claude/settings.local.json.
  *
  * Idempotent: a file with the expected content is left alone; a file that differs is updated only when it
  * still has the content of the previous install (see Manifest::$files) or with $force, otherwise skipped.
@@ -26,9 +27,19 @@ final class Installer
 
     public const string BLOCK_END = '<!-- agentio:end -->';
 
-    public const array GITIGNORE = ['/.agent-stop', '/storage/logs/agents'];
+    /** .env and .claude/settings.local.json get the YouTrack token. */
+    public const array GITIGNORE = ['/.agent-stop', '/storage/logs/agents', '/.claude/settings.local.json', '/.env'];
+
+    /** Keys of the "env" block of .claude/settings.local.json: interactive sessions substitute them into .mcp.json. */
+    public const array LOCAL_ENV = ['YOUTRACK_URL', 'YOUTRACK_TOKEN'];
+
+    public const string MCP_SERVER = 'youtrack';
 
     private const string SETTINGS = '.claude/settings.json';
+
+    private const string LOCAL_SETTINGS = '.claude/settings.local.json';
+
+    private const string MCP_JSON = '.mcp.json';
 
     private const string AGENTS_MCP = '.claude/agents-mcp.json';
 
@@ -65,10 +76,37 @@ final class Installer
         }
 
         $changes[] = $this->mergeSettings();
+        $changes[] = $this->mergeMcpJson();
         $changes[] = $this->updateClaudeMarkdown();
         $changes[] = $this->appendLines('.gitignore', self::GITIGNORE);
         $changes[] = $this->appendEnvExample();
         $changes[] = $this->publishConfig($configStub, $configTarget);
+
+        return $changes;
+    }
+
+    /**
+     * Record the YouTrack connection: every key with a value goes into .env (replaced on its line or appended),
+     * YOUTRACK_URL and YOUTRACK_TOKEN also into the "env" block of .claude/settings.local.json (git-ignored),
+     * which an interactive `claude` applies to the ${VAR}s of .mcp.json. Values never appear in the notes.
+     *
+     * @param  array<string, string|null>  $values  E.g. YOUTRACK_URL, YOUTRACK_TOKEN, AGENTIO_PROJECT
+     * @return list<FileChange>
+     */
+    public function writeEnvironment(array $values): array
+    {
+        $values = array_filter($values, fn (?string $value): bool => $value !== null && $value !== '');
+
+        if ($values === []) {
+            return [];
+        }
+
+        $changes = [$this->updateEnv($values)];
+        $local = array_intersect_key($values, array_flip(self::LOCAL_ENV));
+
+        if ($local !== []) {
+            $changes[] = $this->updateLocalSettings($local);
+        }
 
         return $changes;
     }
@@ -217,6 +255,91 @@ final class Installer
         $this->write($target, $this->encode($merged), false);
 
         return new FileChange(self::SETTINGS, FileStatus::Updated, 'merged: permissions, hooks, MCP servers');
+    }
+
+    /**
+     * Add the youtrack server of .claude/agents-mcp.json to the project's .mcp.json (committed, so it holds
+     * only ${YOUTRACK_URL} and ${YOUTRACK_TOKEN}); the other servers (e.g. laravel-boost) are kept. A youtrack
+     * server of the project's own is replaced only with --force.
+     */
+    private function mergeMcpJson(): FileChange
+    {
+        $stub = json_decode((string) file_get_contents($this->stubsPath.'/claude/agents-mcp.json'), true);
+        $server = is_array($stub) && is_array($stub['mcpServers'][self::MCP_SERVER] ?? null) ? $stub['mcpServers'][self::MCP_SERVER] : [];
+        $target = $this->path(self::MCP_JSON);
+
+        if (! is_file($target)) {
+            $this->write($target, $this->encode(['mcpServers' => [self::MCP_SERVER => $server]]), false);
+
+            return new FileChange(self::MCP_JSON, FileStatus::Created, 'MCP server '.self::MCP_SERVER);
+        }
+
+        $config = json_decode((string) file_get_contents($target), true);
+
+        if (! is_array($config) || ! is_array($config['mcpServers'] ?? [])) {
+            return new FileChange(self::MCP_JSON, FileStatus::Skipped, 'not valid JSON, left as is');
+        }
+
+        $servers = (array) ($config['mcpServers'] ?? []);
+        $current = $servers[self::MCP_SERVER] ?? null;
+
+        if ($current === $server) {
+            return new FileChange(self::MCP_JSON, FileStatus::Unchanged);
+        }
+
+        if ($current !== null && ! $this->force) {
+            return new FileChange(self::MCP_JSON, FileStatus::Skipped, 'has its own '.self::MCP_SERVER.' MCP server; --force replaces it');
+        }
+
+        $config['mcpServers'] = [...$servers, self::MCP_SERVER => $server];
+        $this->write($target, $this->encode($config), false);
+
+        return new FileChange(self::MCP_JSON, FileStatus::Updated, $current === null
+            ? 'added MCP server '.self::MCP_SERVER
+            : 'replaced MCP server '.self::MCP_SERVER.' (--force)');
+    }
+
+    /**
+     * @param  array<string, string>  $values
+     */
+    private function updateEnv(array $values): FileChange
+    {
+        $env = new EnvFile($this->path('.env'));
+        $exists = $env->exists();
+        $updated = $env->contentWith($values);
+
+        if ($exists && $updated === $env->content()) {
+            return new FileChange('.env', FileStatus::Unchanged);
+        }
+
+        $this->write($this->path('.env'), $updated, false);
+
+        return new FileChange('.env', $exists ? FileStatus::Updated : FileStatus::Created, 'set '.implode(', ', array_keys($values)));
+    }
+
+    /**
+     * @param  array<string, string>  $values
+     */
+    private function updateLocalSettings(array $values): FileChange
+    {
+        $target = $this->path(self::LOCAL_SETTINGS);
+        $exists = is_file($target);
+        $settings = $exists ? json_decode((string) file_get_contents($target), true) : [];
+
+        if (! is_array($settings) || ! is_array($settings['env'] ?? [])) {
+            return new FileChange(self::LOCAL_SETTINGS, FileStatus::Skipped, 'not valid JSON, left as is: put '.implode(', ', array_keys($values)).' into its "env" by hand');
+        }
+
+        $merged = $settings;
+        $merged['env'] = [...(array) ($settings['env'] ?? []), ...$values];
+
+        if ($exists && $merged === $settings) {
+            return new FileChange(self::LOCAL_SETTINGS, FileStatus::Unchanged);
+        }
+
+        $this->write($target, $this->encode($merged), false);
+
+        return new FileChange(self::LOCAL_SETTINGS, $exists ? FileStatus::Updated : FileStatus::Created, 'env: '.implode(', ', array_keys($values)));
     }
 
     /**

@@ -36,8 +36,8 @@ final readonly class Preconditions
             new Check('setsid', $this->has('setsid'), true, 'agent sessions are started with setsid (util-linux; on macOS: brew install util-linux)'),
             new Check('flock', $this->has('flock'), false, 'scripts/agent-commit.sh falls back to a mkdir lock without it'),
             new Check('bun or npm', $this->has('bun') || $this->has('npm'), false, 'needed only when the project has a frontend build'),
-            new Check('YOUTRACK_URL', (string) $this->youTrackUrl !== '', true, 'set YOUTRACK_URL in .env (e.g. https://example.youtrack.cloud)'),
-            new Check('YOUTRACK_TOKEN', (string) $this->youTrackToken !== '', true, 'set YOUTRACK_TOKEN in .env (YouTrack → Profile → Account Security → Tokens)'),
+            new Check('YOUTRACK_URL', (string) $this->youTrackUrl !== '', true, 'run php artisan agentio:install and enter it, or set YOUTRACK_URL in .env (e.g. https://example.youtrack.cloud)'),
+            new Check('YOUTRACK_TOKEN', (string) $this->youTrackToken !== '', true, 'run php artisan agentio:install and enter it, or set YOUTRACK_TOKEN in .env (YouTrack → Profile → Account Security → Tokens)'),
         ];
     }
 

@@ -14,7 +14,7 @@ use Symfony\Component\Process\Process;
 function projectWithInstalledStubs(array $ideas = []): string
 {
     $project = hostProject();
-    test()->artisan('agentio:install', ['--project' => 'XY'])->assertSuccessful();
+    test()->artisan('agentio:install', ['--no-interaction' => true, '--project' => 'XY'])->assertSuccessful();
 
     $ideasJson = json_encode(array_map(fn (string $id): array => ['id' => $id, 'summary' => 'Idea'], $ideas));
     file_put_contents($project.'/scripts/yt.php', <<<PHP
