@@ -189,6 +189,57 @@ it('keeps locally edited files unless forced and updates files nobody edited', f
     expect(file_get_contents($project.'/scripts/run-tests.sh'))->toBe($stub);
 });
 
+it('removes files of a previous install that are no longer part of the package unless they were edited', function () {
+    $project = hostProject();
+    $this->artisan('agentio:install', ['--no-interaction' => true, '--project' => 'XY'])->assertSuccessful();
+
+    $obsolete = [
+        '.claude/skills/system-analyst/layers.md' => "# Layers\n",
+        '.claude/skills/retired/SKILL.md' => "# Retired skill\n",
+        'scripts/edited.sh' => "echo installed\n",
+        'docs/gone.md' => "# Already deleted\n",
+        'app/Models/User.php' => "<?php\n",
+        'scripts/../app/Secret.php' => "<?php\n",
+    ];
+
+    foreach ($obsolete as $path => $content) {
+        @mkdir(dirname($project.'/'.$path), 0755, true);
+        file_put_contents($project.'/'.$path, $content);
+    }
+
+    $manifest = Manifest::load($project);
+    $manifest->with(files: [...$manifest->files, ...array_map(fn (string $content): string => hash('sha256', $content), $obsolete)])->save($project);
+    file_put_contents($project.'/scripts/edited.sh', "echo edited\n");
+    unlink($project.'/docs/gone.md');
+
+    $this->artisan('agentio:install', ['--no-interaction' => true, '--dry-run' => true])
+        ->expectsOutputToContain('will be removed')
+        ->assertSuccessful();
+
+    expect($project.'/.claude/skills/system-analyst/layers.md')->toBeFile();
+
+    $this->artisan('agentio:install', ['--no-interaction' => true])
+        ->expectsOutputToContain('2 removed')
+        ->expectsOutputToContain('scripts/edited.sh: no longer part of agentio, but edited locally: kept')
+        ->assertSuccessful();
+
+    $files = Manifest::load($project)->files;
+
+    expect($project.'/.claude/skills/system-analyst/layers.md')->not->toBeFile()
+        ->and($project.'/.claude/skills/system-analyst/SKILL.md')->toBeFile()
+        ->and($project.'/.claude/skills/retired')->not->toBeDirectory()
+        ->and($project.'/.claude/skills')->toBeDirectory()
+        ->and(file_get_contents($project.'/scripts/edited.sh'))->toBe("echo edited\n")
+        ->and($project.'/app/Models/User.php')->toBeFile()
+        ->and($files)->toHaveKey('scripts/edited.sh')
+        ->not->toHaveKeys(['.claude/skills/system-analyst/layers.md', '.claude/skills/retired/SKILL.md', 'docs/gone.md', 'app/Models/User.php', 'scripts/../app/Secret.php']);
+
+    $this->artisan('agentio:install', ['--no-interaction' => true])
+        ->doesntExpectOutputToContain('removed')
+        ->expectsOutputToContain('scripts/edited.sh: no longer part of agentio')
+        ->assertSuccessful();
+});
+
 it('restores the executable bit of an unchanged script', function () {
     $project = hostProject();
     $this->artisan('agentio:install', ['--no-interaction' => true, '--project' => 'XY'])->assertSuccessful();

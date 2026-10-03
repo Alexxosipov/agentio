@@ -15,4 +15,7 @@ enum FileStatus: string
 
     /** The file was edited by hand and differs from the stub: kept (use --force to overwrite). */
     case Skipped = 'skipped';
+
+    /** The file was installed before, but its stub is no longer part of the package. */
+    case Removed = 'removed';
 }

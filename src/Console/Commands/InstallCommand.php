@@ -399,7 +399,7 @@ final class InstallCommand extends Command
         $this->newLine();
         $this->line('<options=bold>Files</>'.($dryRun ? ' (plan)' : ''));
         $this->table(['Status', 'File', 'Note'], array_map(fn (FileChange $change): array => [
-            $dryRun && in_array($change->status, [FileStatus::Created, FileStatus::Updated], true) ? 'will be '.$change->status->value : $change->status->value,
+            $dryRun && in_array($change->status, [FileStatus::Created, FileStatus::Updated, FileStatus::Removed], true) ? 'will be '.$change->status->value : $change->status->value,
             $change->path,
             $change->note,
         ], $changes));

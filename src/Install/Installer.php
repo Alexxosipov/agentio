@@ -17,6 +17,7 @@ use SplFileInfo;
  *
  * Idempotent: a file with the expected content is left alone; a file that differs is updated only when it
  * still has the content of the previous install (see Manifest::$files) or with $force, otherwise skipped.
+ * A file installed before whose stub is gone from the package is removed when nobody edited it, otherwise kept.
  */
 final class Installer
 {
@@ -71,8 +72,18 @@ final class Installer
     {
         $changes = [];
 
-        foreach ($this->stubFiles() as $relative => $source) {
+        $stubFiles = $this->stubFiles();
+
+        foreach ($stubFiles as $relative => $source) {
             $changes[] = $this->installFile($relative, $source);
+        }
+
+        foreach (array_diff_key($this->previousHashes, $stubFiles) as $relative => $hash) {
+            $change = $this->removeObsoleteFile($relative, $hash);
+
+            if ($change !== null) {
+                $changes[] = $change;
+            }
         }
 
         $changes[] = $this->mergeSettings();
@@ -217,6 +228,50 @@ final class Installer
         $this->hashes[$relative] = $hash;
 
         return new FileChange($relative, FileStatus::Updated, $pristine ? 'new version of the stub' : 'overwritten (--force)');
+    }
+
+    /**
+     * A file of a previous install whose stub is no longer in the package: removed (with the directories it
+     * leaves empty) when it still has the installed content, kept with a warning when it was edited. Paths
+     * outside the stub roots are ignored; a file that is already gone is forgotten.
+     */
+    private function removeObsoleteFile(string $relative, string $hash): ?FileChange
+    {
+        $root = strstr($relative, '/', true);
+
+        if ($root === false || ! in_array($root, self::ROOTS, true) || preg_match('#(^|/)\.\.?(/|$)#', $relative) === 1) {
+            return null;
+        }
+
+        $target = $this->path($relative);
+
+        if (! is_file($target)) {
+            return null;
+        }
+
+        if (hash_file('sha256', $target) !== $hash) {
+            $this->hashes[$relative] = $hash;
+
+            return new FileChange($relative, FileStatus::Skipped, 'no longer part of agentio, but edited locally: kept, delete it by hand when you no longer need it');
+        }
+
+        if (! $this->dryRun) {
+            unlink($target);
+            $this->removeEmptyDirectories(dirname($relative));
+        }
+
+        return new FileChange($relative, FileStatus::Removed, 'no longer part of agentio');
+    }
+
+    /**
+     * Remove the directory and its parents while they are empty, up to (not including) the stub root.
+     */
+    private function removeEmptyDirectories(string $relative): void
+    {
+        while (str_contains($relative, '/') && is_dir($this->path($relative)) && scandir($this->path($relative)) === ['.', '..']) {
+            rmdir($this->path($relative));
+            $relative = dirname($relative);
+        }
     }
 
     /**
