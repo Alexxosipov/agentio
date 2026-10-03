@@ -202,12 +202,15 @@ final class InstallCommand extends Command
             }
         }
 
-        if ($this->configString('agentio.youtrack.project') !== $project) {
-            $steps[] = "Set AGENTIO_PROJECT={$project} in .env (the config currently says ".($this->configString('agentio.youtrack.project') ?? 'nothing').').';
+        $configuredProject = $this->configString('agentio.youtrack.project');
+        $configuredBranch = $this->configString('agentio.base_branch');
+
+        if ($configuredProject !== null && $configuredProject !== $project) {
+            $steps[] = "Set AGENTIO_PROJECT={$project} in .env or remove it (the config says {$configuredProject}, the files are installed for {$project}).";
         }
 
-        if ($this->configString('agentio.base_branch') !== $placeholders->baseBranch) {
-            $steps[] = "Set AGENTIO_BASE_BRANCH={$placeholders->baseBranch} in .env.";
+        if ($configuredBranch !== null && $configuredBranch !== $placeholders->baseBranch) {
+            $steps[] = "Set AGENTIO_BASE_BRANCH={$placeholders->baseBranch} in .env or remove it (the config says {$configuredBranch}).";
         }
 
         $missingKb = array_diff(array_keys(KnowledgeBase::ARTICLES), array_keys($placeholders->kb));

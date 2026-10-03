@@ -14,6 +14,7 @@ use Obrazmisli\Agentio\Console\Commands\RunCommand;
 use Obrazmisli\Agentio\Console\Commands\StatusCommand;
 use Obrazmisli\Agentio\Dashboard\YouTrackSource;
 use Obrazmisli\Agentio\Http\Middleware\Authorize;
+use Obrazmisli\Agentio\Install\Manifest;
 use Obrazmisli\Agentio\Process\StageMap;
 use Obrazmisli\Agentio\Runtime\LoopState;
 use Obrazmisli\Agentio\Runtime\SystemTimezone;
@@ -38,7 +39,7 @@ final class AgentioServiceProvider extends ServiceProvider
 
         $this->app->singleton(IssueRepository::class, fn (Application $app): IssueRepository => new IssueRepository(
             $app->make(Client::class),
-            $this->configString('agentio.youtrack.project') ?? 'TP',
+            $this->configString('agentio.youtrack.project') ?? Manifest::load($app->basePath())->project ?? 'TP',
         ));
 
         $this->app->singleton(LoopState::class, fn (Application $app): LoopState => new LoopState(

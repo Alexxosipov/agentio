@@ -175,10 +175,10 @@ Publish the config with `php artisan vendor:publish --tag=agentio-config` (`agen
 | Variable | Config key | Default | Meaning |
 |---|---|---|---|
 | `YOUTRACK_URL`, `YOUTRACK_TOKEN` | `youtrack.url`, `youtrack.token` | — | YouTrack instance and permanent token (read only from the environment) |
-| `AGENTIO_PROJECT` | `youtrack.project` | `TP` | YouTrack project short name (also read by `scripts/yt.php` from `.env`) |
+| `AGENTIO_PROJECT` | `youtrack.project` | the project in `.agentio.json`, then `TP` | YouTrack project short name (also read by `scripts/yt.php` from `.env`) |
 | `AGENTIO_YOUTRACK_TIMEOUT` | `youtrack.timeout` | 30 | Seconds per YouTrack request |
 | `AGENTIO_YOUTRACK_RETRIES` | `youtrack.retries` | 2 | Retries of a request after a connection error, a 5xx or a 429 |
-| `AGENTIO_BASE_BRANCH` | `base_branch` | `main` | Base branch of the epic branches |
+| `AGENTIO_BASE_BRANCH` | `base_branch` | the branch in `.agentio.json`, then `main` | Base branch of the epic branches |
 | `AGENTIO_MERGE_POLICY` | `merge_policy` | the `MERGE_POLICY:` line of `CLAUDE.md` | `local-branch`, `pull-request` or `auto-merge` |
 | `AGENTIO_MAX_PARALLEL`, `AGENTIO_MAX_PARALLEL_TASKS` | `max_parallel`, `max_parallel_tasks` | 2, 2 | Epics at the same time; task subagents per epic |
 | `AGENTIO_INTERVAL` | `interval` | 300 | Seconds between passes of the loop |

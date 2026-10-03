@@ -11,14 +11,16 @@ return [
     |
     | YouTrack is the source of truth for the autonomous cycle: ideas, epics,
     | stories, tasks, agent comments and the knowledge base. The token is only
-    | ever read from the environment. "project" is the project's short name.
+    | ever read from the environment. "project" is the project's short name;
+    | when it is not set, the project agentio:install recorded in .agentio.json
+    | is used (then "TP").
     |
     */
 
     'youtrack' => [
         'url' => env('YOUTRACK_URL'),
         'token' => env('YOUTRACK_TOKEN'),
-        'project' => env('AGENTIO_PROJECT', 'TP'),
+        'project' => env('AGENTIO_PROJECT'),
         'timeout' => (int) env('AGENTIO_YOUTRACK_TIMEOUT', 30),
         'retries' => (int) env('AGENTIO_YOUTRACK_RETRIES', 2),
     ],
@@ -30,11 +32,13 @@ return [
     |
     | Settings passed to scripts/agent-loop.sh. When "merge_policy" is null the
     | `MERGE_POLICY:` line of the project's CLAUDE.md is used, exactly like the
-    | loop script does (local-branch, pull-request or auto-merge).
+    | loop script does (local-branch, pull-request or auto-merge). When
+    | "base_branch" is null, the branch recorded in .agentio.json is used
+    | (then "main").
     |
     */
 
-    'base_branch' => env('AGENTIO_BASE_BRANCH', 'main'),
+    'base_branch' => env('AGENTIO_BASE_BRANCH'),
 
     'merge_policy' => env('AGENTIO_MERGE_POLICY'),
 

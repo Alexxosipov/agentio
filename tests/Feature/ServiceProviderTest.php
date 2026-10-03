@@ -10,8 +10,8 @@ use Obrazmisli\Agentio\YouTrack\Client;
 use Obrazmisli\Agentio\YouTrack\IssueRepository;
 
 it('merges the package config with the documented defaults', function () {
-    expect(config('agentio.youtrack.project'))->toBe('TP')
-        ->and(config('agentio.base_branch'))->toBe('main')
+    expect(config('agentio.youtrack.project'))->toBeNull()
+        ->and(config('agentio.base_branch'))->toBeNull()
         ->and(config('agentio.merge_policy'))->toBeNull()
         ->and(config('agentio.max_parallel'))->toBe(2)
         ->and(config('agentio.max_parallel_tasks'))->toBe(2)
@@ -39,6 +39,22 @@ it('builds the YouTrack client and repository from the config', function () {
         ->and(app(Client::class)->baseUrl())->toBe('https://example.youtrack.cloud')
         ->and($repository->project())->toBe('DV')
         ->and($repository->client())->toBe(app(Client::class));
+});
+
+it('takes the project from .agentio.json, then TP, when the config has none', function () {
+    $project = hostProject();
+
+    expect(app(IssueRepository::class)->project())->toBe('TP');
+
+    file_put_contents($project.'/.agentio.json', json_encode(['project' => 'AB']));
+    app()->forgetInstance(IssueRepository::class);
+
+    expect(app(IssueRepository::class)->project())->toBe('AB');
+
+    config(['agentio.youtrack.project' => 'CD']);
+    app()->forgetInstance(IssueRepository::class);
+
+    expect(app(IssueRepository::class)->project())->toBe('CD');
 });
 
 it('resolves an unconfigured client without failing', function () {

@@ -322,7 +322,23 @@ it('reports missing preconditions with hints', function () {
         ->expectsOutputToContain('Fix: git repository')
         ->expectsOutputToContain('Fix: Claude Code CLI (/nonexistent/claude)')
         ->expectsOutputToContain('Fix: YOUTRACK_URL')
-        ->expectsOutputToContain('Set AGENTIO_PROJECT=XY in .env')
+        ->expectsOutputToContain('Set AGENTIO_PROJECT=XY in .env or remove it (the config says TP, the files are installed for XY)')
+        ->assertSuccessful();
+});
+
+it('does not ask to set the project or the base branch when the config leaves them to .agentio.json', function () {
+    hostProject();
+    config(['agentio.youtrack.project' => null, 'agentio.base_branch' => null]);
+
+    $this->artisan('agentio:install', ['--project' => 'XY', '--base-branch' => 'develop', '--dry-run' => true])
+        ->doesntExpectOutputToContain('Set AGENTIO_PROJECT')
+        ->doesntExpectOutputToContain('Set AGENTIO_BASE_BRANCH')
+        ->assertSuccessful();
+
+    config(['agentio.base_branch' => 'main']);
+
+    $this->artisan('agentio:install', ['--project' => 'XY', '--base-branch' => 'develop', '--dry-run' => true])
+        ->expectsOutputToContain('Set AGENTIO_BASE_BRANCH=develop in .env or remove it (the config says main)')
         ->assertSuccessful();
 });
 

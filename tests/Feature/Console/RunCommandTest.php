@@ -61,6 +61,14 @@ it('runs the loop script with the config in its environment and streams its outp
         ->assertSuccessful();
 });
 
+it('passes the project and the base branch of .agentio.json when the config has none', function () {
+    $project = projectWithFakeLoop();
+    file_put_contents($project.'/.agentio.json', json_encode(['project' => 'AB', 'base_branch' => 'trunk']));
+    config(['agentio.youtrack.project' => null, 'agentio.base_branch' => null]);
+
+    $this->artisan('agentio:run')->expectsOutputToContain('env: project=AB base=trunk policy=local-branch')->assertSuccessful();
+});
+
 it('returns the exit code of the loop', function () {
     projectWithFakeLoop(exitCode: 3);
 
