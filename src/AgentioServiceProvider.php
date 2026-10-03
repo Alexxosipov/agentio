@@ -10,6 +10,8 @@ use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\ServiceProvider;
 use Obrazmisli\Agentio\Console\Commands\InstallCommand;
+use Obrazmisli\Agentio\Console\Commands\RunCommand;
+use Obrazmisli\Agentio\Console\Commands\StatusCommand;
 use Obrazmisli\Agentio\Dashboard\YouTrackSource;
 use Obrazmisli\Agentio\Http\Middleware\Authorize;
 use Obrazmisli\Agentio\Process\StageMap;
@@ -68,6 +70,8 @@ final class AgentioServiceProvider extends ServiceProvider
 
         $this->commands([
             InstallCommand::class,
+            RunCommand::class,
+            StatusCommand::class,
         ]);
 
         $this->publishes([
