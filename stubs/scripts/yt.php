@@ -538,6 +538,79 @@ function removeTag(string $id, string $tag): void
     }
 }
 
+/**
+ * Knowledge base articles of the project, keyed by readable id; children keep the YouTrack order.
+ *
+ * @return array<string, array{id: string, summary: string, parent: ?string, children: list<string>}>
+ */
+function projectArticles(): array
+{
+    $articles = [];
+
+    for ($skip = 0; ; $skip += 200) {
+        $page = api('GET', 'articles', [
+            'query' => 'project: '.PROJECT,
+            'fields' => 'idReadable,summary,project(shortName),parentArticle(idReadable),childArticles(idReadable)',
+            '$top' => 200,
+            '$skip' => $skip,
+        ]);
+
+        foreach ($page as $raw) {
+            if (! is_string($raw['idReadable'] ?? null) || ($raw['project']['shortName'] ?? PROJECT) !== PROJECT) {
+                continue;
+            }
+
+            $articles[$raw['idReadable']] = [
+                'id' => $raw['idReadable'],
+                'summary' => (string) ($raw['summary'] ?? ''),
+                'parent' => $raw['parentArticle']['idReadable'] ?? null,
+                'children' => array_values(array_filter(array_map(fn (array $child): ?string => $child['idReadable'] ?? null, $raw['childArticles'] ?? []))),
+            ];
+        }
+
+        if (count($page) < 200) {
+            return $articles;
+        }
+    }
+}
+
+/**
+ * The article with its descendants, down to $depth levels below it (null: all of them).
+ *
+ * @param  array<string, array{id: string, summary: string, parent: ?string, children: list<string>}>  $articles
+ * @param  array<string, true>  $seen
+ * @return array{id: string, summary: string, children: list<array<string, mixed>>}
+ */
+function articleTree(array $articles, string $id, ?int $depth, array &$seen = []): array
+{
+    $seen[$id] = true;
+    $article = $articles[$id];
+    $children = $article['children'];
+
+    foreach ($articles as $candidate) {
+        if ($candidate['parent'] === $id && ! in_array($candidate['id'], $children, true)) {
+            $children[] = $candidate['id'];
+        }
+    }
+
+    $nodes = [];
+
+    if ($depth === null || $depth > 0) {
+        foreach ($children as $child) {
+            if (isset($articles[$child]) && ! isset($seen[$child])) {
+                $nodes[] = articleTree($articles, $child, $depth === null ? null : $depth - 1, $seen);
+            }
+        }
+    }
+
+    return ['id' => $id, 'summary' => $article['summary'], 'children' => $nodes];
+}
+
+function articleNumber(string $id): int
+{
+    return (int) mb_substr((string) mb_strrchr($id, '-'), 1);
+}
+
 function defaultOwner(string $worktree): string
 {
     return gethostname().':'.$worktree;
@@ -959,6 +1032,35 @@ switch ($command) {
         });
         break;
 
+    case 'kb-tree':
+        $articles = projectArticles();
+        $root = $positional[1] ?? null;
+        $depth = is_string($options['depth'] ?? null) ? max(0, (int) $options['depth']) : null;
+
+        if ($root !== null && ! isset($articles[$root])) {
+            fail("Article {$root} is not in the knowledge base of project ".PROJECT.'.');
+        }
+
+        $tops = $root !== null ? [$root] : array_keys(array_filter($articles, fn (array $article): bool => $article['parent'] === null || ! isset($articles[$article['parent']])));
+        usort($tops, fn (string $left, string $right): int => articleNumber($left) <=> articleNumber($right));
+        $seen = [];
+        $tree = array_map(fn (string $id): array => articleTree($articles, $id, $depth, $seen), $tops);
+
+        output($tree, $json, function (array $tree): void {
+            $print = function (array $node, int $level) use (&$print): void {
+                echo str_repeat('  ', $level).sprintf('%-9s %s', $node['id'], $node['summary']).PHP_EOL;
+
+                foreach ($node['children'] as $child) {
+                    $print($child, $level + 1);
+                }
+            };
+
+            foreach ($tree as $node) {
+                $print($node, 0);
+            }
+        });
+        break;
+
     case 'slug':
         echo slug(getIssue($positional[1] ?? fail('Usage: slug <ID>'))['summary']).PHP_EOL;
         break;
@@ -989,6 +1091,9 @@ switch ($command) {
                                        Fix Stage where it does not match State (all project issues by default).
                                        Stage = Backlog for Backlog/Analysis/Ready/Blocked, Develop for In Progress,
                                        Review for Review, Done for Done. Skipped when the project has no Stage field
+              kb-tree [<ARTICLE>] [--depth=N]
+                                       Knowledge base tree with article ids: the whole project, or the article and
+                                       its descendants (--depth=1: only its direct children)
               slug <ID>                Branch slug for an issue summary
 
             HELP;
