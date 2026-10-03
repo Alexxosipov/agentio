@@ -136,17 +136,17 @@ final readonly class IssueRepository
     }
 
     /**
-     * The latest comments across the project, newest first.
+     * The latest comments across the project (or of the issues matching $issueQuery), newest first.
      *
      * @return list<Comment>
      *
      * @throws YouTrackException
      */
-    public function recentComments(int $limit = 50): array
+    public function recentComments(int $limit = 50, ?string $issueQuery = null): array
     {
         $comments = [];
 
-        foreach ($this->client->commentActivities('project: '.$this->project, $limit) as $activity) {
+        foreach ($this->client->commentActivities($issueQuery ?? 'project: '.$this->project, $limit) as $activity) {
             foreach (is_array($activity['added'] ?? null) ? $activity['added'] : [] as $added) {
                 if (is_array($added)) {
                     $comments[] = Comment::fromApi([...$added, 'author' => $activity['author'] ?? null]);
@@ -158,15 +158,28 @@ final readonly class IssueRepository
     }
 
     /**
-     * The latest [AGENT:*] comments across the project, newest first.
+     * The latest [AGENT:*] comments across the project (or of the issues matching $issueQuery), newest first.
      *
      * @return list<AgentComment>
      *
      * @throws YouTrackException
      */
-    public function recentAgentComments(int $limit = 50): array
+    public function recentAgentComments(int $limit = 50, ?string $issueQuery = null): array
     {
-        return array_values(array_filter(array_map(AgentComment::fromComment(...), $this->recentComments($limit))));
+        return array_values(array_filter(array_map(AgentComment::fromComment(...), $this->recentComments($limit, $issueQuery))));
+    }
+
+    /**
+     * The latest [AGENT:*] comments of the given issues, newest first.
+     *
+     * @param  list<string>  $ids
+     * @return list<AgentComment>
+     *
+     * @throws YouTrackException
+     */
+    public function recentAgentCommentsOf(array $ids, int $limit = 50): array
+    {
+        return $ids === [] ? [] : $this->recentAgentComments($limit, 'issue ID: '.implode(', ', $ids));
     }
 
     /**

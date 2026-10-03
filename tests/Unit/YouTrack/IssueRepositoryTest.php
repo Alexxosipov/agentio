@@ -156,6 +156,18 @@ it('reads the latest comments of the project from the activity stream', function
     Http::assertSent(fn (Request $request): bool => $request['issueQuery'] === 'project: TP');
 });
 
+it('reads the latest agent comments of selected issues', function () {
+    Http::fake(['yt.example.com/api/activities*' => Http::response([
+        ['id' => 'a-1', 'added' => [['id' => '7-1', 'text' => "[AGENT:START]\nowner: `h:/w#TP-4`", 'issue' => ['idReadable' => 'TP-4']]]],
+    ])]);
+
+    expect(repository()->recentAgentCommentsOf([]))->toBe([])
+        ->and(repository()->recentAgentCommentsOf(['TP-2', 'TP-4'], 30)[0]->owner())->toBe('h:/w#TP-4');
+
+    Http::assertSentCount(1);
+    Http::assertSent(fn (Request $request): bool => $request['issueQuery'] === 'issue ID: TP-2, TP-4' && (int) $request['$top'] === 30);
+});
+
 it('links to issues in YouTrack', function () {
     expect(repository()->url('TP-2'))->toBe('https://yt.example.com/issue/TP-2');
 });

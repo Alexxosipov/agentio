@@ -54,11 +54,15 @@ return [
     |--------------------------------------------------------------------------
     |
     | Where scripts/agent-loop.sh writes its files: loop.log, <ID>.log and
-    | <ID>.pid for epic sessions, plan-<ID>.log for planning sessions.
+    | <ID>.pid for epic sessions, plan-<ID>.log for planning sessions. The
+    | loop writes local time; "timezone" is that time zone (null detects
+    | the machine's time zone from $TZ, /etc/timezone or /etc/localtime).
     |
     */
 
-    'logs_path' => storage_path('logs/agents'),
+    'logs_path' => env('AGENTIO_LOGS_PATH', storage_path('logs/agents')),
+
+    'timezone' => env('AGENTIO_TIMEZONE'),
 
     /*
     |--------------------------------------------------------------------------
@@ -87,6 +91,8 @@ return [
     | The process dashboard served at /{path}. Access is granted by the
     | "viewAgentio" gate: always in the local environment, otherwise to the
     | listed emails. Override it with Agentio::auth(fn ($request) => ...).
+    | The page polls its JSON endpoints every "poll" seconds; YouTrack
+    | responses are cached for "cache" seconds (0 disables the cache).
     |
     */
 
@@ -96,6 +102,7 @@ return [
         'domain' => env('AGENTIO_UI_DOMAIN'),
         'middleware' => ['web'],
         'poll' => (int) env('AGENTIO_UI_POLL', 5),
+        'cache' => (int) env('AGENTIO_UI_CACHE', 5),
         'allowed_emails' => array_values(array_filter(array_map(
             'trim',
             explode(',', (string) env('AGENTIO_ALLOWED_EMAILS', '')),

@@ -9,9 +9,11 @@ use Illuminate\Contracts\Foundation\Application;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\ServiceProvider;
+use Obrazmisli\Agentio\Dashboard\YouTrackSource;
 use Obrazmisli\Agentio\Http\Middleware\Authorize;
 use Obrazmisli\Agentio\Process\StageMap;
 use Obrazmisli\Agentio\Runtime\LoopState;
+use Obrazmisli\Agentio\Runtime\SystemTimezone;
 use Obrazmisli\Agentio\YouTrack\Client;
 use Obrazmisli\Agentio\YouTrack\IssueRepository;
 
@@ -39,7 +41,10 @@ final class AgentioServiceProvider extends ServiceProvider
         $this->app->singleton(LoopState::class, fn (Application $app): LoopState => new LoopState(
             $this->configString('agentio.logs_path') ?? storage_path('logs/agents'),
             base_path('.agent-stop'),
+            $this->configString('agentio.timezone') ?? SystemTimezone::detect(),
         ));
+
+        $this->app->scoped(YouTrackSource::class);
 
         $this->app->singleton(StageMap::class, fn (Application $app): StageMap => new StageMap(
             array_filter((array) config('agentio.stage_map', []), is_string(...)),
