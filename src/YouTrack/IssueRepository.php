@@ -49,7 +49,25 @@ final readonly class IssueRepository
      */
     public function projectIssues(string $filter = ''): array
     {
-        return $this->search(trim('project: '.$this->project.' '.$filter));
+        return $this->search($this->projectQuery($filter));
+    }
+
+    /**
+     * The search query of the project's issues, optionally narrowed, e.g. "project: TP Type: Epic".
+     */
+    public function projectQuery(string $filter = ''): string
+    {
+        return trim('project: '.$this->project.' '.$filter);
+    }
+
+    /**
+     * The search query of the given issues.
+     *
+     * @param  list<string>  $ids
+     */
+    public static function idQuery(array $ids): string
+    {
+        return 'issue ID: '.implode(', ', $ids);
     }
 
     /**
@@ -144,9 +162,20 @@ final readonly class IssueRepository
      */
     public function recentComments(int $limit = 50, ?string $issueQuery = null): array
     {
+        return self::commentsFromActivities($this->client->commentActivities($issueQuery ?? $this->projectQuery(), $limit));
+    }
+
+    /**
+     * The comments added by comment activities (see Client::commentActivities()), in the same order.
+     *
+     * @param  list<array<array-key, mixed>>  $activities
+     * @return list<Comment>
+     */
+    public static function commentsFromActivities(array $activities): array
+    {
         $comments = [];
 
-        foreach ($this->client->commentActivities($issueQuery ?? 'project: '.$this->project, $limit) as $activity) {
+        foreach ($activities as $activity) {
             foreach (is_array($activity['added'] ?? null) ? $activity['added'] : [] as $added) {
                 if (is_array($added)) {
                     $comments[] = Comment::fromApi([...$added, 'author' => $activity['author'] ?? null]);
@@ -179,7 +208,7 @@ final readonly class IssueRepository
      */
     public function recentAgentCommentsOf(array $ids, int $limit = 50): array
     {
-        return $ids === [] ? [] : $this->recentAgentComments($limit, 'issue ID: '.implode(', ', $ids));
+        return $ids === [] ? [] : $this->recentAgentComments($limit, self::idQuery($ids));
     }
 
     /**

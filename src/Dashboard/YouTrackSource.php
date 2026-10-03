@@ -4,12 +4,12 @@ declare(strict_types=1);
 
 namespace Obrazmisli\Agentio\Dashboard;
 
-use Carbon\CarbonImmutable;
 use Closure;
 use Illuminate\Support\Facades\Cache;
 use Obrazmisli\Agentio\Process\AgentComment;
 use Obrazmisli\Agentio\Process\AgentComments;
 use Obrazmisli\Agentio\Process\ReadinessGraph;
+use Obrazmisli\Agentio\YouTrack\Client;
 use Obrazmisli\Agentio\YouTrack\Comment;
 use Obrazmisli\Agentio\YouTrack\Issue;
 use Obrazmisli\Agentio\YouTrack\IssueRepository;
@@ -20,9 +20,9 @@ use Obrazmisli\Agentio\YouTrack\YouTrackException;
  * browsers do not hit YouTrack on every request. Failures are cached as well (for at least
  * FAILURE_TTL seconds) and reported through health() instead of breaking the page.
  *
- * Entries are stored as serialized strings and restored with an explicit list of allowed classes:
- * cache stores of applications with `cache.serializable_classes` = false (the Laravel 13 default)
- * would otherwise turn the cached objects into __PHP_Incomplete_Class.
+ * Only the decoded JSON answers are cached, never objects: cache stores of applications with
+ * `cache.serializable_classes` = false (the Laravel 13 default) turn cached objects into
+ * __PHP_Incomplete_Class.
  */
 final class YouTrackSource
 {
@@ -31,9 +31,6 @@ final class YouTrackSource
      * which should not hold up every poll of every open dashboard.
      */
     public const int FAILURE_TTL = 30;
-
-    /** Classes a cached YouTrack answer may contain. */
-    private const array CACHED_CLASSES = [Issue::class, Comment::class, AgentComment::class, CarbonImmutable::class];
 
     private ?string $error = null;
 
@@ -122,9 +119,7 @@ final class YouTrackSource
      */
     public function issues(): array
     {
-        $issues = $this->remember('issues', fn (): array => $this->repository->projectIssues());
-
-        return is_array($issues) ? array_values(array_filter($issues, fn (mixed $issue): bool => $issue instanceof Issue)) : [];
+        return array_map(Issue::fromApi(...), $this->rows('issues', fn (): array => $this->client()->searchIssues($this->repository->projectQuery())));
     }
 
     /**
@@ -144,15 +139,10 @@ final class YouTrackSource
      */
     public function agentComments(string $id): AgentComments
     {
-        if (! isset($this->comments[$id])) {
-            $comments = $this->remember('comments:'.$id, fn (): array => $this->repository->comments($id));
-
-            $this->comments[$id] = AgentComments::fromComments(
-                is_array($comments) ? array_filter($comments, fn (mixed $comment): bool => $comment instanceof Comment) : [],
-            );
-        }
-
-        return $this->comments[$id];
+        return $this->comments[$id] ??= AgentComments::fromComments(array_map(
+            fn (array $raw): Comment => Comment::fromApi($raw, $id),
+            $this->rows('comments:'.$id, fn (): array => $this->client()->comments($id)),
+        ));
     }
 
     /**
@@ -165,12 +155,14 @@ final class YouTrackSource
      */
     public function recentAgentComments(int $limit, ?array $ids = null): array
     {
-        $key = 'recent:'.$limit.($ids === null ? '' : ':'.hash('xxh128', implode(',', $ids)));
-        $comments = $this->remember($key, fn (): array => $ids === null
-            ? $this->repository->recentAgentComments($limit)
-            : $this->repository->recentAgentCommentsOf($ids, $limit));
+        if ($ids === []) {
+            return [];
+        }
 
-        return is_array($comments) ? array_values(array_filter($comments, fn (mixed $comment): bool => $comment instanceof AgentComment)) : [];
+        $query = $ids === null ? $this->repository->projectQuery() : IssueRepository::idQuery($ids);
+        $activities = $this->rows('recent:'.$limit.':'.hash('xxh128', $query), fn (): array => $this->client()->commentActivities($query, $limit));
+
+        return array_values(array_filter(array_map(AgentComment::fromComment(...), IssueRepository::commentsFromActivities($activities))));
     }
 
     /**
@@ -218,7 +210,7 @@ final class YouTrackSource
     private function external(string $id): ?Issue
     {
         try {
-            $issue = $this->remember('issue:'.$id, fn (): Issue => $this->repository->find($id));
+            $raw = $this->remember('issue:'.$id, fn (): array => $this->client()->issue($id, Client::ISSUE_FIELDS));
         } catch (YouTrackException $exception) {
             if ($exception->isNotFound()) {
                 return null;
@@ -227,10 +219,33 @@ final class YouTrackSource
             throw $exception;
         }
 
-        return $issue instanceof Issue ? $issue : null;
+        return is_array($raw) ? Issue::fromApi($raw) : null;
+    }
+
+    private function client(): Client
+    {
+        return $this->repository->client();
     }
 
     /**
+     * A cached list of YouTrack entities (decoded JSON objects).
+     *
+     * @param  Closure(): array<array-key, mixed>  $read
+     * @return list<array<array-key, mixed>>
+     *
+     * @throws YouTrackException
+     */
+    private function rows(string $key, Closure $read): array
+    {
+        $rows = $this->remember($key, $read);
+
+        return is_array($rows) ? array_values(array_filter($rows, is_array(...))) : [];
+    }
+
+    /**
+     * Read through the cache. Only the decoded JSON of YouTrack is cached (arrays and scalars), so any cache
+     * store works, including ones that refuse to unserialize objects (`cache.serializable_classes`).
+     *
      * @param  Closure(): mixed  $read
      *
      * @throws YouTrackException
@@ -242,16 +257,16 @@ final class YouTrackSource
         }
 
         $cacheKey = $this->cacheKey($key);
-        $envelope = self::unpack(Cache::get($cacheKey));
+        $envelope = Cache::get($cacheKey);
 
-        if ($envelope === null) {
+        if (! is_array($envelope) || ! (array_key_exists('value', $envelope) || is_string($envelope['error'] ?? null))) {
             try {
                 $envelope = ['value' => $read()];
             } catch (YouTrackException $exception) {
                 $envelope = ['error' => $exception->getMessage(), 'status' => $exception->status];
             }
 
-            Cache::put($cacheKey, serialize($envelope), isset($envelope['error']) ? max($this->ttl, self::FAILURE_TTL) : $this->ttl);
+            Cache::put($cacheKey, $envelope, isset($envelope['error']) ? max($this->ttl, self::FAILURE_TTL) : $this->ttl);
         }
 
         if (is_string($envelope['error'] ?? null)) {
@@ -259,18 +274,6 @@ final class YouTrackSource
         }
 
         return $envelope['value'] ?? null;
-    }
-
-    /**
-     * A cached envelope, or null for a missing, foreign or corrupt entry.
-     *
-     * @return array<array-key, mixed>|null
-     */
-    private static function unpack(mixed $cached): ?array
-    {
-        $envelope = is_string($cached) ? @unserialize($cached, ['allowed_classes' => self::CACHED_CLASSES]) : null;
-
-        return is_array($envelope) ? $envelope : null;
     }
 
     private function cacheKey(string $key): string

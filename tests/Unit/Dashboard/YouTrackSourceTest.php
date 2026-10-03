@@ -99,8 +99,8 @@ it('reads YouTrack again when a cache entry is not its own', function (mixed $en
 
     Http::assertSentCount(2);
 })->with([
-    'array from an older version' => [['value' => []]],
-    'corrupt string' => ['not serialized'],
+    'string' => ['not an envelope'],
+    'array without a value' => [['something' => 1]],
 ]);
 
 it('reads YouTrack every time when the cache is disabled', function () {
