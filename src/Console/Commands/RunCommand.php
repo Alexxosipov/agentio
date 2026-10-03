@@ -6,6 +6,7 @@ namespace Obrazmisli\Agentio\Console\Commands;
 
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Route;
+use Obrazmisli\Agentio\Install\EnvFile;
 use Obrazmisli\Agentio\Install\Manifest;
 use Obrazmisli\Agentio\Install\Preconditions;
 use Obrazmisli\Agentio\Runtime\LoopState;
@@ -94,15 +95,22 @@ final class RunCommand extends Command
     }
 
     /**
-     * The environment of the loop: config values under the names scripts/agent-loop.sh reads.
+     * The environment of the loop: config values under the names scripts/agent-loop.sh reads. The variables
+     * Laravel loaded from the project's .env (APP_ENV, APP_URL, APP_KEY, DB_*, …) are removed (false): they
+     * would leak into the agents' sessions and override the .env of every epic worktree and the test
+     * environment of phpunit.xml. The agentio and YouTrack ones stay.
      *
-     * @return array<string, string>
+     * @return array<string, string|false>
      */
     public function environment(string $basePath, MergePolicy $policy, LoopState $loop): array
     {
         $manifest = Manifest::load($basePath);
+        $loaded = array_filter(
+            (new EnvFile($basePath.'/.env'))->keys(),
+            fn (string $key): bool => ! str_starts_with($key, 'AGENTIO_') && ! str_starts_with($key, 'YOUTRACK_'),
+        );
 
-        return array_filter([
+        return [...array_fill_keys($loaded, false), ...array_filter([
             'YOUTRACK_URL' => $this->configString('agentio.youtrack.url'),
             'YOUTRACK_TOKEN' => $this->configString('agentio.youtrack.token'),
             'AGENTIO_PROJECT' => $this->configString('agentio.youtrack.project') ?? $manifest->project,
@@ -116,7 +124,7 @@ final class RunCommand extends Command
             'AGENT_LOG_DIR' => $loop->logsPath(),
             'AGENTIO_TEST_COMMAND' => $this->configString('agentio.tests.command'),
             'AGENTIO_FULL_TEST_COMMAND' => $this->configString('agentio.tests.full_command'),
-        ], fn (?string $value): bool => $value !== null);
+        ], fn (?string $value): bool => $value !== null)];
     }
 
     /**

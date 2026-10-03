@@ -74,6 +74,18 @@ final readonly class EnvFile
         return $prefix."# agentio\n".implode("\n", $appended)."\n";
     }
 
+    /**
+     * The keys the file defines, in order.
+     *
+     * @return list<string>
+     */
+    public function keys(): array
+    {
+        preg_match_all('/^[ \t]*(?:export[ \t]+)?([A-Za-z_][A-Za-z0-9_.]*)[ \t]*=/m', $this->content(), $matches);
+
+        return array_values(array_unique($matches[1]));
+    }
+
     public function content(): string
     {
         return $this->exists() ? (string) file_get_contents($this->path) : '';

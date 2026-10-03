@@ -21,6 +21,7 @@ function projectWithFakeLoop(int $exitCode = 0): string
         echo "cwd: \$(pwd)"
         echo "env: project=\$AGENTIO_PROJECT base=\$BASE_BRANCH policy=\$MERGE_POLICY parallel=\$MAX_PARALLEL tasks=\$MAX_PARALLEL_TASKS interval=\$AGENT_LOOP_INTERVAL"
         echo "env: worktrees=\$WORKTREES_DIR claude=\$CLAUDE_BIN logs=\$AGENT_LOG_DIR url=\$YOUTRACK_URL token=\${YOUTRACK_TOKEN:+set} tests=\${AGENTIO_TEST_COMMAND:-default}"
+        echo "env: app=\${APP_ENV:-unset} db=\${DB_DATABASE:-unset} timezone=\${AGENTIO_TIMEZONE:-unset} home=\${HOME:+set}"
         echo "to stderr" >&2
         exit {$exitCode}
         BASH);
@@ -59,6 +60,27 @@ it('runs the loop script with the config in its environment and streams its outp
         ->expectsOutputToContain('env: project=XY base=develop policy=pull-request parallel=3 tasks=4 interval=60')
         ->expectsOutputToContain("env: worktrees={$project}/../worktrees claude={$project}/bin/claude logs={$project}/storage/logs/agents url=https://yt.example.com token=set tests=vendor/bin/pest --compact")
         ->assertSuccessful();
+});
+
+it('does not pass the variables Laravel loaded from the project .env to the loop', function () {
+    $project = projectWithFakeLoop();
+    file_put_contents($project.'/.env', "APP_ENV=local\nexport DB_DATABASE=/srv/main.sqlite\nAGENTIO_TIMEZONE=UTC\n# NOT_A_KEY=1\n");
+    $loaded = ['APP_ENV' => 'local', 'DB_DATABASE' => '/srv/main.sqlite', 'AGENTIO_TIMEZONE' => 'UTC'];
+
+    // As Laravel's dotenv repository does: $_ENV, $_SERVER and putenv().
+    foreach ($loaded as $key => $value) {
+        [$_ENV[$key], $_SERVER[$key]] = [$value, $value];
+        putenv("{$key}={$value}");
+    }
+
+    try {
+        $this->artisan('agentio:run')->expectsOutputToContain('env: app=unset db=unset timezone=UTC home=set')->assertSuccessful();
+    } finally {
+        foreach (array_keys($loaded) as $key) {
+            unset($_ENV[$key], $_SERVER[$key]);
+            putenv($key);
+        }
+    }
 });
 
 it('passes the project and the base branch of .agentio.json when the config has none', function () {
