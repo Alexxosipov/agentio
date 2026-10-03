@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Obrazmisli\Agentio\Dashboard;
 
+use Carbon\CarbonImmutable;
 use Closure;
 use Illuminate\Support\Facades\Cache;
 use Obrazmisli\Agentio\Process\AgentComment;
@@ -18,9 +19,16 @@ use Obrazmisli\Agentio\YouTrack\YouTrackException;
  * YouTrack data for the dashboard: the IssueRepository behind a short cache, so that polling
  * browsers do not hit YouTrack on every request. Failures are cached as well (for the same time)
  * and reported through health() instead of breaking the page.
+ *
+ * Entries are stored as serialized strings and restored with an explicit list of allowed classes:
+ * cache stores of applications with `cache.serializable_classes` = false (the Laravel 13 default)
+ * would otherwise turn the cached objects into __PHP_Incomplete_Class.
  */
 final class YouTrackSource
 {
+    /** Classes a cached YouTrack answer may contain. */
+    private const array CACHED_CLASSES = [Issue::class, Comment::class, AgentComment::class, CarbonImmutable::class];
+
     private ?string $error = null;
 
     private ?ReadinessGraph $graph = null;
@@ -227,19 +235,36 @@ final class YouTrackSource
             return $read();
         }
 
-        $envelope = Cache::remember($this->cacheKey($key), $this->ttl, function () use ($read): array {
-            try {
-                return ['value' => $read()];
-            } catch (YouTrackException $exception) {
-                return ['error' => $exception->getMessage(), 'status' => $exception->status];
-            }
-        });
+        $cacheKey = $this->cacheKey($key);
+        $envelope = self::unpack(Cache::get($cacheKey));
 
-        if (isset($envelope['error'])) {
-            throw new YouTrackException($envelope['error'], $envelope['status'] ?? null);
+        if ($envelope === null) {
+            try {
+                $envelope = ['value' => $read()];
+            } catch (YouTrackException $exception) {
+                $envelope = ['error' => $exception->getMessage(), 'status' => $exception->status];
+            }
+
+            Cache::put($cacheKey, serialize($envelope), $this->ttl);
+        }
+
+        if (is_string($envelope['error'] ?? null)) {
+            throw new YouTrackException($envelope['error'], is_int($envelope['status'] ?? null) ? $envelope['status'] : null);
         }
 
         return $envelope['value'] ?? null;
+    }
+
+    /**
+     * A cached envelope, or null for a missing, foreign or corrupt entry.
+     *
+     * @return array<array-key, mixed>|null
+     */
+    private static function unpack(mixed $cached): ?array
+    {
+        $envelope = is_string($cached) ? @unserialize($cached, ['allowed_classes' => self::CACHED_CLASSES]) : null;
+
+        return is_array($envelope) ? $envelope : null;
     }
 
     private function cacheKey(string $key): string

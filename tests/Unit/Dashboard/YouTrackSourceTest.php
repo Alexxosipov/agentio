@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Sleep;
 use Obrazmisli\Agentio\Dashboard\YouTrackSource;
@@ -47,6 +48,48 @@ it('caches answers and failures for the configured time', function () {
 
     Http::assertSentCount(1);
 });
+
+it('restores cached issues from a store that does not unserialize objects (Laravel 13 default)', function () {
+    config([
+        'cache.default' => 'file',
+        'cache.stores.file.path' => hostProject().'/cache',
+        'cache.serializable_classes' => false,
+    ]);
+    Http::fake([
+        'yt.example.com/api/issues?*' => Http::response([apiIssue('TP-1', ['Type' => 'Epic', 'State' => 'Ready'])]),
+        'yt.example.com/api/activities?*' => Http::response([[
+            'author' => ['login' => 'agent'],
+            'added' => [['id' => '1', 'text' => '[AGENT:START] go', 'created' => 1791010361184, 'issue' => ['idReadable' => 'TP-1']]],
+        ]]),
+    ]);
+
+    source()->issues();
+    source()->recentAgentComments(10);
+    $issues = source()->issues();
+    $comments = source()->recentAgentComments(10);
+
+    expect($issues)->toHaveCount(1)
+        ->and($issues[0]->id)->toBe('TP-1')
+        ->and($issues[0]->updatedAt?->toIso8601String())->toBe('2026-10-03T11:39:10+00:00')
+        ->and($comments)->toHaveCount(1)
+        ->and($comments[0]->createdAt?->toIso8601String())->toBe('2026-10-03T06:52:41+00:00');
+
+    Http::assertSentCount(2);
+});
+
+it('reads YouTrack again when a cache entry is not its own', function (mixed $entry) {
+    Http::fake(['yt.example.com/api/issues?*' => Http::response([apiIssue('TP-1', ['Type' => 'Epic', 'State' => 'Ready'])])]);
+    source()->issues();
+
+    Cache::put('agentio:'.hash('xxh128', 'https://yt.example.com|TP').':issues', $entry, 60);
+
+    expect(source()->issues()[0]->id)->toBe('TP-1');
+
+    Http::assertSentCount(2);
+})->with([
+    'array from an older version' => [['value' => []]],
+    'corrupt string' => ['not serialized'],
+]);
 
 it('reads YouTrack every time when the cache is disabled', function () {
     Http::fake(['yt.example.com/api/issues?*' => Http::response([apiIssue('TP-1', ['Type' => 'Epic', 'State' => 'Ready'])])]);
