@@ -28,12 +28,11 @@ The package installs the whole setup into a Laravel project — skills, subagent
 ## Quick start
 
 1. Install the package as a dev dependency: `composer require obrazmisli/agentio --dev`.
-2. Install the cycle into the project (the project must be a git repository): `php artisan agentio:install --project=ABC`, where `ABC` is the short name of your YouTrack project.
-3. Put the connection into `.env`: `YOUTRACK_URL=https://example.youtrack.cloud`, `YOUTRACK_TOKEN=perm-...` (never commit it), `AGENTIO_PROJECT=ABC`.
-4. Configure the YouTrack project: `php artisan agentio:install --youtrack --dry-run` shows the plan, `php artisan agentio:install --youtrack` applies it and writes the knowledge base article ids into the installed skills.
-5. Commit the installed files to the base branch (`.claude/`, `scripts/`, `docs/`, `CLAUDE.md`, `.gitignore`, `.env.example`, `.agentio.json`, `config/agentio.php`): epic worktrees are created from it.
-6. File an idea in YouTrack (Type `Idea` or the `idea` tag, State `Backlog`), check what the loop would do with `php artisan agentio:run --dry-run`, then start it: `php artisan agentio:run`.
-7. Watch the agents at `/agentio` or with `php artisan agentio:status`, answer `[AGENT:BLOCKED]` comments, and accept epics that reach `Review` by merging their `epic/<ID>-<slug>` branch.
+2. Install the cycle into the project (the project must be a git repository): `php artisan agentio:install`. It asks for the YouTrack URL, a permanent token (hidden input) and the project short name (`ABC`), checks the access, offers to create the project when it does not exist, writes the connection to `.env` and offers to configure the YouTrack project (fields, tags, saved searches, knowledge base). `--youtrack --dry-run` shows that setup plan without changing anything.
+3. Start `claude` in the project once and accept the trust dialog: the `youtrack` MCP server from `.mcp.json` connects with the token from `.claude/settings.local.json` — no `export`, no `claude mcp add`.
+4. Commit the installed files to the base branch (`.claude/` without `settings.local.json`, `.mcp.json`, `scripts/`, `docs/`, `CLAUDE.md`, `.gitignore`, `.env.example`, `.agentio.json`, `config/agentio.php`): epic worktrees are created from it. `.env` and `.claude/settings.local.json` hold the token and stay local (both are added to `.gitignore`).
+5. File an idea in YouTrack (Type `Idea` or the `idea` tag, State `Backlog`), check what the loop would do with `php artisan agentio:run --dry-run`, then start it: `php artisan agentio:run`.
+6. Watch the agents at `/agentio` or with `php artisan agentio:status`, answer `[AGENT:BLOCKED]` comments, and accept epics that reach `Review` by merging their `epic/<ID>-<slug>` branch.
 
 ## Installation
 
@@ -58,12 +57,27 @@ composer require obrazmisli/agentio:@dev --dev
 ## Setting up a project
 
 ```bash
-php artisan agentio:install --project=ABC                # files for the agents, CLAUDE.md, .gitignore, .env.example, config
+php artisan agentio:install                              # asks for the connection and the project, installs everything
 php artisan agentio:install --youtrack --dry-run         # plan the YouTrack setup (changes nothing)
 php artisan agentio:install --youtrack                   # apply it and record the knowledge base ids
 ```
 
-Then set the connection in `.env` (never commit the token):
+In a terminal the command asks:
+
+1. **YouTrack URL** — default `YOUTRACK_URL` (environment or `.env`); leave it empty to install the files without YouTrack.
+2. **Token** — hidden input; when a token is already set it offers to keep it. Create a permanent token in YouTrack → Profile → Account Security → Tokens.
+3. The access is checked with `GET /api/users/me`; on an error (wrong URL, rejected token) it explains what failed and asks again.
+4. **Project short name** — default `.agentio.json`, then `AGENTIO_PROJECT`. When the project does not exist (or the token cannot see it), it offers to create it (`POST /api/admin/projects`, with the token owner as the project leader; the token needs the permission to create projects) and asks for its name.
+5. Whether to configure the YouTrack project now (the same as `--youtrack`).
+
+Options given on the command line are not asked again. Without a terminal or with `--no-interaction` nothing is asked: the values come from the options and the environment (`YOUTRACK_URL`, `YOUTRACK_TOKEN`, `AGENTIO_PROJECT`, `.env`), the access is checked when both the URL and the token are known (a rejected token fails the command), and a missing project is created only with `--create-project`:
+
+```bash
+YOUTRACK_TOKEN=perm-... php artisan agentio:install --no-interaction \
+    --youtrack-url=https://example.youtrack.cloud --project=ABC --create-project --project-name="Our product" --youtrack
+```
+
+The connection is written to `.env` (created when missing; existing keys are replaced on their line, new ones appended):
 
 ```dotenv
 YOUTRACK_URL=https://example.youtrack.cloud
@@ -71,16 +85,41 @@ YOUTRACK_TOKEN=perm-...
 AGENTIO_PROJECT=ABC
 ```
 
-and follow the checklist the command prints: connect the YouTrack MCP server for your interactive sessions (`claude mcp add --transport http youtrack https://example.youtrack.cloud/mcp --header "Authorization: Bearer <token>"`), create a Kanban board by the `Stage` field if you want one, **commit the installed files to the base branch** (epic worktrees take `.claude/` and `scripts/` from it) and try `php artisan agentio:run --dry-run`.
+The token is never printed: not in the output, not in `--dry-run`, not in error messages. Prefer the prompt or the `YOUTRACK_TOKEN` variable to `--token=`, which stays in your shell history.
+
+Then follow the checklist the command prints: start `claude` and trust the folder (see [YouTrack MCP server](#youtrack-mcp-server)), create a Kanban board by the `Stage` field if you want one, **commit the installed files to the base branch** (epic worktrees take `.claude/` and `scripts/` from it) and try `php artisan agentio:run --dry-run`.
+
+### YouTrack MCP server
+
+`agentio:install` adds the `youtrack` server to the project's `.mcp.json` (merged with what is there, e.g. `laravel-boost` from Boost; a `youtrack` server of your own is kept unless you pass `--force`) and enables it in `.claude/settings.json` (`enabledMcpjsonServers`). `.mcp.json` is committed, so it holds only variable references:
+
+```json
+{
+    "mcpServers": {
+        "youtrack": {
+            "type": "http",
+            "url": "${YOUTRACK_URL}/mcp",
+            "headers": { "Authorization": "Bearer ${YOUTRACK_TOKEN}" }
+        }
+    }
+}
+```
+
+The values come from the `env` block of `.claude/settings.local.json`, which the command writes (merged with the file, git-ignored) together with `.env`. An interactive `claude` started in the project applies that block to the `${VAR}`s of `.mcp.json` once the folder is trusted, so the server connects without `export` or `claude mcp add` (checked with Claude Code 2.1.288). Two exceptions: `claude -p` and `claude mcp get|list` do **not** read that block for the substitution — export `YOUTRACK_URL` and `YOUTRACK_TOKEN` for them (the agent loop does it itself and gives its headless sessions `.claude/agents-mcp.json`). When you rotate the token, run `agentio:install` again (or edit both `.env` and `.claude/settings.local.json`).
 
 ### `agentio:install`
 
 | Option | Meaning |
 |---|---|
+| `--youtrack-url=URL` | YouTrack URL. Default: `YOUTRACK_URL` |
+| `--token=TOKEN` | YouTrack permanent token. Default: `YOUTRACK_TOKEN` (prefer the variable or the prompt) |
 | `--project=KEY` | YouTrack project short name. Default: `.agentio.json`, then `AGENTIO_PROJECT` |
+| `--create-project` | Create the YouTrack project when it does not exist (asked when interactive) |
+| `--project-name=NAME` | Name of the project to create. Default: its short name |
 | `--base-branch=BRANCH` | Branch epic branches start from and humans merge into. Default: `.agentio.json`, then `AGENTIO_BASE_BRANCH` (`main`) |
 | `--merge-policy=POLICY` | `local-branch` (the branch stays local), `pull-request` (push + PR via `gh`) or `auto-merge`. Default: `AGENTIO_MERGE_POLICY`, then the `MERGE_POLICY:` line of `CLAUDE.md`, then `local-branch` |
-| `--youtrack` | Also configure the YouTrack project (see below) |
+| `--youtrack` | Also configure the YouTrack project (see below; asked when interactive) |
+| `--no-interaction` | Ask nothing: take the values from the options and the environment |
 | `--force` | Overwrite installed files that were edited locally |
 | `--dry-run` | Only print the plan |
 
@@ -90,10 +129,12 @@ What it installs (the stubs live in `stubs/`; `{{project}}`, `{{base_branch}}`, 
 - `.claude/agents/` — `task-developer` and `story-reviewer` subagents;
 - `.claude/hooks/guard-bash.php`, `.claude/agent-settings.json`, `.claude/agents-mcp.json` (YouTrack MCP from the environment; Laravel Boost only when the project uses it);
 - `.claude/settings.json` — **merged** with yours: allow/deny lists and enabled MCP servers are united, the guard hook is added once, everything else is kept;
+- `.mcp.json` — the `youtrack` MCP server added to yours; `.claude/settings.local.json` — `YOUTRACK_URL` and `YOUTRACK_TOKEN` in its `env` block, merged with yours (see [YouTrack MCP server](#youtrack-mcp-server));
+- `.env` — `YOUTRACK_URL`, `YOUTRACK_TOKEN`, `AGENTIO_PROJECT` (the keys whose values are known);
 - `scripts/` — `agent-loop.sh`, `epic-worktree.sh`, `yt.php`, `agent-commit.sh`, `agent-log.php`, `run-tests.sh`, `php/testing.ini`;
 - `docs/AUTONOMOUS_WORKFLOW.md` — the user manual of the cycle;
 - a block between `<!-- agentio:start -->` and `<!-- agentio:end -->` at the top of `CLAUDE.md` (replaced on reinstall, the rest of the file is untouched);
-- `/.agent-stop` and `/storage/logs/agents` in `.gitignore`, `YOUTRACK_URL=`, `YOUTRACK_TOKEN=`, `AGENTIO_PROJECT=` in `.env.example`, and `config/agentio.php` when it is not published yet.
+- `/.agent-stop`, `/storage/logs/agents`, `/.claude/settings.local.json` and `/.env` in `.gitignore` (an existing entry such as `.env` is not duplicated), `YOUTRACK_URL=`, `YOUTRACK_TOKEN=`, `AGENTIO_PROJECT=` in `.env.example`, and `config/agentio.php` when it is not published yet.
 
 The command is idempotent and safe to rerun after updating the package: a file with the expected content is left alone, a file that still has the content of the previous install is updated, and a file you edited is skipped with a warning (`--force` overwrites it). `.agentio.json` (commit it) remembers the project, the base branch, the knowledge base article ids and the hashes of the installed files.
 
@@ -221,7 +262,7 @@ The full manual for the people running the cycle is installed as `docs/AUTONOMOU
 
 - Headless agents run with `--permission-mode dontAsk`: only the commands allowed in `.claude/settings.json` run; `git push` to the base branch, force pushes, history rewrites, `composer require` and similar are denied. The loop passes these rules together with `.claude/agent-settings.json` through `--settings`, because Claude Code ignores the allow rules of a project directory whose workspace trust was never accepted, and every new epic worktree is such a directory. `.claude/agent-settings.json` forbids the agents to edit their own settings, hooks, loop scripts and `.agentio.json`.
 - `.claude/hooks/guard-bash.php` is a second line of defence for every Bash command: protected branches, destructive commands outside the project, access to secrets and to the token in the environment.
-- The YouTrack token is read only from the environment or `.env`; it is passed to the loop in its environment and to the agents' MCP config by reference (`${YOUTRACK_TOKEN}`), never written into files, logs or comments. `.env.example` gets an empty `YOUTRACK_TOKEN=`.
+- The YouTrack token lives only in the environment and in two git-ignored local files that `agentio:install` writes: `.env` and the `env` block of `.claude/settings.local.json` (for the interactive MCP server). It is passed to the loop in its environment and to the MCP configs by reference (`${YOUTRACK_TOKEN}` in `.mcp.json` and `.claude/agents-mcp.json`), and never printed or written into committed files, logs or comments. `.env.example` gets an empty `YOUTRACK_TOKEN=`.
 - Agents commit only the files of their task (`scripts/agent-commit.sh`) and never merge into the base branch; humans accept epics (unless you choose `auto-merge`).
 - Keep the dashboard behind the `viewAgentio` gate; it shows issue data and agent logs.
 

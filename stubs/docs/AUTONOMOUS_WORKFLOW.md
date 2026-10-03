@@ -113,7 +113,7 @@ EPIC берётся, когда он в `Ready`, его зависимости-�
 
 | Путь | Назначение |
 |---|---|
-| `php artisan agentio:install` | Установка и обновление всего перечисленного ниже; `--youtrack` — настройка проекта YouTrack |
+| `php artisan agentio:install` | Установка и обновление всего перечисленного ниже: спрашивает URL и токен YouTrack и ключ проекта, проверяет доступ, при необходимости создаёт проект; `--youtrack` — настройка проекта YouTrack |
 | `php artisan agentio:run` | Запуск цикла с настройками из `config/agentio.php` и `.env` (обёртка над `scripts/agent-loop.sh`) |
 | `php artisan agentio:status` | Сводка: цикл, живые сессии, счётчики и блокировки в YouTrack |
 | `/agentio` | Веб-страница наблюдения за процессом (маршрут пакета) |
@@ -128,6 +128,8 @@ EPIC берётся, когда он в `Ready`, его зависимости-�
 | `.claude/settings.json` | Белый и чёрный списки команд, хук `guard-bash` |
 | `.claude/agent-settings.json` | Дополнительные запреты для headless-агентов |
 | `.claude/agents-mcp.json` | MCP-серверы для headless-агентов (YouTrack и Laravel Boost, если он установлен) |
+| `.mcp.json` | MCP-серверы проекта для интерактивного `claude`, в том числе `youtrack` (без токена, через `${…}`) |
+| `.claude/settings.local.json` | Локальные настройки Claude Code (не коммитится): `YOUTRACK_URL` и `YOUTRACK_TOKEN` в блоке `env` для MCP `youtrack` |
 | `.claude/hooks/guard-bash.php` | Второй рубеж защиты для Bash-команд |
 | `storage/logs/agents/` | Логи цикла и сессий: `loop.log`, `loop.pid`, `<EPIC>.log`, `<EPIC>.pid`, `<EPIC>.restarts`, `<EPIC>.setup.log`, `plan-<IDEA>.log`, `plan-<IDEA>.pid` |
 | `../worktrees/<EPIC>` | Рабочие копии эпиков |
@@ -170,11 +172,15 @@ EPIC берётся, когда он в `Ready`, его зависимости-�
 1. YouTrack → аватар → **Profile** → **Account Security** → **Tokens** → **New token…**, scope: *YouTrack*.
 2. Скопируйте токен (`perm-…`). Он показывается один раз.
 
-Токен никогда не коммитится в репозиторий и не вставляется в файлы проекта.
+3. Запустите `php artisan agentio:install` и вставьте токен, когда команда спросит (ввод скрыт). Команда спрашивает URL YouTrack, токен и ключ проекта, проверяет доступ (`GET /api/users/me`; при ошибке объясняет, что не так, и спрашивает снова), предлагает создать проект, если его нет (лидер — владелец токена; нужны права на создание проектов), и предлагает сразу настроить его (как `--youtrack`, см. 2.6). Если токен уже записан, команда предложит его оставить.
+
+Без терминала или с `--no-interaction` команда ничего не спрашивает и берёт значения из опций (`--youtrack-url=`, `--token=`, `--project=`, `--create-project`, `--project-name=`) и окружения; несуществующий проект создаётся только с `--create-project`. Токен не печатается нигде — ни в выводе, ни в `--dry-run`, ни в ошибках; `--token=` остаётся в истории shell, поэтому лучше prompt или переменная `YOUTRACK_TOKEN`.
+
+Токен никогда не коммитится в репозиторий: он лежит только в окружении и в двух локальных файлах, которые пишет `agentio:install` и добавляет в `.gitignore`, — `.env` и `.claude/settings.local.json`.
 
 ### 2.3. Переменные окружения
 
-**Вариант 1 (рекомендуется): `.env` проекта** (он не коммитится). `php artisan agentio:run` передаёт значения из конфига в окружение цикла и агентов, а `scripts/yt.php` при запуске вручную сам читает `.env`, если переменных нет в окружении:
+**Вариант 1 (рекомендуется): `.env` проекта** (он не коммитится; `agentio:install` записывает туда значения сам — существующие ключи заменяет на месте, недостающие дописывает). `php artisan agentio:run` передаёт значения из конфига в окружение цикла и агентов, а `scripts/yt.php` при запуске вручную сам читает `.env`, если переменных нет в окружении:
 
 ```dotenv
 YOUTRACK_URL=https://<instance>.youtrack.cloud
@@ -193,7 +199,8 @@ export YOUTRACK_TOKEN="perm-..."
 - `scripts/yt.php`: без них — ошибка `YOUTRACK_URL and YOUTRACK_TOKEN are required (environment variables or the project .env file).`;
 - `scripts/agent-loop.sh`: без них не стартует (`agentio:run` передаёт их сам);
 - `scripts/epic-worktree.sh`: по ним вычисляет slug ветки;
-- headless-агенты: через `.claude/agents-mcp.json`.
+- headless-агенты: через `.claude/agents-mcp.json`;
+- интерактивный `claude`: через блок `env` файла `.claude/settings.local.json` (см. 2.4).
 
 ### 2.4. MCP YouTrack
 
@@ -207,15 +214,17 @@ export YOUTRACK_TOKEN="perm-..."
 }
 ```
 
-**Для вашей интерактивной работы** (`claude` в каталоге проекта) подключите MCP один раз:
+**Для вашей интерактивной работы** (`claude` в каталоге проекта) тоже ничего делать не нужно — это настроил `agentio:install`:
 
-```bash
-claude mcp add --transport http youtrack https://<instance>.youtrack.cloud/mcp \
-  --header "Authorization: Bearer perm-..."
-claude mcp list      # youtrack: https://<instance>.youtrack.cloud/mcp (HTTP) - ✔ Connected
-```
+- в `.mcp.json` проекта (коммитится; другие серверы, например `laravel-boost`, сохраняются) добавлен сервер `youtrack` с теми же подстановками `${YOUTRACK_URL}` / `${YOUTRACK_TOKEN}` — токена в файле нет;
+- сервер включён в `enabledMcpjsonServers` файла `.claude/settings.json`, поэтому Claude Code не спрашивает разрешения на него;
+- значения лежат в блоке `env` файла `.claude/settings.local.json` (не коммитится, добавлен в `.gitignore`).
 
-По умолчанию сервер добавляется в scope `local`, то есть только для текущего каталога. Конфигурация хранится в `~/.claude.json`, вне репозитория. Чтобы MCP работал и в каталогах worktree (`../worktrees/<EPIC>`), добавьте его с `-s user` или запускайте там `claude --mcp-config .claude/agents-mcp.json` (см. 4.5). Laravel Boost (если установлен) подключается из `.mcp.json` проекта.
+Интерактивный `claude`, запущенный в каталоге проекта, после принятия диалога доверия к каталогу (один раз) подставляет значения из `env` в `.mcp.json` — `export` и `claude mcp add` не нужны. Проверка: `/mcp` внутри сессии → «Project MCPs: ✔ youtrack».
+
+Ограничения (проверено на Claude Code 2.1.288): `claude -p …`, `claude mcp get` и `claude mcp list` блок `env` для подстановки **не применяют** и покажут `youtrack` как «Failed to connect: 'url' is not a valid URL». Для них экспортируйте переменные в shell. Агентам цикла это не мешает: `agent-loop.sh` передаёт им переменные сам. В каталогах worktree (`../worktrees/<EPIC>`) файла `.claude/settings.local.json` нет — см. 4.5.
+
+Сменили токен — запустите `php artisan agentio:install` ещё раз (он обновит и `.env`, и `.claude/settings.local.json`).
 
 ### 2.5. Проверка
 
@@ -393,7 +402,7 @@ cd ../worktrees/{{project}}-2
 claude --mcp-config .claude/agents-mcp.json "/work-epic {{project}}-2"
 ```
 
-`/work-epic` проверяет, что текущая ветка — `epic/{{project}}-2-*`; в главном каталоге он откажется работать. `--mcp-config` нужен, если MCP `youtrack` добавлен в scope `local` главного каталога (см. 2.4).
+`/work-epic` проверяет, что текущая ветка — `epic/{{project}}-2-*`; в главном каталоге он откажется работать. В worktree нет `.claude/settings.local.json` (он не коммитится), поэтому перед запуском экспортируйте `YOUTRACK_URL` и `YOUTRACK_TOKEN` в этом shell или скопируйте файл из главного каталога: `cp <главный каталог>/.claude/settings.local.json .claude/` (см. 2.4).
 
 ### 4.6. Параметры
 
@@ -584,6 +593,7 @@ git branch -d epic/{{project}}-2-<slug>                      # по желани
 |---|---|
 | `YOUTRACK_URL and YOUTRACK_TOKEN are required …` или `YOUTRACK_URL and YOUTRACK_TOKEN must be set …` | Нет значений ни в `.env`, ни в окружении (2.3). Запускайте цикл через `php artisan agentio:run`; при прямом запуске скрипта экспортируйте переменные в том же shell (для `nohup` — или в `~/.zshenv`). |
 | В логе агента нет инструментов `mcp__youtrack__*` | Неверный токен или URL. Проверьте: `php scripts/yt.php status`. Агенты берут MCP из `.claude/agents-mcp.json`. |
+| В интерактивном `claude` `/mcp` показывает `youtrack` как failed | Нет значений в блоке `env` файла `.claude/settings.local.json` (или токен устарел): запустите `php artisan agentio:install`. Каталог должен быть доверенным (диалог при первом запуске). `claude -p` и `claude mcp get/list` этот блок не применяют — для них экспортируйте переменные (2.4). |
 | Тесты «висят» после прохождения | Сиротский процесс `playwright run-server` от браузерных тестов держит stdout, и `<тесты> \| tail` ждёт вечно. Запускайте тесты **только** через `scripts/run-tests.sh`: он пишет вывод в файл и убивает такие процессы своего каталога. Вручную: `pkill -f '^node .*playwright run-server'`. |
 | Строгий гейт покрытия падает на строках с `assert()` | Системный php.ini с `zend.assertions=-1`. Используйте `RUN_TESTS_FULL=1 scripts/run-tests.sh` (включает assertions сам) или выставьте `zend.assertions = 1`. |
 | В логе агента `⚠️` с отказом в разрешении на команду с `$(...)`, обратными кавычками или `$VAR` | Headless-агенты работают в `--permission-mode dontAsk`: команды с подстановками не совпадают с белым списком и отклоняются без вопроса. Поэтому `claim` сам берёт ветку и worktree из git, а скиллы требуют писать значения буквально. Если агенту нужна новая безопасная команда, добавьте правило в `.claude/settings.json` → `permissions.allow` и закоммитьте в `{{base_branch}}` (`agentio:install` при обновлении сохраняет ваши правила: списки объединяются). |
