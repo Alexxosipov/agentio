@@ -180,6 +180,59 @@ it('releases an issue: comment, Stage, tag removed', function () {
         ->and($server->callsOf('manage_issue_tags'))->toHaveCount(1);
 });
 
+it('ends an active claim when the agent releases without a comment that ends it', function () {
+    $server = epicProject()->comment('XY-8', "[AGENT:START]\nowner: `me:/w#XY-8`");
+
+    expect(yt(['action' => 'release', 'id' => 'XY-8', '--state' => 'Ready'])[0])->toBe(0)
+        ->and(end($server->comments['XY-8'])['text'])->toBe("[AGENT:RELEASE]\nowner: `me:/w#XY-8` → Ready");
+
+    // Released again (the first try failed half-way): nothing is ended twice.
+    expect(yt(['action' => 'release', 'id' => 'XY-8', '--state' => 'Ready'])[0])->toBe(0)
+        ->and($server->comments['XY-8'])->toHaveCount(2);
+});
+
+it('withdraws a claim that failed half-way', function () {
+    $server = epicProject();
+    $server->on('manage_issue_tags', fn (): array => FakeYouTrackMcp::error('Service unavailable'));
+
+    [$status, $output] = yt(['action' => 'claim', 'id' => 'XY-6', '--owner' => 'me:/w', '--worktree' => '/w', '--branch' => 'b']);
+
+    expect($status)->toBe(1)
+        ->and($output)->toContain('Service unavailable')
+        ->and(array_column($server->comments['XY-6'], 'text'))->toBe(["[AGENT:START]\nowner: `me:/w`\nbranch: `b`\nworktree: `/w`\n\nThe plan follows in the next [AGENT:START] comment.", "[AGENT:RELEASE]\nThe claim failed: YouTrack MCP manage_issue_tags failed: Service unavailable"])
+        ->and($server->issues['XY-6']['fields']['Stage'])->toBe('Ready');
+});
+
+it('lists the epics and ideas this machine left unfinished', function () {
+    $project = hostProject();
+    $worktrees = $project.'/worktrees';
+    mkdir($worktrees.'/XY-40', 0777, true);
+    config(['agentio.worktrees_path' => $worktrees]);
+    $host = gethostname();
+
+    (new FakeYouTrackMcp)
+        ->issue('XY-40', 'Epic', 'In Progress', tags: ['agent-claimed'])
+        ->comment('XY-40', "[AGENT:START]\nowner: `{$host}:{$worktrees}/XY-40`")
+        ->issue('XY-41', 'Epic', 'In Progress', tags: ['agent-claimed'])
+        ->comment('XY-41', "[AGENT:START]\nowner: `other-host:{$worktrees}/XY-41`")
+        ->issue('XY-42', 'Epic', 'In Progress', tags: ['agent-claimed'])
+        ->comment('XY-42', "[AGENT:START]\nowner: `{$host}:{$worktrees}/XY-42`")
+        ->issue('XY-1', 'Idea', 'Analysis', tags: ['idea', 'agent-claimed'])
+        ->comment('XY-1', "[AGENT:START]\nowner: `{$host}:{$project}#pm`")
+        ->issue('XY-3', 'Idea', 'Analysis', tags: ['agent-claimed'])
+        ->comment('XY-3', "[AGENT:START]\nowner: `{$host}:/elsewhere#pm`")
+        ->fake();
+
+    [$status, $json] = yt(['action' => 'resumable', '--json' => true]);
+
+    // XY-41 is another machine's, the worktree of XY-42 is gone, XY-3 is planned from another checkout.
+    expect($status)->toBe(0)
+        ->and(json_decode($json, true))->toBe([
+            ['id' => 'XY-40', 'kind' => 'epic', 'summary' => '[EPIC] Summary of XY-40'],
+            ['id' => 'XY-1', 'kind' => 'idea', 'summary' => '[IDEA] Summary of XY-1'],
+        ]);
+});
+
 it('refuses an unknown Stage', function () {
     epicProject();
 

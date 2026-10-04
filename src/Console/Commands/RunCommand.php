@@ -133,7 +133,7 @@ final class RunCommand extends Command
             'AGENTIO_STOP_FILE' => $loop->stopFile(),
             'AGENTIO_SESSION_SETTINGS' => (new SessionSettings($settings))->toJson(),
             'AGENTIO_PLANNING_SETTINGS' => (new SessionSettings($settings))->toJson(planning: true),
-            'AGENTIO_MCP_CONFIG' => implode(' ', $mcp),
+            'AGENTIO_MCP_CONFIG' => implode("\n", $mcp),
         ]);
     }
 

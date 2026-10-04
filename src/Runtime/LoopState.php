@@ -11,7 +11,8 @@ use Carbon\CarbonImmutable;
  *
  * - loop.log            the loop's own log ("[Y-m-d H:i:s] message");
  * - loop.pid            pid of the running loop process (kept by the agent loop while it runs);
- * - <ID>.pid / <ID>.log epic sessions (/agentio-work-epic), <ID>.restarts their restart counter;
+ * - <ID>.pid / <ID>.log epic sessions (/agentio-work-epic), <ID>.restarts their restart counter
+ *                       ("<count> <branch head>": unfinished sessions in a row without new commits);
  * - plan-<ID>.pid / plan-<ID>.log planning sessions (/agentio-plan);
  * - stop               the stop flag: the loop exits after the current step.
  */
@@ -176,7 +177,7 @@ final readonly class LoopState
     }
 
     /**
-     * How many times the epic session ended before Review in a row (<ID>.restarts).
+     * How many epic sessions in a row ended unfinished without new commits (the count of <ID>.restarts).
      */
     public function restarts(string $epicId): int
     {

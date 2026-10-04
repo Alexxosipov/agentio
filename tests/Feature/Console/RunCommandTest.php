@@ -43,7 +43,7 @@ it('passes the settings, the session settings and the MCP configs of the package
     mkdir($project.'/vendor/laravel/boost', 0777, true);
 
     expect($command->environment(app(Settings::class), MergePolicy::LocalBranch, app(LoopState::class))['AGENTIO_MCP_CONFIG'])
-        ->toBe($package.'/resources/claude/mcp/youtrack.json '.$package.'/resources/claude/mcp/laravel-boost.json');
+        ->toBe($package."/resources/claude/mcp/youtrack.json\n".$package.'/resources/claude/mcp/laravel-boost.json');
 });
 
 it('runs the loop of the package in the project and streams its output', function () {

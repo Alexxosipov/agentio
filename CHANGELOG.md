@@ -23,6 +23,12 @@
 
 ### Fixed
 
+- A planning session that broke off no longer leaves its idea claimed in `Analysis` for good: `agentio:yt resumable` lists the epics and the ideas this machine left unfinished, and the loop resumes both (the resume rule moved from bash to PHP). Planning no longer blocks the loop: it is reaped like an epic session, and a finished session starts the next pass right away.
+- Restart accounting: a session that ended unfinished counts also when it died before claiming its epic (it was relaunched forever), new commits on the epic branch reset the count (a long epic that moves is no longer blocked), and ideas are counted too. `--kill` stops planning sessions as well.
+- A session counts as alive only while its pid is a Claude Code process (a pid reused after a reboot held a slot forever); `loop.lock` keeps a second loop from starting.
+- `agentio:yt claim` withdraws a claim that failed half-way, and `release` always ends the claim in the comments, so the tag and the comment chain no longer disagree.
+- `agentio:test` runs the tests in their own process group and kills only what that run left behind, not the Playwright servers of a parallel run in the same worktree.
+- The worktree `.env` is written with the package's `EnvFile` (a worktrees path with a space broke it); the MCP configs are passed one per line.
 - The guard hook is `bin/agentio-guard`, run from the package of the main checkout without booting the worktree's application; it refuses the command when it fails, and takes the protected branches and the extra directories from the loop instead of the worktree's `.claude/settings.json` (an agent could widen them, and `/` let every path through). `agentio:guard` is removed.
 - The guard splits command lines like a shell and closes the bypasses found in an audit: artisan options before the command (`php artisan -n tinker`), `agentio:run --dry-run --kill/--stop`, git aliases and `git -c`/`config`, combined short flags (`git push -fu`), `cd` before a relative path, `cp`/`sed -i`/`>` onto the agentio settings, `find -exec`, `php -i`, `/proc/$$/environ`, `.en?`; and it no longer refuses a plan or a commit message that merely mentions `.env`.
 - `Bash(php -i)` is no longer allowed (it printed the token), and the `tinker` and `get-config` tools of Laravel Boost are denied.

@@ -61,7 +61,7 @@ it('keeps loop.pid while running and plan-<ID>.pid while planning', function () 
         ->and($logs.'/plan-XY-1.pid')->not->toBeFile()
         ->and(file_get_contents($logs.'/loop.log'))->toContain('agent loop started: mode=once policy=local-branch', 'XY-1: planning finished', 'agent loop stopped')
         ->and(file_get_contents($logs.'/plan-XY-1.log'))->toContain('/agentio-plan XY-1', 'claude -p /agentio-plan XY-1')
-        ->and(file_get_contents($project.'/artisan-calls.log'))->toContain('agentio:yt claimed-epics --json', 'agentio:yt ready-epics --json', 'agentio:yt ideas --json');
+        ->and(file_get_contents($project.'/artisan-calls.log'))->toContain('agentio:yt resumable --json', 'agentio:yt ready-epics --json', 'agentio:yt ideas --json');
 });
 
 it('gives planning sessions read-only settings and the MCP configs', function () {
@@ -95,6 +95,31 @@ it('gives epic sessions the session settings of the package and the project rule
         ->and($settings['permissions']['allow'])->not->toContain('Edit(/**)', 'Bash(php -i)')
         ->and($settings['permissions']['deny'])->toContain('Bash(git push --force*)', 'Bash(git push origin develop*)', 'Bash(git checkout develop*)', 'Bash(git push origin main*)', 'Bash(php artisan agentio:accept*)', 'Read(./.env)', 'Read(**/.env)', 'Edit(.claude/skills/agentio-*/**)', 'Read(./secrets/**)', 'mcp__laravel-boost__tinker', 'mcp__laravel-boost__get-config')
         ->and($settings['hooks']['PreToolUse'][0]['hooks'][0]['command'])->toBe("php '{$package}/bin/agentio-guard' '--protected=develop,main,master' '--root=/srv/shared'");
+});
+
+it('marks an idea Blocked when its planning keeps ending unfinished', function () {
+    $project = projectForLoop(['XY-1']);
+    file_put_contents($project.'/artisan', str_replace('\'state\' => "Review\\n"', '\'state\' => "Analysis\\n"', (string) file_get_contents($project.'/artisan')));
+    mkdir($project.'/storage/logs/agents', 0777, true);
+    file_put_contents($project.'/storage/logs/agents/plan-XY-1.restarts', "3 \n");
+
+    $process = runPackageLoop($project, '--once');
+
+    expect($process->getExitCode())->toBe(0, $process->getErrorOutput())
+        ->and(file_get_contents($project.'/storage/logs/agents/loop.log'))->toContain('XY-1: planning ended unfinished 3 times, marked Blocked')
+        ->and(file_get_contents($project.'/artisan-calls.log'))->toContain('agentio:yt release XY-1 --state=Blocked --comment=[AGENT:BLOCKED]')
+        ->and($project.'/storage/logs/agents/plan-XY-1.restarts')->not->toBeFile();
+});
+
+it('counts an unfinished planning and resumes it later', function () {
+    $project = projectForLoop(['XY-1']);
+    file_put_contents($project.'/artisan', str_replace('\'state\' => "Review\\n"', '\'state\' => "Analysis\\n"', (string) file_get_contents($project.'/artisan')));
+
+    $process = runPackageLoop($project, '--once');
+
+    expect($process->getExitCode())->toBe(0, $process->getErrorOutput())
+        ->and(file_get_contents($project.'/storage/logs/agents/loop.log'))->toContain('XY-1: planning ended unfinished in Analysis (attempt 1/3), will be resumed')
+        ->and(file_get_contents($project.'/storage/logs/agents/plan-XY-1.restarts'))->toBe("1 \n");
 });
 
 it('refuses to start a second loop in the same checkout', function () {
@@ -148,6 +173,26 @@ it('runs the configured test commands through agentio:test', function () {
     expect(Artisan::call('agentio:test'))->toBe(7)
         ->and(Artisan::output())->toContain('exit=7');
 });
+
+it('kills what a test run leaves behind, and only that', function () {
+    $project = projectForLoop();
+    $other = new Process(['sleep', '30']);
+    $other->start();
+    config(['agentio.tests.command' => 'sleep 30 & echo $! > '.$project.'/left.pid; echo started']);
+
+    try {
+        expect(Artisan::call('agentio:test'))->toBe(0)
+            ->and(Artisan::output())->toContain('exit=0');
+
+        $left = (int) file_get_contents($project.'/left.pid');
+        usleep(200_000);
+
+        expect(posix_kill($left, 0))->toBeFalse()
+            ->and($other->isRunning())->toBeTrue();
+    } finally {
+        $other->stop(0);
+    }
+})->skip(! function_exists('posix_kill'), 'needs the posix extension');
 
 it('commits only the given files of a task through agentio:commit', function () {
     $project = projectForLoop();

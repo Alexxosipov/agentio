@@ -36,6 +36,7 @@ mkdir -p "$WORKTREES_DIR"
 worktrees="$(cd "$WORKTREES_DIR" && pwd -P)"
 dir="$worktrees/$epic"
 log() { echo "[epic-worktree $epic] $*" >&2; }
+package="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 
 if [[ "$action" == "--remove" ]]; then
     if [[ -d "$dir" ]]; then
@@ -103,17 +104,15 @@ if [[ ! -f .env && -f .env.example ]]; then
         touch database/database.sqlite
     fi
     cp .env.example .env
+    # The values are written by the EnvFile of the package (quoted when needed, e.g. a path with a space).
     php -r '
-        [$file, $values] = [$argv[1], array_slice($argv, 2)];
-        $env = file_get_contents($file);
-        foreach (array_chunk($values, 2) as [$key, $value]) {
-            $line = $key."=".$value;
-            $env = preg_match("/^#?\s*".preg_quote($key, "/")."=.*$/m", $env)
-                ? preg_replace("/^#?\s*".preg_quote($key, "/")."=.*$/m", $line, $env, 1)
-                : rtrim($env).PHP_EOL.$line.PHP_EOL;
+        foreach ([$argv[1]."/vendor/autoload.php", $argv[1]."/../../autoload.php"] as $autoload) {
+            if (is_file($autoload)) { require $autoload; break; }
         }
-        file_put_contents($file, $env);
-    ' .env "${settings[@]}"
+        $values = [];
+        foreach (array_chunk(array_slice($argv, 3), 2) as [$key, $value]) { $values[$key] = $value; }
+        file_put_contents($argv[2], (new Obrazmisli\Agentio\Install\EnvFile($argv[2]))->contentWith($values));
+    ' "$package" .env "${settings[@]}"
 fi
 
 composer install --no-interaction --prefer-dist --no-progress >&2

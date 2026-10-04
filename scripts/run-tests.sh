@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# Runs the tests writing output to a log file, then kills Playwright servers left behind by
-# browser tests in this checkout. Those orphans keep stdout open, so piping `<tests> | tail`
-# would otherwise hang forever. The commands are configurable:
+# Runs the tests writing output to a log file, in a process group of their own, then kills what the run
+# left behind in that group (Playwright servers of browser tests: those orphans keep stdout open, so piping
+# `<tests> | tail` would otherwise hang forever) — and only that: parallel runs in the same worktree keep
+# their servers. The commands are configurable:
 #
 #   AGENTIO_TEST_COMMAND       narrow run, gets the script arguments  (default: php artisan test --compact)
 #   AGENTIO_FULL_TEST_COMMAND  full quality gate                      (default: composer test when composer.json
@@ -25,15 +26,21 @@ cd "$ROOT" || exit 1
 # php/*.ini next to this script: test-only PHP settings (zend.assertions=1, so assert() lines run and count in coverage).
 export PHP_INI_SCAN_DIR=":$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/php"
 
-cleanup_playwright() {
-    local pid
-    for pid in $(pgrep -f '^node .*playwright run-server' 2>/dev/null); do
-        if [[ "$(readlink -f "/proc/$pid/cwd" 2>/dev/null)" == "$ROOT" ]]; then
-            kill "$pid" 2>/dev/null
-        fi
-    done
+# Run a command line in a new process group (when setsid is available) and kill what is left of the group.
+run_isolated() {
+    local command="$1" pid status
+    shift
+    if ! command -v setsid >/dev/null; then
+        ( eval "$command \"\$@\"" ) >"$LOG" 2>&1 </dev/null
+        return $?
+    fi
+    setsid bash -c "$command \"\$@\"" agentio-test "$@" >"$LOG" 2>&1 </dev/null &
+    pid=$!
+    wait "$pid"
+    status=$?
+    kill -TERM -- "-$pid" 2>/dev/null
+    return "$status"
 }
-trap cleanup_playwright EXIT
 
 narrow="${AGENTIO_TEST_COMMAND:-php artisan test --compact}"
 
@@ -46,9 +53,9 @@ if [[ "${RUN_TESTS_FULL:-0}" == "1" ]]; then
             full="$narrow"
         fi
     fi
-    ( eval "$full" ) >"$LOG" 2>&1 </dev/null
+    run_isolated "$full"
 else
-    ( eval "$narrow \"\$@\"" ) >"$LOG" 2>&1 </dev/null
+    run_isolated "$narrow" "$@"
 fi
 status=$?
 

@@ -8,6 +8,7 @@ use Illuminate\Console\Command;
 use Obrazmisli\Agentio\Git\Branches;
 use Obrazmisli\Agentio\Process\AgentCommentKind;
 use Obrazmisli\Agentio\Process\AgentComments;
+use Obrazmisli\Agentio\Process\Claims;
 use Obrazmisli\Agentio\Process\ReadinessGraph;
 use Obrazmisli\Agentio\Process\TreeNode;
 use Obrazmisli\Agentio\Settings;
@@ -36,7 +37,7 @@ final class YouTrackCommand extends Command
      * @var string
      */
     protected $signature = 'agentio:yt
-        {action=help : ideas, ready-epics, claimed-epics, tree, ready-tasks, blocked, validate, claim, release, state, kb-tree}
+        {action=help : ideas, ready-epics, claimed-epics, resumable, tree, ready-tasks, blocked, validate, claim, release, state, kb-tree}
         {id? : The issue (or, for kb-tree, the article) id}
         {--json : Print JSON}
         {--as= : claim: owner suffix of a subagent, e.g. its TASK id}
@@ -55,6 +56,10 @@ final class YouTrackCommand extends Command
 
     private Tools $tools;
 
+    private Claims $claims;
+
+    private Settings $settings;
+
     private string $project;
 
     private ?ReadinessGraph $graph = null;
@@ -62,6 +67,8 @@ final class YouTrackCommand extends Command
     public function handle(Tools $tools, Settings $settings): int
     {
         $this->tools = $tools;
+        $this->claims = new Claims($tools);
+        $this->settings = $settings;
         $this->project = $settings->project();
         $this->graph = null;
         $action = (string) $this->argument('action');
@@ -81,6 +88,7 @@ final class YouTrackCommand extends Command
                 'ideas' => $this->ideas(),
                 'ready-epics' => $this->readyEpics(),
                 'claimed-epics' => $this->claimedEpics(),
+                'resumable' => $this->resumable(),
                 'tree' => $this->tree($this->id()),
                 'ready-tasks' => $this->readyTasks($this->id()),
                 'blocked' => $this->blocked(),
@@ -165,6 +173,43 @@ final class YouTrackCommand extends Command
         return $this->output($epics, function (array $epics): void {
             foreach ($epics as $epic) {
                 $this->line($epic['id'].' '.($epic['state'] ?? '-').' owner='.($epic['owner'] ?? '-').' '.$epic['summary']);
+            }
+        });
+    }
+
+    /**
+     * What this machine left unfinished, for the loop to resume: epics In Progress claimed by their worktree here
+     * (which still exists), and ideas in planning claimed by the project manager of this checkout.
+     */
+    private function resumable(): int
+    {
+        $items = [];
+        $worktrees = $this->settings->worktreesPath();
+
+        foreach ($this->tools->searchIssues($this->query('Type: Epic tag: {'.Tag::Claimed->value.'}')) as $raw) {
+            $epic = Issue::fromMcp($raw);
+            $worktree = $worktrees === null ? null : (realpath($worktrees) ?: $worktrees).'/'.$epic->id;
+
+            if ($worktree !== null && $epic->hasState(State::InProgress) && is_dir($worktree) && $this->claims->ownerOf($epic->id) === Claims::owner($worktree)) {
+                $items[$epic->id] = ['id' => $epic->id, 'kind' => 'epic', 'summary' => $epic->summary];
+            }
+        }
+
+        $planner = Claims::owner(realpath($this->settings->basePath()) ?: $this->settings->basePath(), Claims::PLANNER);
+
+        foreach (['tag: {'.Tag::Idea->value.'}', 'Type: '.IssueType::Idea->value] as $filter) {
+            foreach ($this->tools->searchIssues($this->query($filter.' tag: {'.Tag::Claimed->value.'}')) as $raw) {
+                $idea = Issue::fromMcp($raw);
+
+                if (! isset($items[$idea->id]) && ($idea->hasState(State::Analysis) || $idea->hasState(State::InProgress)) && $this->claims->ownerOf($idea->id) === $planner) {
+                    $items[$idea->id] = ['id' => $idea->id, 'kind' => 'idea', 'summary' => $idea->summary];
+                }
+            }
+        }
+
+        return $this->output(array_values($items), function (array $items): void {
+            foreach ($items as $item) {
+                $this->line($item['id'].' '.$item['kind'].' '.$item['summary']);
             }
         });
     }
@@ -343,35 +388,21 @@ final class YouTrackCommand extends Command
             return $this->failWith('Cannot determine the git worktree and branch: pass --worktree and --branch.');
         }
 
-        $suffix = $this->stringOption('as');
-        $owner = $this->stringOption('owner') ?? gethostname().':'.$worktree.($suffix === null ? '' : '#'.$suffix);
-        $current = $this->agentComments($id)->claimOwner();
+        $owner = $this->stringOption('owner') ?? Claims::owner($worktree, $this->stringOption('as'));
+        $result = $this->claims->claim($id, $owner, $branch, $worktree, $this->stringOption('plan'));
 
-        if ($current !== null && $current !== $owner) {
-            return $this->lost($id, $current);
-        }
-
-        if ($current === null) {
-            $plan = $this->stringOption('plan') ?? 'The plan follows in the next [AGENT:START] comment.';
-            $this->tools->addComment($id, "[AGENT:START]\nowner: `{$owner}`\nbranch: `{$branch}`\nworktree: `{$worktree}`\n\n{$plan}");
-        }
-
-        $this->tools->addTag($id, Tag::Claimed->value);
-        $this->tools->updateFields($id, [State::FIELD => State::InProgress->value]);
-        $winner = $this->agentComments($id)->claimOwner();
-
-        if ($winner !== $owner) {
-            return $this->lost($id, $winner);
+        if (! $result->won) {
+            return $this->lost($id, $result->owner);
         }
 
         return $this->output(
-            ['claimed' => true, 'owner' => $owner, 'resumed' => $current !== null],
-            fn (array $result) => $this->line(($result['resumed'] ? 'RESUMED' : 'CLAIMED')." {$id} as {$owner}"),
+            ['claimed' => true, 'owner' => $owner, 'resumed' => $result->resumed],
+            fn (array $data) => $this->line(($data['resumed'] ? 'RESUMED' : 'CLAIMED')." {$id} as {$owner}"),
         );
     }
 
     /**
-     * Post an optional comment, set the Stage and remove the agent-claimed tag.
+     * Post an optional comment, end the claim, set the Stage and remove the agent-claimed tag.
      */
     private function release(string $id): int
     {
@@ -381,17 +412,7 @@ final class YouTrackCommand extends Command
             return $this->failWith('Usage: agentio:yt release <ID> --state=<Stage> [--comment=<text>]  (Stage: '.$this->states().')');
         }
 
-        $comment = $this->stringOption('comment');
-
-        if ($comment !== null) {
-            $this->tools->addComment($id, $comment);
-        }
-
-        $this->tools->updateFields($id, [State::FIELD => $state->value]);
-
-        if (Issue::fromMcp($this->tools->issue($id))->isClaimed()) {
-            $this->tools->removeTag($id, Tag::Claimed->value);
-        }
+        $this->claims->release($id, $state, $this->stringOption('comment'));
 
         return $this->output(['id' => $id, 'state' => $state->value], fn () => $this->line("RELEASED {$id} -> {$state->value}"));
     }
@@ -591,6 +612,7 @@ final class YouTrackCommand extends Command
                                        re-read, verify. CLAIMED / RESUMED (exit 0) or LOST (exit 3)
               release <ID> --state=S [--comment=TEXT]
                                        Post an optional comment, set Stage, remove the agent-claimed tag
+              resumable                Epics and ideas this machine left unfinished (claimed here, no session needed)
               state <ID>               The Stage of the issue
               kb-tree [<ARTICLE>] [--depth=N]
                                        Knowledge base tree with article ids (--depth=1: direct children only)
