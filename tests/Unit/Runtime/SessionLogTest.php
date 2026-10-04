@@ -205,6 +205,14 @@ it('does not find a result that is not there', function () {
     expect((new SessionLog($path))->lastResult())->toBeNull();
 });
 
+it('does not show the result of an earlier run of a resumed session', function () {
+    $path = temporaryDirectory().'/TP-9.log';
+    file_put_contents($path, (string) file_get_contents(fixture('session.log'))."===== 2026-10-04 10:00:00 /agentio-work-epic TP-9 in /srv =====\n");
+
+    expect((new SessionLog($path))->lastResult())->toBeNull()
+        ->and(sessionLog()->lastResult())->not->toBeNull();
+});
+
 it('parses individual lines defensively', function (string $line, array $expected) {
     expect(array_map(fn (SessionEvent $event): array => [$event->type->value, $event->text], SessionLog::parseLine($line)))->toBe($expected);
 })->with([

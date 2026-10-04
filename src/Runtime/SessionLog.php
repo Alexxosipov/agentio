@@ -129,11 +129,16 @@ final readonly class SessionLog
     }
 
     /**
-     * The latest Result event (cost, duration, final text), scanning at most $maxBytes from the end.
+     * The Result event (cost, duration, final text) of the latest run in the log, scanning at most $maxBytes from
+     * the end; null while that run has none yet (the loop appends every run to the same log after a "=====" header).
      */
     public function lastResult(int $maxBytes = self::DEFAULT_MAX_BYTES): ?SessionEvent
     {
         foreach (ReverseLineReader::lines($this->path, $maxBytes) as $offset => $line) {
+            if (str_starts_with($line, '===== ')) {
+                return null;
+            }
+
             if (! str_contains($line, '"type":"result"')) {
                 continue;
             }

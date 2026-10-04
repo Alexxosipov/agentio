@@ -131,7 +131,7 @@ final readonly class Issue
 
     public function type(): ?string
     {
-        return $this->field('Type');
+        return $this->field(IssueType::FIELD);
     }
 
     public function hasState(State ...$states): bool
@@ -168,11 +168,6 @@ final readonly class Issue
     public function isIdea(): bool
     {
         return $this->hasType(IssueType::Idea) || $this->hasTag(Tag::Idea);
-    }
-
-    public function isResolved(): bool
-    {
-        return $this->resolvedAt !== null;
     }
 
     /**

@@ -6,10 +6,8 @@ namespace Obrazmisli\Agentio\YouTrack;
 
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\PendingRequest;
-use Illuminate\Http\Client\RequestException;
 use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Http;
-use Throwable;
 
 /**
  * A thin YouTrack REST client (https://www.jetbrains.com/help/youtrack/devportal/youtrack-rest-api.html).
@@ -278,16 +276,6 @@ final readonly class Client
     }
 
     /**
-     * Detach a custom field from a project (its values in the project's issues are lost).
-     *
-     * @throws YouTrackException
-     */
-    public function detachProjectCustomField(string $projectId, string $projectFieldId): void
-    {
-        $this->delete('admin/projects/'.rawurlencode($projectId).'/customFields/'.rawurlencode($projectFieldId));
-    }
-
-    /**
      * Whether the project has at least one issue.
      *
      * @throws YouTrackException
@@ -422,7 +410,7 @@ final readonly class Client
         }
 
         try {
-            $response = $this->request()->send($method, $path, $options);
+            $response = $this->request($method === 'GET')->send($method, $path, $options);
         } catch (ConnectionException $exception) {
             throw YouTrackException::connectionFailed($method, $path, $exception);
         }
@@ -436,20 +424,14 @@ final readonly class Client
         return is_array($decoded) ? $decoded : [];
     }
 
-    private function request(): PendingRequest
+    private function request(bool $idempotent): PendingRequest
     {
         return Http::baseUrl($this->baseUrl().'/api/')
             ->withToken((string) $this->token)
             ->acceptJson()
             ->timeout($this->timeout)
             ->connectTimeout(min($this->timeout, 10))
-            ->retry(
-                $this->retries + 1,
-                fn (int $attempt): int => $attempt * 500,
-                fn (Throwable $exception): bool => $exception instanceof ConnectionException
-                    || ($exception instanceof RequestException && ($exception->response->serverError() || $exception->response->status() === 429)),
-                throw: false,
-            );
+            ->retry($this->retries + 1, Retry::backoff(...), Retry::when($idempotent), throw: false);
     }
 
     private function reason(Response $response): string

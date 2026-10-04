@@ -75,3 +75,15 @@ it('does not register the routes when the UI is disabled', function () {
 
     expect(Route::has('agentio.index'))->toBeFalse();
 });
+
+it('needs the manageAgentio gate to act from the dashboard', function () {
+    config(['agentio.ui.allowed_emails' => ['dev@example.com']]);
+    Gate::define('manageAgentio', fn (User $user): bool => $user->email === 'lead@example.com');
+
+    $this->actingAs(user('dev@example.com'))->getJson('/agentio/api/epics/XY-2/review')
+        ->assertOk()
+        ->assertJsonPath('actions', false);
+    $this->actingAs(user('dev@example.com'))->postJson('/agentio/api/epics/XY-2/accept')
+        ->assertForbidden()
+        ->assertJsonPath('message', 'Нет права принимать эпики (gate manageAgentio).');
+});

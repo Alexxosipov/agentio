@@ -6,12 +6,11 @@ namespace Obrazmisli\Agentio\YouTrack\Mcp;
 
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\PendingRequest;
-use Illuminate\Http\Client\RequestException;
 use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Http;
 use JsonException;
+use Obrazmisli\Agentio\YouTrack\Retry;
 use Obrazmisli\Agentio\YouTrack\YouTrackException;
-use Throwable;
 
 /**
  * A client of the YouTrack MCP server (`<url>/mcp`, streamable HTTP transport): JSON-RPC requests with the
@@ -19,7 +18,10 @@ use Throwable;
  * with an `Mcp-Session-Id` header gets it back on every following request.
  *
  * Tools answer with a text content block that holds JSON (decoded by call()) or plain text (callText()).
- * A tool error (`isError`) becomes a YouTrackException; "… not found" errors have status 404.
+ * A tool error (`isError`) becomes a YouTrackException; "… not found" errors have status 404. An HTTP error of
+ * the endpoint itself is a transport error (isNotFound() is false even for a 404: a wrong URL is not a missing
+ * issue); a 404 for a known session means the server dropped the session, which is opened again once.
+ * Reading tools are retried after transient failures, writing tools only when YouTrack did not get them (Retry).
  */
 final class McpClient
 {
@@ -93,8 +95,20 @@ final class McpClient
     public function callText(string $tool, array $arguments = []): string
     {
         $this->initialize();
+        $params = ['name' => $tool, 'arguments' => (object) $arguments];
 
-        $result = $this->request('tools/call', ['name' => $tool, 'arguments' => (object) $arguments]);
+        try {
+            $result = $this->request('tools/call', $params, self::isReadOnly($tool));
+        } catch (YouTrackException $exception) {
+            if (! $exception->sessionExpired) {
+                throw $exception;
+            }
+
+            // The server forgot the session (it did not run the call): open a new one and send the call again.
+            [$this->initialized, $this->sessionId] = [false, null];
+            $this->initialize();
+            $result = $this->request('tools/call', $params, self::isReadOnly($tool));
+        }
         $text = '';
 
         foreach (is_array($result['content'] ?? null) ? $result['content'] : [] as $block) {
@@ -113,6 +127,14 @@ final class McpClient
         }
 
         return $text;
+    }
+
+    /**
+     * Whether a tool only reads (get_*, search_*, find_*, list_*): such calls may be sent again after a failure.
+     */
+    public static function isReadOnly(string $tool): bool
+    {
+        return preg_match('/^(get|search|find|list)_/', $tool) === 1;
     }
 
     /**
@@ -170,10 +192,10 @@ final class McpClient
      *
      * @throws YouTrackException
      */
-    private function request(string $method, array $params): array
+    private function request(string $method, array $params, bool $idempotent = true): array
     {
         $id = ++$this->requestId;
-        $response = $this->send(['jsonrpc' => '2.0', 'id' => $id, 'method' => $method, 'params' => (object) $params], $method);
+        $response = $this->send(['jsonrpc' => '2.0', 'id' => $id, 'method' => $method, 'params' => (object) $params], $method, $idempotent);
         $session = $response->header('Mcp-Session-Id');
 
         if ($session !== '') {
@@ -204,20 +226,24 @@ final class McpClient
      *
      * @throws YouTrackException
      */
-    private function send(array $payload, string $method): Response
+    private function send(array $payload, string $method, bool $idempotent = true): Response
     {
         try {
-            $response = $this->http()->post($this->endpoint(), $payload);
+            $response = $this->http($idempotent)->post($this->endpoint(), $payload);
         } catch (ConnectionException $exception) {
             throw YouTrackException::connectionFailed('MCP', $method, $exception);
         }
 
         if ($response->status() === 401 || $response->status() === 403) {
-            throw new YouTrackException(sprintf('YouTrack MCP %s failed with HTTP %d: the token was rejected (is it a valid permanent token?)', $method, $response->status()), $response->status());
+            throw new YouTrackException(sprintf('YouTrack MCP %s failed with HTTP %d: the token was rejected (is it a valid permanent token?)', $method, $response->status()), $response->status(), transport: true);
+        }
+
+        if ($response->status() === 404 && $this->sessionId !== null && $method !== 'initialize') {
+            throw new YouTrackException(sprintf('YouTrack MCP %s failed: the MCP session expired', $method), 404, transport: true, sessionExpired: true);
         }
 
         if ($response->failed()) {
-            throw YouTrackException::requestFailed('MCP', $method, $response->status(), mb_substr(trim($response->body()), 0, 500));
+            throw YouTrackException::requestFailed('MCP', $method, $response->status(), mb_substr(trim($response->body()), 0, 500), transport: true);
         }
 
         return $response;
@@ -254,7 +280,7 @@ final class McpClient
         throw new YouTrackException('YouTrack MCP returned no answer to the request: is '.$this->endpoint().' the MCP endpoint of a YouTrack instance?');
     }
 
-    private function http(): PendingRequest
+    private function http(bool $idempotent): PendingRequest
     {
         $headers = ['Accept' => 'application/json, text/event-stream', 'MCP-Protocol-Version' => self::PROTOCOL_VERSION];
 
@@ -267,12 +293,6 @@ final class McpClient
             ->asJson()
             ->timeout($this->timeout)
             ->connectTimeout(min($this->timeout, 10))
-            ->retry(
-                $this->retries + 1,
-                fn (int $attempt): int => $attempt * 500,
-                fn (Throwable $exception): bool => $exception instanceof ConnectionException
-                    || ($exception instanceof RequestException && ($exception->response->serverError() || $exception->response->status() === 429)),
-                throw: false,
-            );
+            ->retry($this->retries + 1, Retry::backoff(...), Retry::when($idempotent), throw: false);
     }
 }

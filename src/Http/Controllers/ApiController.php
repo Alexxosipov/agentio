@@ -6,6 +6,7 @@ namespace Obrazmisli\Agentio\Http\Controllers;
 
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Obrazmisli\Agentio\Agentio;
 use Obrazmisli\Agentio\Dashboard\ActivityPresenter;
 use Obrazmisli\Agentio\Dashboard\BoardPresenter;
 use Obrazmisli\Agentio\Dashboard\EpicPresenter;
@@ -71,9 +72,9 @@ final class ApiController
         return self::json($presenter->loopLog());
     }
 
-    public function review(ReviewPresenter $presenter, string $id): JsonResponse
+    public function review(Request $request, ReviewPresenter $presenter, string $id): JsonResponse
     {
-        return self::json($presenter->present($id));
+        return self::json($presenter->present($id, self::actionsEnabled() && Agentio::canManage($request)));
     }
 
     public function diff(Request $request, Settings $settings, string $id): JsonResponse
@@ -85,8 +86,10 @@ final class ApiController
 
     public function accept(Request $request, EpicAcceptance $acceptance, YouTrackSource $source, string $id): JsonResponse
     {
-        if (! self::actionsEnabled()) {
-            return self::actionsDisabled();
+        $refused = self::refuseAction($request);
+
+        if ($refused !== null) {
+            return $refused;
         }
 
         try {
@@ -105,8 +108,10 @@ final class ApiController
 
     public function rework(Request $request, EpicAcceptance $acceptance, YouTrackSource $source, string $id): JsonResponse
     {
-        if (! self::actionsEnabled()) {
-            return self::actionsDisabled();
+        $refused = self::refuseAction($request);
+
+        if ($refused !== null) {
+            return $refused;
         }
 
         $story = trim((string) $request->input('story', ''));
@@ -130,9 +135,18 @@ final class ApiController
         return (bool) config('agentio.ui.actions', true);
     }
 
-    private static function actionsDisabled(): JsonResponse
+    /**
+     * The answer to an action that may not run: actions disabled, a user without the manageAgentio gate, or a
+     * request without a session (then nothing checks its CSRF token).
+     */
+    private static function refuseAction(Request $request): ?JsonResponse
     {
-        return self::json(['message' => 'Действия в панели отключены (AGENTIO_UI_ACTIONS=false).'], 403);
+        return match (true) {
+            ! self::actionsEnabled() => self::json(['message' => 'Действия в панели отключены (AGENTIO_UI_ACTIONS=false).'], 403),
+            ! Agentio::canManage($request) => self::json(['message' => 'Нет права принимать эпики (gate manageAgentio).'], 403),
+            ! $request->hasSession() => self::json(['message' => 'Действия требуют сессию с CSRF-токеном: ui.middleware должен запускать сессию (как web).'], 403),
+            default => null,
+        };
     }
 
     private static function failure(ReviewException $exception): JsonResponse

@@ -162,7 +162,7 @@ final readonly class EpicAcceptance
                     '[TASK] Review: '.self::headline($remark),
                     self::taskDescription($epicId, $storyId, $remark),
                     $storyId,
-                    ['Type' => IssueType::Task->value, State::FIELD => State::Ready->value],
+                    [IssueType::FIELD => IssueType::Task->value, State::FIELD => State::Ready->value],
                 );
             } catch (YouTrackException $exception) {
                 throw new ReviewException('YouTrack: '.$exception->getMessage(), 502);

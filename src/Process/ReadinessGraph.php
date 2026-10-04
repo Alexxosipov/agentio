@@ -209,28 +209,6 @@ final class ReadinessGraph
     }
 
     /**
-     * Ready tasks and epics that wait for dependencies, with the unmet dependency ids.
-     *
-     * @return array<string, list<string>>
-     */
-    public function waitingForDependencies(): array
-    {
-        $waiting = [];
-
-        foreach ($this->issues() as $id => $issue) {
-            if ($issue->hasState(State::Ready) && $issue->hasType(IssueType::Task, IssueType::Epic)) {
-                $unmet = $this->unmetDependencies($id);
-
-                if ($unmet !== []) {
-                    $waiting[$id] = $unmet;
-                }
-            }
-        }
-
-        return $waiting;
-    }
-
-    /**
      * Dependency ("depends on") cycles, each as a path that ends with its first issue.
      *
      * @return list<list<string>>

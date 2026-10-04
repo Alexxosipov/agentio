@@ -161,16 +161,6 @@ final readonly class LoopState
         return $this->path($name.'.log');
     }
 
-    public function epicLogPath(string $epicId): string
-    {
-        return $this->logPath($epicId);
-    }
-
-    public function planLogPath(string $ideaId): string
-    {
-        return $this->logPath('plan-'.$ideaId);
-    }
-
     public function sessionLog(string $name): SessionLog
     {
         return new SessionLog($this->logPath($name), $this->timezone);

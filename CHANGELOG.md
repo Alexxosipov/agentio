@@ -5,6 +5,7 @@
 ### Changed
 
 - Branch model: `main` is production, `dev` the development branch (the develop server); every epic is worked on in a branch named after its issue id (`TP-12`) instead of `epic/<ID>-<slug>`, started from `dev` and merged back into it. `agentio:install` asks for both branches and creates the missing ones locally. Epics started on an `epic/<ID>-<slug>` branch are resumed and accepted on it. `AGENTIO_BASE_BRANCH` now defaults to `dev`; `agentio:yt slug` and the branch slugs are gone.
+- The structure rules of `agentio:yt validate` live in `Process\StructureValidator`; `IssueType` knows its summary prefix and its parent type.
 - The settings of the headless sessions are built in PHP (`SessionSettings`) and allow pushing only the branches of the project's issues; the loop no longer runs inline PHP for them.
 - `agentio:install` adds only skills to the project (`.claude/skills/agentio-*`, packaged as Claude Code skills with the `agentio-` prefix; the subagents became the `agentio-develop-task` and `agentio-review-story` skills) plus `.agentio.json` and `.env` keys. Scripts, hooks, session settings, MCP configs and the manual stay in the package; nothing is merged into `.claude/settings.json`, `.mcp.json`, `CLAUDE.md`, `.gitignore` or `.env.example`.
 - The agents work with YouTrack only through its MCP server. `scripts/yt.php` is replaced by `php artisan agentio:yt`, which also talks to the MCP server; the REST API is left to the project setup and the dashboard.
@@ -23,6 +24,11 @@
 
 ### Fixed
 
+- YouTrack writes (creating an issue, posting a comment, creating a tag or a saved search) are no longer sent again after a timeout or a 5xx, which could duplicate them; reads still are, and writes are retried after a refused connection or a 429 (`YouTrack\Retry`, shared by the REST and the MCP client).
+- An HTTP error of the MCP endpoint (a wrong URL) is a transport error, no longer "issue not found"; a session the MCP server dropped is opened again once.
+- The dashboard's actions need the new `manageAgentio` gate (by default the same rule as `viewAgentio`) and a session, so they never run without a CSRF check; the review panel shows them only to users who may use them.
+- The session card of a resumed epic no longer shows the result of the previous run.
+- `AGENTIO_UI_CACHE` defaults to 15 seconds: with 5 (the poll interval) the cache almost never answered.
 - A planning session that broke off no longer leaves its idea claimed in `Analysis` for good: `agentio:yt resumable` lists the epics and the ideas this machine left unfinished, and the loop resumes both (the resume rule moved from bash to PHP). Planning no longer blocks the loop: it is reaped like an epic session, and a finished session starts the next pass right away.
 - Restart accounting: a session that ended unfinished counts also when it died before claiming its epic (it was relaunched forever), new commits on the epic branch reset the count (a long epic that moves is no longer blocked), and ideas are counted too. `--kill` stops planning sessions as well.
 - A session counts as alive only while its pid is a Claude Code process (a pid reused after a reboot held a slot forever); `loop.lock` keeps a second loop from starting.
@@ -39,6 +45,8 @@
 - The dashboard's git calls take no optional locks, so its polling no longer makes commits of agents and humans fail on `index.lock`.
 
 ### Removed
+
+- Dead code: the unused queries of `IssueRepository`, `ReadinessGraph::waitingForDependencies()`, `AgentComment::isAgentComment()`, `Issue::isResolved()`, `LoopState::epicLogPath()` / `planLogPath()` and `Client::detachProjectCustomField()`.
 
 - `sync-stage`: Stage is the status field itself, nothing is derived from another field.
 

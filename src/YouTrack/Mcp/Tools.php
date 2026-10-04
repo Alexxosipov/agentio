@@ -6,6 +6,7 @@ namespace Obrazmisli\Agentio\YouTrack\Mcp;
 
 use Obrazmisli\Agentio\YouTrack\Comment;
 use Obrazmisli\Agentio\YouTrack\Issue;
+use Obrazmisli\Agentio\YouTrack\IssueType;
 use Obrazmisli\Agentio\YouTrack\State;
 use Obrazmisli\Agentio\YouTrack\YouTrackException;
 
@@ -91,7 +92,7 @@ final readonly class Tools
      *
      * @throws YouTrackException
      */
-    public function searchIssues(string $query, array $fields = ['Type', State::FIELD]): array
+    public function searchIssues(string $query, array $fields = [IssueType::FIELD, State::FIELD]): array
     {
         return $this->client->paginate('search_issues', ['query' => $query, 'customFieldsToReturn' => $fields], self::ISSUE_PAGE, 'issuesPage');
     }

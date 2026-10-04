@@ -29,7 +29,7 @@ final readonly class ReviewPresenter
     /**
      * @return array<string, mixed>
      */
-    public function present(string $id): array
+    public function present(string $id, bool $actions = true): array
     {
         $epic = $this->source->attempt(fn (): ?Issue => $this->source->graph()->find($id), null);
         $branch = EpicBranch::find($this->settings, $id);
@@ -40,7 +40,7 @@ final readonly class ReviewPresenter
             'epicId' => $id,
             'base' => $this->settings->baseBranch(),
             'mergePolicy' => $this->mergePolicy(),
-            'actions' => (bool) config('agentio.ui.actions', true),
+            'actions' => $actions,
             'branch' => $branch === null ? null : $this->branch($branch, $merged),
             'checks' => $checks,
             'canAccept' => $branch !== null && $epic !== null && array_filter($checks, fn (array $check): bool => $check['ok'] === false) === [],

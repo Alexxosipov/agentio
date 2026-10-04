@@ -103,6 +103,26 @@ it('gives up after the configured retries', function () {
     Http::assertSentCount(2);
 });
 
+it('does not send a write again when YouTrack may have done it', function () {
+    Http::fake(['*' => Http::sequence()
+        ->push('busy', 503)
+        ->push(['id' => 'tag-1'])]);
+
+    expect(fn () => client()->createTag('idea'))->toThrow(YouTrackException::class, 'HTTP 503');
+
+    Http::assertSentCount(1);
+});
+
+it('sends a write again after a rate limit', function () {
+    Http::fake(['*' => Http::sequence()
+        ->push('slow down', 429)
+        ->push(['id' => 'tag-1', 'name' => 'idea'])]);
+
+    expect(client()->createTag('idea'))->toMatchArray(['id' => 'tag-1']);
+
+    Http::assertSentCount(2);
+});
+
 it('does not retry client errors', function () {
     Http::fake(['*' => Http::response(['error_description' => 'Bad query'], 400)]);
 
@@ -204,15 +224,6 @@ it('tells whether a project has issues', function (array $issues, bool $expected
     'empty' => [[], false],
     'with issues' => [[['id' => '2-1']], true],
 ]);
-
-it('detaches a field from a project', function () {
-    Http::fake(['*' => Http::response('')]);
-
-    client()->detachProjectCustomField('0-3', '189-20');
-
-    Http::assertSent(fn (Request $request): bool => $request->method() === 'DELETE'
-        && parse_url($request->url(), PHP_URL_PATH) === '/api/admin/projects/0-3/customFields/189-20');
-});
 
 it('creates YouTrack settings for the installer', function (Closure $call, string $path, array $body) {
     Http::fake(['*' => Http::response(['id' => 'new'])]);

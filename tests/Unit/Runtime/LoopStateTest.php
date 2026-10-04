@@ -154,8 +154,6 @@ it('locates session logs', function () {
     file_put_contents($directory.'/TP-2.log', "===== 2026-10-03 14:57:38 /work-epic TP-2 in /srv =====\n");
 
     expect($state->logPath('TP-2'))->toBe($directory.'/TP-2.log')
-        ->and($state->epicLogPath('TP-2'))->toBe($directory.'/TP-2.log')
-        ->and($state->planLogPath('TP-1'))->toBe($directory.'/plan-TP-1.log')
         ->and($state->sessionLog('TP-2')->tail())->toHaveCount(1)
         ->and($state->sessionLog('TP-2')->tail()[0]->time?->toIso8601String())->toBe('2026-10-03T14:57:38+08:00')
         ->and($state->restarts('TP-2'))->toBe(0);

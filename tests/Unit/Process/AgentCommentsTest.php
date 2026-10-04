@@ -37,8 +37,7 @@ it('parses an agent comment', function () {
 });
 
 it('ignores comments that are not agent comments', function (string $text) {
-    expect(AgentComment::fromComment(comment($text)))->toBeNull()
-        ->and(AgentComment::isAgentComment($text))->toBeFalse();
+    expect(AgentComment::fromComment(comment($text)))->toBeNull();
 })->with([
     'plain text' => ['Looks good to me'],
     'marker inside the text' => ['See [AGENT:DONE] above'],
@@ -51,8 +50,7 @@ it('keeps unknown kinds', function () {
     expect($comment?->kind)->toBe('REVIEW')
         ->and($comment?->kind())->toBeNull()
         ->and($comment?->endsClaim())->toBeFalse()
-        ->and($comment?->body())->toBe('Approved')
-        ->and(AgentComment::isAgentComment('[AGENT:REVIEW] Approved'))->toBeTrue();
+        ->and($comment?->body())->toBe('Approved');
 });
 
 it('reads the owner only from START comments', function () {

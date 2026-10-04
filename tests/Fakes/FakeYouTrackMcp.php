@@ -48,6 +48,14 @@ final class FakeYouTrackMcp
     }
 
     /**
+     * Answer one request to the MCP endpoint (for a test that fakes the HTTP layer itself).
+     */
+    public function handle(Request $request): PromiseInterface
+    {
+        return $this->respond($request);
+    }
+
+    /**
      * @param  array<string, string|null>  $fields
      * @param  list<string>  $tags
      * @param  list<string>  $dependsOn

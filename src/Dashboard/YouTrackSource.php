@@ -13,6 +13,7 @@ use Obrazmisli\Agentio\YouTrack\Client;
 use Obrazmisli\Agentio\YouTrack\Comment;
 use Obrazmisli\Agentio\YouTrack\Issue;
 use Obrazmisli\Agentio\YouTrack\IssueRepository;
+use Obrazmisli\Agentio\YouTrack\IssueType;
 use Obrazmisli\Agentio\YouTrack\YouTrackException;
 
 /**
@@ -48,7 +49,7 @@ final class YouTrackSource
      */
     public function __construct(private readonly IssueRepository $repository, ?int $ttl = null)
     {
-        $this->ttl = $ttl ?? (int) config('agentio.ui.cache', 5);
+        $this->ttl = $ttl ?? (int) config('agentio.ui.cache', 15);
     }
 
     public function isConfigured(): bool
@@ -214,7 +215,9 @@ final class YouTrackSource
      */
     public static function summary(string $summary): string
     {
-        return (string) preg_replace('/^\[(IDEA|EPIC|STORY|TASK)\]\s*/i', '', $summary);
+        $prefixes = implode('|', array_map(fn (IssueType $type): string => preg_quote($type->prefix(), '/'), IssueType::cases()));
+
+        return (string) preg_replace('/^('.$prefixes.')\s*/i', '', $summary);
     }
 
     /**

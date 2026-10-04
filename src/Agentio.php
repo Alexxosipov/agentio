@@ -40,4 +40,18 @@ final class Agentio
 
         return Gate::forUser($request->user())->check('viewAgentio');
     }
+
+    /**
+     * Determine whether the given request may act from the dashboard: accept an epic (merge its branch into the
+     * development branch of this checkout) or send it back. The "manageAgentio" gate decides, or the callback of
+     * auth() when one is set.
+     */
+    public static function canManage(Request $request): bool
+    {
+        if (self::$authUsing !== null) {
+            return (self::$authUsing)($request);
+        }
+
+        return Gate::forUser($request->user())->check('manageAgentio');
+    }
 }

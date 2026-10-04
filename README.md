@@ -273,7 +273,7 @@ The data comes from YouTrack (cached for `AGENTIO_UI_CACHE` seconds, so polling 
 
 ### Access
 
-Every route of the dashboard, the assets included, goes through the `ui.middleware` (`web` by default) and the `viewAgentio` gate. In the `local` environment everyone may open it; elsewhere only an authenticated user whose email is listed in `AGENTIO_ALLOWED_EMAILS` (comma separated), everybody else gets 403. To change the rule, define your own `viewAgentio` gate in a service provider, or replace the check entirely with `Agentio::auth()` (`Agentio::auth(null)` restores the gate):
+Every route of the dashboard, the assets included, goes through the `ui.middleware` (`web` by default) and the `viewAgentio` gate; the actions (accept, send back) also need the `manageAgentio` gate and a session (its CSRF token is checked). In the `local` environment everyone passes both gates; elsewhere only an authenticated user whose email is listed in `AGENTIO_ALLOWED_EMAILS` (comma separated), everybody else gets 403. To change the rules, define your own `viewAgentio` / `manageAgentio` gates in a service provider (e.g. everybody of the team may watch, only leads may merge), or replace both checks with `Agentio::auth()` (`Agentio::auth(null)` restores the gates):
 
 ```php
 use Illuminate\Http\Request;
@@ -310,7 +310,7 @@ Everything can be set from `.env`; publish the config with `php artisan vendor:p
 | `AGENTIO_UI_PATH`, `AGENTIO_UI_DOMAIN` | `ui.path`, `ui.domain` | `agentio`, — | Where the dashboard is mounted |
 | — | `ui.middleware` | `['web']` | Middleware of the dashboard routes (the `viewAgentio` check is always added) |
 | `AGENTIO_UI_POLL` | `ui.poll` | 5 | Seconds between the page's requests |
-| `AGENTIO_UI_CACHE` | `ui.cache` | 5 | Seconds YouTrack answers are cached for the dashboard (0 disables the cache) |
+| `AGENTIO_UI_CACHE` | `ui.cache` | 15 | Seconds YouTrack answers are cached for the dashboard (0 disables the cache; keep it above `AGENTIO_UI_POLL`, or every poll goes to YouTrack) |
 | `AGENTIO_UI_ACTIONS` | `ui.actions` | true | Whether the dashboard may accept an epic in Review (merge its branch) and send it back for rework |
 | `AGENTIO_ALLOWED_EMAILS` | `ui.allowed_emails` | — | Emails allowed to open the dashboard outside the `local` environment |
 
@@ -322,7 +322,7 @@ The full manual for the people running the cycle is `resources/docs/AUTONOMOUS_W
 - Headless agents run with `--permission-mode dontAsk`: only the commands allowed by the session settings run. Epic sessions get the rules of the package plus the project's own; `git push` to the development and the production branch, force pushes, history rewrites, `composer require` and similar are denied, `Read(./.env)` is denied, and so are edits of `.agentio.json`, the agentio skills, `vendor/`, `php -i` and the `tinker` and `get-config` tools of Laravel Boost. Planning sessions run in your main checkout and are read-only (`resources/claude/planning.json`): they read the code and write YouTrack, nothing else.
 - `bin/agentio-guard` is the PreToolUse hook of every Bash command of the agents, a second line of defence. It runs from the package of the main checkout without booting the application of the worktree (code the agents edit), takes the protected branches and the extra directories from the loop (never from files of the worktree), and refuses the command when it fails. It splits the command line like a shell (quotes, `$(…)`, pipes, `cd`) and refuses: pushes to protected branches and force pushes, branch moves other than the branches of issues, merges into protected branches, history rewrites, git aliases and `git -c`/`config` writes, `git add -A`/`commit -a`/`--amend`, writes (`rm`, `mv`, `cp`, `sed -i`, `tee`, `>`) outside the project or to the agentio settings, skills and `vendor/`, `find -exec`, access to secrets and to the token (`.env`, `YOUTRACK_TOKEN`, `/proc/*/environ`, `php -i`, `config:show agentio`, `printenv`), and the commands only humans and the loop run (`agentio:install`, `agentio:setup-youtrack`, `agentio:worktree`, `agentio:accept`, `agentio:run` other than `--dry-run`, `tinker`), also behind artisan options such as `-n`.
 - Agents commit only the files of their task (`agentio:commit`) and never merge into the development branch; humans accept epics (unless you choose `auto-merge`) and release to production.
-- Keep the dashboard behind the `viewAgentio` gate; it shows issue data and agent logs.
+- Keep the dashboard behind the `viewAgentio` gate (it shows issue data and agent logs) and give `manageAgentio` (merging into the development branch of the checkout the app runs from) only to the people who accept epics.
 
 ## Testing
 

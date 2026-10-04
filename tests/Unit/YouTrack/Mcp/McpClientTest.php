@@ -108,6 +108,58 @@ it('reports JSON-RPC errors and HTTP failures', function () {
         ->and(fn () => mcpClient()->call('get_current_user'))->toThrow(YouTrackException::class, 'failed with HTTP 502');
 });
 
+it('sends a reading tool again after a server error, never a writing one', function () {
+    $mcp = (new FakeYouTrackMcp)->issue('XY-1', 'Task', 'Ready');
+    $failures = ['get_issue' => 1, 'add_issue_comment' => 1];
+    Http::fake(['yt.example.com/mcp' => function (Request $request) use ($mcp, &$failures) {
+        $tool = FakeYouTrackMcp::payload($request)['params']['name'] ?? null;
+
+        if (is_string($tool) && ($failures[$tool] ?? 0) > 0) {
+            $failures[$tool]--;
+
+            return Http::response('Bad gateway', 502);
+        }
+
+        return $mcp->handle($request);
+    }]);
+    $client = mcpClient();
+
+    expect($client->call('get_issue', ['issueId' => 'XY-1']))->toMatchArray(['id' => 'XY-1'])
+        ->and(fn () => $client->callText('add_issue_comment', ['issueId' => 'XY-1', 'text' => 'Hi']))->toThrow(YouTrackException::class, 'HTTP 502')
+        ->and($mcp->comments['XY-1'] ?? [])->toBe([])
+        ->and(count($mcp->callsOf('get_issue')))->toBe(1);
+});
+
+it('tells a missing endpoint from a missing issue', function () {
+    Http::fake(['yt.example.com/mcp' => Http::response('Not Found', 404)]);
+
+    expect(fn () => mcpClient()->call('get_issue', ['issueId' => 'XY-1']))
+        ->toThrow(fn (YouTrackException $exception) => expect($exception->status)->toBe(404)->and($exception->isNotFound())->toBeFalse());
+});
+
+it('opens a new session when the server dropped the old one', function () {
+    $mcp = (new FakeYouTrackMcp)->issue('XY-1', 'Task', 'Ready');
+    $expired = false;
+    Http::fake(['yt.example.com/mcp' => function (Request $request) use ($mcp, &$expired) {
+        if (! $expired && (FakeYouTrackMcp::payload($request)['method'] ?? null) === 'tools/call' && count($mcp->calls) === 1) {
+            $expired = true;
+
+            return Http::response('Session not found', 404);
+        }
+
+        return $mcp->handle($request);
+    }]);
+    $client = mcpClient();
+
+    expect($client->call('get_issue', ['issueId' => 'XY-1']))->toMatchArray(['id' => 'XY-1'])
+        ->and($client->call('get_issue', ['issueId' => 'XY-1']))->toMatchArray(['id' => 'XY-1'])
+        ->and($expired)->toBeTrue();
+
+    $methods = array_map(fn (array $pair): ?string => FakeYouTrackMcp::payload($pair[0])['method'] ?? null, Http::recorded()->all());
+
+    expect($methods)->toBe(['initialize', 'notifications/initialized', 'tools/call', 'tools/call', 'initialize', 'notifications/initialized', 'tools/call']);
+});
+
 it('reads every page of a paginated tool', function () {
     $server = (new FakeYouTrackMcp)->fake();
 

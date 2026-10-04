@@ -106,17 +106,18 @@ final class AgentioServiceProvider extends ServiceProvider
     }
 
     /**
-     * The "viewAgentio" gate: everyone in the local environment, otherwise the emails in agentio.ui.allowed_emails.
-     * An application may define its own gate or replace the whole check with Agentio::auth().
+     * The "viewAgentio" gate (open the dashboard) and the "manageAgentio" gate (accept or send back an epic from
+     * it): everyone in the local environment, otherwise the emails in agentio.ui.allowed_emails. An application
+     * may define its own gates or replace both checks with Agentio::auth().
      */
     private function defineGate(): void
     {
-        if (Gate::has('viewAgentio')) {
-            return;
+        foreach (['viewAgentio', 'manageAgentio'] as $gate) {
+            if (! Gate::has($gate)) {
+                Gate::define($gate, fn (?Authenticatable $user = null): bool => $this->app->environment('local')
+                    || ($user !== null && in_array(data_get($user, 'email'), (array) config('agentio.ui.allowed_emails', []), true)));
+            }
         }
-
-        Gate::define('viewAgentio', fn (?Authenticatable $user = null): bool => $this->app->environment('local')
-            || ($user !== null && in_array(data_get($user, 'email'), (array) config('agentio.ui.allowed_emails', []), true)));
     }
 
     private function registerRoutes(): void

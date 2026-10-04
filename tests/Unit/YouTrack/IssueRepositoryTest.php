@@ -6,7 +6,6 @@ use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Sleep;
 use Obrazmisli\Agentio\YouTrack\Client;
-use Obrazmisli\Agentio\YouTrack\Issue;
 use Obrazmisli\Agentio\YouTrack\IssueRepository;
 use Obrazmisli\Agentio\YouTrack\YouTrackException;
 
@@ -34,39 +33,6 @@ it('searches the project and pages through the results', function () {
         ->and(repository()->project())->toBe('TP');
 
     Http::assertSent(fn (Request $request): bool => $request['query'] === 'project: TP Type: Epic');
-});
-
-it('finds an issue with its description', function () {
-    Http::fake(['yt.example.com/api/issues/TP-6?*' => Http::response([...apiIssue('TP-6'), 'description' => 'Body'])]);
-
-    expect(repository()->find('TP-6'))
-        ->toBeInstanceOf(Issue::class)
-        ->description->toBe('Body');
-});
-
-it('lists ideas waiting for planning', function () {
-    Http::fake(['yt.example.com/api/issues?*' => Http::response([
-        apiIssue('TP-1', ['Type' => 'Idea', 'Stage' => 'Backlog']),
-        apiIssue('TP-2', ['Type' => 'Task', 'Stage' => 'Backlog'], tags: ['idea']),
-        apiIssue('TP-3', ['Type' => 'Idea', 'Stage' => 'Backlog'], tags: ['agent-claimed']),
-        apiIssue('TP-4', ['Type' => 'Task', 'Stage' => 'Backlog']),
-        apiIssue('TP-5', ['Type' => 'Idea', 'Stage' => 'Analysis', 'State' => 'Backlog']),
-    ])]);
-
-    expect(array_map(fn (Issue $issue): string => $issue->id, repository()->ideas()))->toBe(['TP-1', 'TP-2']);
-
-    Http::assertSent(fn (Request $request): bool => $request['query'] === 'project: TP Stage: Backlog');
-});
-
-it('lists claimed epics', function () {
-    Http::fake(['yt.example.com/api/issues?*' => Http::response([
-        apiIssue('TP-2', ['Type' => 'Epic', 'Stage' => 'In Progress'], tags: ['agent-claimed']),
-        apiIssue('TP-9', ['Type' => 'Task', 'Stage' => 'In Progress'], tags: ['agent-claimed']),
-    ])]);
-
-    expect(array_map(fn (Issue $issue): string => $issue->id, repository()->claimedEpics()))->toBe(['TP-2']);
-
-    Http::assertSent(fn (Request $request): bool => $request['query'] === 'project: TP Type: Epic tag: agent-claimed');
 });
 
 it('builds the readiness graph and loads issues outside the project on demand', function () {
@@ -118,54 +84,6 @@ it('reads comments and agent comments of an issue', function () {
         ->and($agentComments->claimOwner())->toBe('host:/srv/worktrees/TP-2');
 
     Http::assertSent(fn (Request $request): bool => $request['fields'] === Client::COMMENT_FIELDS);
-});
-
-it('reads the latest comments of the project from the activity stream', function () {
-    Http::fake(['yt.example.com/api/activities*' => Http::response([
-        [
-            'id' => 'a-2',
-            'author' => ['login' => 'a.osipov', 'fullName' => 'Alexander Osipov'],
-            'added' => [['id' => '7-63', 'text' => "[AGENT:DONE]\nEpic is ready", 'created' => 1791013037440, 'issue' => ['idReadable' => 'TP-2', 'summary' => '[EPIC] Avatar']]],
-        ],
-        [
-            'id' => 'a-1',
-            'author' => ['login' => 'someone'],
-            'added' => [['id' => '7-60', 'text' => 'Looks good', 'created' => 1791013000000, 'issue' => ['idReadable' => 'TP-3']], 'junk'],
-        ],
-        ['id' => 'a-0', 'added' => 'junk'],
-    ])]);
-
-    $comments = repository()->recentComments(20);
-    $agentComments = repository()->recentAgentComments(20);
-
-    expect($comments)->toHaveCount(2)
-        ->and($comments[0]->toArray())->toBe([
-            'id' => '7-63',
-            'issueId' => 'TP-2',
-            'issueSummary' => '[EPIC] Avatar',
-            'text' => "[AGENT:DONE]\nEpic is ready",
-            'author' => 'a.osipov',
-            'authorName' => 'Alexander Osipov',
-            'createdAt' => '2026-10-03T07:37:17+00:00',
-        ])
-        ->and($comments[1]->issueId)->toBe('TP-3')
-        ->and($agentComments)->toHaveCount(1)
-        ->and($agentComments[0]->kind)->toBe('DONE')
-        ->and($agentComments[0]->issueId)->toBe('TP-2');
-
-    Http::assertSent(fn (Request $request): bool => $request['issueQuery'] === 'project: TP');
-});
-
-it('reads the latest agent comments of selected issues', function () {
-    Http::fake(['yt.example.com/api/activities*' => Http::response([
-        ['id' => 'a-1', 'added' => [['id' => '7-1', 'text' => "[AGENT:START]\nowner: `h:/w#TP-4`", 'issue' => ['idReadable' => 'TP-4']]]],
-    ])]);
-
-    expect(repository()->recentAgentCommentsOf([]))->toBe([])
-        ->and(repository()->recentAgentCommentsOf(['TP-2', 'TP-4'], 30)[0]->owner())->toBe('h:/w#TP-4');
-
-    Http::assertSentCount(1);
-    Http::assertSent(fn (Request $request): bool => $request['issueQuery'] === 'issue ID: TP-2, TP-4' && (int) $request['$top'] === 30);
 });
 
 it('links to issues in YouTrack', function () {

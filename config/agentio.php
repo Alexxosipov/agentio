@@ -108,8 +108,9 @@ return [
     |--------------------------------------------------------------------------
     |
     | The process dashboard served at /{path}. Access is granted by the
-    | "viewAgentio" gate: always in the local environment, otherwise to the
-    | listed emails. Override it with Agentio::auth(fn ($request) => ...).
+    | "viewAgentio" gate, the actions by the "manageAgentio" gate: always in
+    | the local environment, otherwise to the listed emails. Define your own
+    | gates, or override both with Agentio::auth(fn ($request) => ...).
     | The page polls its JSON endpoints every "poll" seconds; YouTrack
     | responses are cached for "cache" seconds (0 disables the cache; failures
     | are cached for at least 30 seconds). "actions" allows accepting an epic
@@ -125,7 +126,7 @@ return [
         'domain' => env('AGENTIO_UI_DOMAIN'),
         'middleware' => ['web'],
         'poll' => (int) env('AGENTIO_UI_POLL', 5),
-        'cache' => (int) env('AGENTIO_UI_CACHE', 5),
+        'cache' => (int) env('AGENTIO_UI_CACHE', 15),
         'actions' => (bool) env('AGENTIO_UI_ACTIONS', true),
         'allowed_emails' => array_values(array_filter(array_map(
             trim(...),

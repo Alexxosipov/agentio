@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace Obrazmisli\Agentio\YouTrack;
 
-use Obrazmisli\Agentio\Process\AgentComment;
 use Obrazmisli\Agentio\Process\AgentComments;
 use Obrazmisli\Agentio\Process\ReadinessGraph;
 
@@ -71,16 +70,6 @@ final readonly class IssueRepository
     }
 
     /**
-     * A single issue with its description.
-     *
-     * @throws YouTrackException
-     */
-    public function find(string $id): Issue
-    {
-        return Issue::fromApi($this->client->issue($id));
-    }
-
-    /**
      * The readiness graph of the whole project; issues outside the project are loaded on demand.
      *
      * @throws YouTrackException
@@ -98,37 +87,6 @@ final readonly class IssueRepository
                 throw $exception;
             }
         });
-    }
-
-    /**
-     * Ideas waiting for planning: Type Idea or tag "idea", Stage Backlog, not claimed.
-     *
-     * @return list<Issue>
-     *
-     * @throws YouTrackException
-     */
-    public function ideas(): array
-    {
-        // The search is narrowed by the query; the Stage is re-checked on the answer.
-        return array_values(array_filter(
-            $this->projectIssues(State::FIELD.': '.State::Backlog->value),
-            fn (Issue $issue): bool => $issue->isIdea() && $issue->hasState(State::Backlog) && ! $issue->isClaimed(),
-        ));
-    }
-
-    /**
-     * Epics with the agent-claimed tag.
-     *
-     * @return list<Issue>
-     *
-     * @throws YouTrackException
-     */
-    public function claimedEpics(): array
-    {
-        return array_values(array_filter(
-            $this->projectIssues('Type: Epic tag: '.Tag::Claimed->value),
-            fn (Issue $issue): bool => $issue->hasType(IssueType::Epic) && $issue->isClaimed(),
-        ));
     }
 
     /**
@@ -154,18 +112,6 @@ final readonly class IssueRepository
     }
 
     /**
-     * The latest comments across the project (or of the issues matching $issueQuery), newest first.
-     *
-     * @return list<Comment>
-     *
-     * @throws YouTrackException
-     */
-    public function recentComments(int $limit = 50, ?string $issueQuery = null): array
-    {
-        return self::commentsFromActivities($this->client->commentActivities($issueQuery ?? $this->projectQuery(), $limit));
-    }
-
-    /**
      * The comments added by comment activities (see Client::commentActivities()), in the same order.
      *
      * @param  list<array<array-key, mixed>>  $activities
@@ -184,31 +130,6 @@ final readonly class IssueRepository
         }
 
         return $comments;
-    }
-
-    /**
-     * The latest [AGENT:*] comments across the project (or of the issues matching $issueQuery), newest first.
-     *
-     * @return list<AgentComment>
-     *
-     * @throws YouTrackException
-     */
-    public function recentAgentComments(int $limit = 50, ?string $issueQuery = null): array
-    {
-        return array_values(array_filter(array_map(AgentComment::fromComment(...), $this->recentComments($limit, $issueQuery))));
-    }
-
-    /**
-     * The latest [AGENT:*] comments of the given issues, newest first.
-     *
-     * @param  list<string>  $ids
-     * @return list<AgentComment>
-     *
-     * @throws YouTrackException
-     */
-    public function recentAgentCommentsOf(array $ids, int $limit = 50): array
-    {
-        return $ids === [] ? [] : $this->recentAgentComments($limit, self::idQuery($ids));
     }
 
     /**

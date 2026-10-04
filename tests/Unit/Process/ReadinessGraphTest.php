@@ -106,10 +106,6 @@ it('computes readiness of epics', function () {
         ->and(projectGraph(['E1' => ['Epic', 'Ready', null, [], ['agent-claimed']]])->isEpicReady('E1'))->toBeFalse();
 });
 
-it('lists ready issues waiting for dependencies', function () {
-    expect(projectGraph()->waitingForDependencies())->toBe(['T2' => ['T1'], 'T3' => ['X1']]);
-});
-
 it('detects dependency cycles', function () {
     $graph = graphOf([
         'A' => ['Task', 'Ready', null, ['B']],

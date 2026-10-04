@@ -39,11 +39,6 @@ final readonly class AgentComment
         return new self($comment->issueId, $match[1], $text, $comment->author, $comment->createdAt);
     }
 
-    public static function isAgentComment(string $text): bool
-    {
-        return preg_match(self::MARKER, ltrim($text)) === 1;
-    }
-
     public function kind(): ?AgentCommentKind
     {
         return AgentCommentKind::tryFrom($this->kind);

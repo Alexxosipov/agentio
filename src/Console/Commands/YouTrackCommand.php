@@ -10,6 +10,7 @@ use Obrazmisli\Agentio\Process\AgentCommentKind;
 use Obrazmisli\Agentio\Process\AgentComments;
 use Obrazmisli\Agentio\Process\Claims;
 use Obrazmisli\Agentio\Process\ReadinessGraph;
+use Obrazmisli\Agentio\Process\StructureValidator;
 use Obrazmisli\Agentio\Process\TreeNode;
 use Obrazmisli\Agentio\Settings;
 use Obrazmisli\Agentio\YouTrack\Issue;
@@ -284,8 +285,8 @@ final class YouTrackCommand extends Command
 
         $waiting = [];
 
-        foreach (['Task', 'Epic'] as $type) {
-            foreach ($this->tools->searchIssues($this->query('Type: '.$type.' '.State::FIELD.': '.State::Ready->value)) as $raw) {
+        foreach ([IssueType::Task->value, IssueType::Epic->value] as $type) {
+            foreach ($this->tools->searchIssues($this->query(IssueType::FIELD.': '.$type.' '.State::FIELD.': '.State::Ready->value)) as $raw) {
                 $id = (string) ($raw['id'] ?? '');
                 $unmet = $id === '' ? [] : $this->graph()->unmetDependencies($id);
 
@@ -329,40 +330,9 @@ final class YouTrackCommand extends Command
         }
 
         $epics = $issue->hasType(IssueType::Epic) ? [$root] : Tools::byNumber($this->tools->issueIds($this->query('Type: Epic relates to: '.$root)));
-        $problems = $epics === [] ? ["{$root}: no epics found (an idea is linked to its epics with 'relates to')."] : [];
-        $prefixes = ['Epic' => '[EPIC]', 'Story' => '[STORY]', 'Task' => '[TASK]'];
-        $parents = ['Story' => 'Epic', 'Task' => 'Story'];
-
-        foreach ($epics as $epic) {
-            foreach ([$epic, ...$this->graph()->descendants($epic)] as $id) {
-                $node = $this->graph()->get($id);
-                $type = (string) $node->type();
-                $prefix = $prefixes[$type] ?? null;
-
-                if ($prefix === null || ! str_starts_with($node->summary, $prefix)) {
-                    $problems[] = "{$id}: Type '{$type}' does not match the summary prefix.";
-                }
-
-                $parent = $node->parentId();
-                $expected = $parents[$type] ?? null;
-
-                if ($expected !== null && ($parent === null || $this->graph()->find($parent)?->type() !== $expected)) {
-                    $problems[] = "{$id}: a {$type} must be a subtask of a {$expected}.";
-                }
-
-                if ($type === 'Story' && $node->childIds() === []) {
-                    $problems[] = "{$id}: the story has no tasks.";
-                }
-            }
-
-            if ($this->graph()->get($epic)->hasState(State::Ready) && $this->graph()->readyTasks($epic) === []) {
-                $problems[] = "{$epic}: the epic is Ready but its first wave of ready tasks is empty.";
-            }
-        }
-
-        foreach ($this->graph()->dependencyCycles() as $cycle) {
-            $problems[] = 'Dependency cycle: '.implode(' -> ', $cycle);
-        }
+        $problems = $epics === []
+            ? ["{$root}: no epics found (an idea is linked to its epics with 'relates to')."]
+            : (new StructureValidator($this->graph()))->problems($epics);
 
         $this->output(['ok' => $problems === [], 'epics' => $epics, 'problems' => $problems], function (array $result): void {
             $this->line(($result['ok'] ? 'OK' : 'PROBLEMS').' epics='.implode(',', $result['epics']));

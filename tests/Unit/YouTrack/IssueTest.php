@@ -62,8 +62,7 @@ it('normalises a YouTrack issue', function () {
         ->and($issue->childIds())->toBe([])
         ->and($issue->dependencyIds())->toBe([])
         ->and($issue->createdAt?->getTimestampMs())->toBe(1791010361184)
-        ->and($issue->updatedAt?->toIso8601String())->toBe('2026-10-03T11:39:10+00:00')
-        ->and($issue->isResolved())->toBeTrue();
+        ->and($issue->updatedAt?->toIso8601String())->toBe('2026-10-03T11:39:10+00:00');
 });
 
 it('tolerates a sparse payload', function () {
@@ -75,7 +74,6 @@ it('tolerates a sparse payload', function () {
         ->and($issue->parentId())->toBeNull()
         ->and($issue->createdAt?->getTimestampMs())->toBe(1791010361184)
         ->and($issue->updatedAt)->toBeNull()
-        ->and($issue->isResolved())->toBeFalse()
         ->and(Issue::fromApi([])->id)->toBe('');
 });
 
@@ -142,9 +140,7 @@ it('normalises an issue of the get_issue tool of the MCP server', function () {
         ->and($issue->relations)->toBe(['depends on' => ['TP-9', 'TP-10'], 'subtask of' => ['TP-4']])
         ->and($issue->parentId())->toBe('TP-4')
         ->and($issue->childIds())->toBe([])
-        ->and($issue->createdAt?->toIso8601String())->toBe('2026-10-03T17:13:17+00:00')
-        ->and($issue->isResolved())->toBeFalse();
+        ->and($issue->createdAt?->toIso8601String())->toBe('2026-10-03T17:13:17+00:00');
 
-    expect(Issue::fromMcp(['id' => 'TP-1', 'summary' => 'Search result', 'customFields' => ['Stage' => 'Done'], 'resolvedAt' => '2026-10-03 19:11:46'])->isResolved())->toBeTrue()
-        ->and(Issue::fromMcp([])->id)->toBe('');
+    expect(Issue::fromMcp([])->id)->toBe('');
 });
