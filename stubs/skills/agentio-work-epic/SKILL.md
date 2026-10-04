@@ -68,6 +68,11 @@ git rev-parse --show-toplevel # путь worktree
 ## 4. Завершение
 
 - **Все STORY в `Review` или `Done`:**
+  0. **Синхронизация с `{{base_branch}}`** — ветка эпика получает то, что приняли в `{{base_branch}}` после её создания (другие эпики), и полный прогон проверяет уже объединённый код:
+     - политика `local-branch`: `git merge --no-edit {{base_branch}}`;
+     - `pull-request` / `auto-merge`: `git fetch origin {{base_branch}}`, затем `git merge --no-edit origin/{{base_branch}}`.
+
+     При конфликте выполни `git diff --name-only --diff-filter=U` (список файлов), затем `git merge --abort`. Сам конфликты не разрешай: перечисли файлы в `[AGENT:DONE]` эпика в разделе «что осталось» — их разрешит человек при приёмке.
   1. `php artisan agentio:test --full` — полный прогон на ветке. Если красный — создай TASK-исправление в соответствующей STORY (Ready) и вернись в цикл (не более 2 раз, потом `[AGENT:BLOCKED]`).
   2. Действуй по политике слияния `MERGE_POLICY` (в этом проекте — `{{merge_policy}}`):
      - `local-branch` — ничего не пушить. Ветка остаётся в worktree.

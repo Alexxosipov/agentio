@@ -90,7 +90,7 @@ it('gives epic sessions the session settings of the package and the project rule
 
     $settings = (new SessionSettings(app(Settings::class)))->epic();
 
-    expect($settings['permissions']['allow'])->toContain('Bash(php artisan agentio:yt *)', 'Bash(php artisan agentio:commit *)', 'Bash(php artisan agentio:test *)', 'mcp__youtrack__*', 'Skill', 'Edit(./**)', 'Bash(make lint)', 'Bash(git push -u origin XY-*)')
+    expect($settings['permissions']['allow'])->toContain('Bash(php artisan agentio:yt *)', 'Bash(php artisan agentio:commit *)', 'Bash(php artisan agentio:test *)', 'mcp__youtrack__*', 'Skill', 'Edit(./**)', 'Bash(make lint)', 'Bash(git push -u origin XY-*)', 'Bash(git merge --no-edit develop)', 'Bash(git merge --abort)')
         // "/**" is relative to the main checkout in a git worktree: it would not let the agents edit the epic worktree.
         ->and($settings['permissions']['allow'])->not->toContain('Edit(/**)', 'Bash(php -i)')
         ->and($settings['permissions']['deny'])->toContain('Bash(git push --force*)', 'Bash(git push origin develop*)', 'Bash(git checkout develop*)', 'Bash(git push origin main*)', 'Bash(php artisan agentio:accept*)', 'Read(./.env)', 'Read(**/.env)', 'Edit(.claude/skills/agentio-*/**)', 'Read(./secrets/**)', 'mcp__laravel-boost__tinker', 'mcp__laravel-boost__get-config')

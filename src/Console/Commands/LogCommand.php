@@ -6,6 +6,7 @@ namespace Obrazmisli\Agentio\Console\Commands;
 
 use Illuminate\Console\Command;
 use Obrazmisli\Agentio\Runtime\LoopState;
+use Obrazmisli\Agentio\Runtime\ReverseLineReader;
 use Symfony\Component\Console\Attribute\AsCommand;
 
 /**
@@ -15,6 +16,9 @@ use Symfony\Component\Console\Attribute\AsCommand;
 #[AsCommand(name: 'agentio:log')]
 final class LogCommand extends Command
 {
+    /** Bytes read from the end of a log for its last lines at most. */
+    public const int MAX_BYTES = 16 * 1024 * 1024;
+
     /**
      * @var string
      */
@@ -39,20 +43,31 @@ final class LogCommand extends Command
             return self::FAILURE;
         }
 
+        // Read backwards from the end: logs of long sessions grow to gigabytes.
+        $limit = max(1, (int) $this->option('lines'));
         $rendered = [];
 
-        foreach (file($path, FILE_IGNORE_NEW_LINES) ?: [] as $line) {
-            array_push($rendered, ...self::render($line));
+        foreach (ReverseLineReader::lines($path, self::MAX_BYTES) as $line) {
+            array_unshift($rendered, ...self::render($line));
+
+            if (count($rendered) >= $limit) {
+                break;
+            }
         }
 
-        foreach (array_slice($rendered, -max(1, (int) $this->option('lines'))) as $line) {
+        foreach (array_slice($rendered, -$limit) as $line) {
             $this->line($line, null);
         }
 
-        if (! $this->option('follow')) {
-            return self::SUCCESS;
-        }
+        return $this->option('follow') ? $this->follow($path) : self::SUCCESS;
+    }
 
+    /**
+     * Print the events written after the current end of the log, whole lines only; start over when the log
+     * was truncated.
+     */
+    private function follow(string $path): int
+    {
         $handle = fopen($path, 'r');
 
         if ($handle === false) {
@@ -60,19 +75,31 @@ final class LogCommand extends Command
         }
 
         fseek($handle, 0, SEEK_END);
+        $pending = '';
 
         while (true) { // @phpstan-ignore while.alwaysTrue
-            $line = fgets($handle);
+            clearstatcache(true, $path);
 
-            if ($line === false) {
+            if ((int) filesize($path) < (int) ftell($handle)) {
+                fseek($handle, 0);
+                $pending = '';
+            }
+
+            $chunk = (string) fread($handle, 65536);
+
+            if ($chunk === '') {
                 usleep(500_000);
-                fseek($handle, 0, SEEK_CUR);
 
                 continue;
             }
 
-            foreach (self::render(rtrim($line)) as $output) {
-                $this->line($output, null);
+            $lines = explode("\n", $pending.$chunk);
+            $pending = (string) array_pop($lines);
+
+            foreach ($lines as $line) {
+                foreach (self::render(rtrim($line)) as $output) {
+                    $this->line($output, null);
+                }
             }
         }
     }

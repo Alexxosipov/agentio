@@ -16,6 +16,7 @@
 
 ### Added
 
+- The epic orchestrator merges the development branch into the epic branch before the full test run (a conflict is aborted and left for the human, with the files listed), so an epic is tested together with the epics accepted after it started.
 - `AGENTIO_PRODUCTION_BRANCH` (`production_branch`, recorded in `.agentio.json`).
 - Planning sessions run with read-only settings (`resources/claude/planning.json`): they work in the developer's main checkout and change no file.
 - `php artisan agentio:accept <EPIC>`: the dashboard's acceptance from the command line. The loop uses it for `auto-merge` without a remote, so an auto-merged epic and its stories are now moved to `Done` too.
@@ -24,6 +25,7 @@
 
 ### Fixed
 
+- `agentio:log` reads a log from its end instead of loading it whole, and `--follow` prints whole lines only and starts over when the log is truncated.
 - YouTrack writes (creating an issue, posting a comment, creating a tag or a saved search) are no longer sent again after a timeout or a 5xx, which could duplicate them; reads still are, and writes are retried after a refused connection or a 429 (`YouTrack\Retry`, shared by the REST and the MCP client).
 - An HTTP error of the MCP endpoint (a wrong URL) is a transport error, no longer "issue not found"; a session the MCP server dropped is opened again once.
 - The dashboard's actions need the new `manageAgentio` gate (by default the same rule as `viewAgentio`) and a session, so they never run without a CSRF check; the review panel shows them only to users who may use them.

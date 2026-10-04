@@ -60,7 +60,7 @@ YouTrack (проект `{{project}}`, инстанс из `YOUTRACK_URL`) — е
 /agentio-work-epic: субагент agentio-develop-task по каждой TASK (параллельно, если файлы не пересекаются)
    │                субагент agentio-review-story по каждой STORY (APPROVED или новые TASK-замечания)
    ▼
-полный прогон тестов → [AGENT:DONE] → EPIC: Review
+слияние {{base_branch}} в ветку эпика → полный прогон тестов → [AGENT:DONE] → EPIC: Review
    │
    ▼
 человек: проверка → merge в {{base_branch}} (develop-сервер) → EPIC и STORY: Done
@@ -543,7 +543,7 @@ php artisan agentio:run --kill     # прервать работающие се�
 
 - STORY и их вердикты (все `APPROVED`).
 - Список коммитов (`git log --oneline {{base_branch}}..HEAD`): каждый коммит начинается с ID задачи.
-- Результат полного прогона (`php artisan agentio:test --full`).
+- Результат полного прогона (`php artisan agentio:test --full`). Перед ним оркестратор вливает `{{base_branch}}` в ветку эпика, так что тесты проверяют код вместе с уже принятыми эпиками; если слияние дало конфликты, оркестратор его отменяет и перечисляет файлы в «что осталось» — их разрешаете вы при приёмке.
 - Ветка или PR и команды приёмки.
 - Созданная смежная работа: новые TASK в Backlog, которые требуют вашего решения.
 

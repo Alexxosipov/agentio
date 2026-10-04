@@ -39,6 +39,7 @@ final readonly class SessionSettings
         $package = self::read(self::packageFile(self::FILE));
         $project = self::read($this->settings->basePath().'/.claude/settings.json');
         $key = $this->settings->project();
+        $base = $this->settings->baseBranch();
 
         return $this->compose($package, [
             'allow' => [
@@ -46,6 +47,11 @@ final readonly class SessionSettings
                 ...self::rules($project, 'allow'),
                 "Bash(git push -u origin {$key}-*)",
                 "Bash(git push origin {$key}-*)",
+                // The orchestrator brings the development branch into the epic branch before the full test run.
+                "Bash(git merge --no-edit {$base})",
+                "Bash(git merge --no-edit origin/{$base})",
+                "Bash(git fetch origin {$base})",
+                'Bash(git merge --abort)',
             ],
             'deny' => [...self::rules($package, 'deny'), ...self::rules($project, 'deny'), ...$this->branchRules()],
         ]);
