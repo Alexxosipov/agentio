@@ -292,11 +292,13 @@ it('aborts a conflicting merge and leaves the main checkout as it was', function
     git($project, 'commit', '-q', '-am', 'Rename');
     $head = git($project, 'rev-parse', 'HEAD');
 
-    $this->postJson('/agentio/api/epics/XY-2/accept')
+    // git 2.38+ finds the conflict before the merge (merge-tree), an older git when the merge stops.
+    $details = $this->postJson('/agentio/api/epics/XY-2/accept')
         ->assertStatus(409)
-        ->assertJsonPath('details', ['README.md']);
+        ->json('details');
 
-    expect(git($project, 'rev-parse', 'HEAD'))->toBe($head)
+    expect($details)->toBeIn([['README.md'], ['Слияние без конфликтов — README.md']])
+        ->and(git($project, 'rev-parse', 'HEAD'))->toBe($head)
         ->and(git($project, 'status', '--porcelain', '--untracked-files=no'))->toBe('')
         ->and(file_exists($project.'/.git/MERGE_HEAD'))->toBeFalse()
         ->and($mcp->callsOf('update_issue'))->toBe([]);
