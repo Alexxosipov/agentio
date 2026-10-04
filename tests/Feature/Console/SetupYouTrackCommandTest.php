@@ -26,14 +26,24 @@ beforeEach(function () {
 
 /**
  * Global and project fields of a YouTrack in Russian whose default Stage and Type fields are attached to the
- * project with bundles of its own, optionally with a State field («Состояние») as well.
+ * project with bundles of its own, optionally with a State field («Состояние») as well. A value is a name, or
+ * a name => localized name.
  *
+ * @param  array<int|string, string>  $stages
+ * @param  array<int|string, string>  $types
  * @return array<string, mixed>
  */
-function russianYouTrack(bool $withState = false, array $stages = ['Backlog', 'Analysis', 'Ready', 'In Progress', 'Review', 'Blocked', 'Done']): array
+function russianYouTrack(bool $withState = false, array $stages = ['Backlog', 'Analysis', 'Ready', 'In Progress', 'Review', 'Blocked', 'Done'], array $types = ['Idea', 'Epic', 'Story', 'Task']): array
 {
-    $stageValues = array_map(fn (string $name): array => ['id' => 's-'.$name, 'name' => $name], $stages);
-    $typeValues = array_map(fn (string $name): array => ['id' => 't-'.$name, 'name' => $name], ['Idea', 'Epic', 'Story', 'Task']);
+    $values = fn (string $prefix, array $values): array => array_map(
+        fn (int|string $key, string $value): array => is_int($key)
+            ? ['id' => $prefix.$value, 'name' => $value, 'localizedName' => null]
+            : ['id' => $prefix.$key, 'name' => $key, 'localizedName' => $value],
+        array_keys($values),
+        $values,
+    );
+    $stageValues = $values('s-', $stages);
+    $typeValues = $values('t-', $types);
 
     return [
         'projectFields' => [
@@ -140,19 +150,88 @@ it('only adds the missing values to the Stage field of the project', function ()
         ->and(implode("\n", restWrites()))->not->toContain('customFieldSettings/customFields {', 'bundles/state {', 'Develop');
 });
 
-it('uses a Stage field that only has the localized name and never creates a second one', function () {
+it('renames a Stage field named in Russian to Stage and attaches it instead of creating a second one', function () {
     hostProject();
     (new FakeYouTrackMcp)->fake();
     $youtrack = russianYouTrack();
-    $youtrack['projectFields'] = [];
+    $youtrack['projectFields'] = [$youtrack['projectFields'][1]];
     $youtrack['fields'][0] = ['id' => 'f-etap', 'name' => 'Этап', 'localizedName' => null, 'fieldType' => ['id' => 'state[1]'], 'instances' => []];
     fakeYouTrackRestApi($youtrack);
 
     $this->artisan('agentio:setup-youtrack', ['--no-interaction' => true])
-        ->expectsOutputToContain('YouTrack has it as «Этап»: rename it back to Stage')
+        ->expectsOutputToContain('rename the field «Этап» to Stage')
         ->assertSuccessful();
 
-    expect(implode("\n", restWrites()))->not->toContain('"name":"Stage"', 'bundles/state {');
+    $writes = implode("\n", restWrites());
+
+    expect($writes)->toContain(
+        'POST admin/customFieldSettings/customFields/f-etap {"name":"Stage"}',
+        'POST admin/projects/0-9/customFields {"$type":"StateProjectCustomField","field":{"id":"f-etap"}',
+    )->not->toContain('customFieldSettings/customFields {', 'bundles/state {');
+});
+
+it('renames a field of the project named in Russian', function () {
+    hostProject();
+    $mcp = (new FakeYouTrackMcp)->fake();
+    existingKnowledgeBase($mcp);
+    $youtrack = russianYouTrack();
+    $youtrack['projectFields'][1]['field'] = ['id' => 'f-type', 'name' => 'Тип', 'localizedName' => null, 'fieldType' => ['id' => 'enum[1]']];
+    $youtrack['fields'][1] = [...$youtrack['fields'][1], 'name' => 'Тип', 'localizedName' => null];
+    fakeYouTrackRestApi($youtrack);
+
+    $this->artisan('agentio:setup-youtrack', ['--no-interaction' => true])
+        ->expectsOutputToContain('rename the field «Тип» to Type')
+        ->assertSuccessful();
+
+    expect(restWrites())->toBe(['POST admin/customFieldSettings/customFields/f-type {"name":"Type"}']);
+});
+
+it('shows the values YouTrack localized by their English names, so the MCP server answers with them', function () {
+    hostProject();
+    $mcp = (new FakeYouTrackMcp)->fake();
+    existingKnowledgeBase($mcp);
+    fakeYouTrackRestApi(russianYouTrack(
+        stages: ['Backlog' => 'Очередь', 'Develop' => 'Разработка', 'Analysis', 'Ready', 'In Progress', 'Review' => 'Ревью', 'Blocked', 'Done' => 'Готово'],
+        types: ['Idea', 'Epic', 'Story', 'Task' => 'Задание'],
+    ));
+
+    $this->artisan('agentio:setup-youtrack', ['--no-interaction' => true])
+        ->expectsOutputToContain('show value Backlog by its name instead of «Очередь»')
+        ->assertSuccessful();
+
+    expect(restWrites())->toBe([
+        'POST admin/customFieldSettings/bundles/state/b-stage/values/s-Backlog {"localizedName":null}',
+        'POST admin/customFieldSettings/bundles/state/b-stage/values/s-Review {"localizedName":null}',
+        'POST admin/customFieldSettings/bundles/state/b-stage/values/s-Done {"localizedName":null}',
+        'POST admin/customFieldSettings/bundles/enum/b-type/values/t-Task {"localizedName":null}',
+    ]);
+});
+
+it('renames the values named in Russian to the names of the cycle instead of adding them next to them', function () {
+    hostProject();
+    $mcp = (new FakeYouTrackMcp)->fake();
+    existingKnowledgeBase($mcp);
+    $youtrack = russianYouTrack(stages: ['Очередь', 'Разработка', 'В работе', 'Готово'], types: ['Эпик', 'Задача', 'Ошибка']);
+    $youtrack['projectFields'][0]['defaultValues'] = [['name' => 'Очередь']];
+    fakeYouTrackRestApi($youtrack);
+
+    $this->artisan('agentio:setup-youtrack', ['--no-interaction' => true])
+        ->expectsOutputToContain('rename value «Очередь» to Backlog')
+        ->assertSuccessful();
+
+    $writes = restWrites();
+
+    $rename = fn (string $kind, string $bundle, string $value, string $name): string => "POST admin/customFieldSettings/bundles/{$kind}/{$bundle}/values/".rawurlencode($value).' {"name":"'.$name.'","localizedName":null}';
+
+    expect($writes)->toContain(
+        $rename('state', 'b-stage', 's-Очередь', 'Backlog'),
+        $rename('state', 'b-stage', 's-В работе', 'In Progress'),
+        $rename('state', 'b-stage', 's-Готово', 'Done'),
+        $rename('enum', 'b-type', 't-Эпик', 'Epic'),
+        $rename('enum', 'b-type', 't-Задача', 'Task'),
+        'POST admin/projects/0-9/customFields/pf-stage {"$type":"StateProjectCustomField","defaultValues":[{"id":"s-Очередь","$type":"StateBundleElement"}]}',
+    )->and(implode("\n", $writes))->toContain('values {"name":"Analysis"', 'values {"name":"Idea"')
+        ->not->toContain('values {"name":"Backlog"', 'values {"name":"Done"', 'values {"name":"Task"', 'Разработка', 'Ошибка');
 });
 
 it('reports a State field it does not use and leaves it as is', function () {

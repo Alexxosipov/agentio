@@ -276,6 +276,19 @@ final readonly class Client
     }
 
     /**
+     * Change a global custom field, e.g. its name.
+     *
+     * @param  array<string, mixed>  $changes
+     * @return array<array-key, mixed>
+     *
+     * @throws YouTrackException
+     */
+    public function updateCustomField(string $fieldId, array $changes): array
+    {
+        return $this->post('admin/customFieldSettings/customFields/'.rawurlencode($fieldId), $changes, ['fields' => 'id,name,localizedName']);
+    }
+
+    /**
      * Whether the project has at least one issue.
      *
      * @throws YouTrackException
@@ -311,7 +324,7 @@ final readonly class Client
     public function bundles(string $kind): array
     {
         return $this->paginate('admin/customFieldSettings/bundles/'.$kind, [
-            'fields' => 'id,name,values(id,name,ordinal,isResolved,archived)',
+            'fields' => 'id,name,values(id,name,localizedName,ordinal,isResolved,archived)',
         ]);
     }
 
@@ -342,6 +355,21 @@ final readonly class Client
     {
         return $this->post('admin/customFieldSettings/bundles/'.$kind.'/'.rawurlencode($bundleId).'/values', $value, [
             'fields' => 'id,name,ordinal,isResolved',
+        ]);
+    }
+
+    /**
+     * Change a value of a bundle, e.g. its name or localized name ({"localizedName": null} shows the name).
+     *
+     * @param  array<string, mixed>  $changes
+     * @return array<array-key, mixed>
+     *
+     * @throws YouTrackException
+     */
+    public function updateBundleValue(string $kind, string $bundleId, string $valueId, array $changes): array
+    {
+        return $this->post('admin/customFieldSettings/bundles/'.$kind.'/'.rawurlencode($bundleId).'/values/'.rawurlencode($valueId), $changes, [
+            'fields' => 'id,name,localizedName,ordinal,isResolved',
         ]);
     }
 

@@ -25,6 +25,7 @@
 
 ### Fixed
 
+- A YouTrack in another language broke the cycle: the MCP server answers with the localized name of a value («Очередь» instead of `Backlog`). `agentio:setup-youtrack` now gives the cycle's values their English names in the project's own bundles — it removes their localized name, renames a value named in Russian («Очередь», «Задача», …) instead of adding a second one, and renames a Stage or Type field named in Russian («Этап», «Тип») instead of only warning about it.
 - `agentio:log` reads a log from its end instead of loading it whole, and `--follow` prints whole lines only and starts over when the log is truncated.
 - YouTrack writes (creating an issue, posting a comment, creating a tag or a saved search) are no longer sent again after a timeout or a 5xx, which could duplicate them; reads still are, and writes are retried after a refused connection or a 429 (`YouTrack\Retry`, shared by the REST and the MCP client).
 - An HTTP error of the MCP endpoint (a wrong URL) is a transport error, no longer "issue not found"; a session the MCP server dropped is opened again once.

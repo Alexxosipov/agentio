@@ -25,15 +25,36 @@ use Obrazmisli\Agentio\YouTrack\YouTrackException;
  * when the field has no default among the cycle's values. A State field («Состояние») is not used by the
  * cycle: it is reported and left as is.
  *
+ * English names: the agents read the values through the MCP server, which answers with the localized name
+ * of a value (a Russian YouTrack shows Backlog as «Очередь»), and refer to the fields by name. So the cycle's
+ * values in the project's own bundle lose their localized name, a value named in another language («Очередь»)
+ * is renamed to the cycle's name (its issues keep it), and a field named in another language («Этап») is
+ * renamed to Stage or Type.
+ *
  * Fields, bundles, tags, saved searches and the project id need the REST API (the MCP server has no tools
  * for them); the knowledge base articles are found, created and updated through the MCP server. Existing
- * entities are never deleted, renamed or moved; an existing article is never changed, except the automation
- * guide, which is a copy of the manual of the installed agentio version.
+ * entities are never deleted or moved, and only the fields and values above are renamed; an existing article
+ * is never changed, except the automation guide, which is a copy of the manual of the installed agentio version.
  */
 final class YouTrackSetup
 {
     /** Names of a field in other UI languages: the Type field of a Russian YouTrack is «Тип». */
     public const array FIELD_ALIASES = ['Stage' => ['Этап'], 'Type' => ['Тип'], 'State' => ['Состояние']];
+
+    /** Names of the cycle's values in other UI languages, as YouTrack or a team names them in Russian. */
+    public const array VALUE_ALIASES = [
+        'Backlog' => ['Очередь', 'Бэклог'],
+        'Analysis' => ['Анализ', 'Аналитика'],
+        'Ready' => ['Готово к разработке', 'Готова к разработке', 'Готов к разработке'],
+        'In Progress' => ['В работе', 'В обработке', 'В процессе'],
+        'Review' => ['Ревью', 'На ревью', 'На проверке'],
+        'Blocked' => ['Заблокирована', 'Заблокировано', 'Заблокирован'],
+        'Done' => ['Готово', 'Выполнено', 'Сделано'],
+        'Idea' => ['Идея'],
+        'Epic' => ['Эпик', 'Веха'],
+        'Story' => ['История', 'Пользовательская история'],
+        'Task' => ['Задача', 'Задание'],
+    ];
 
     /** The status field of other YouTrack projects; the cycle keeps the status in Stage (State::FIELD). */
     public const string UNUSED_STATE = 'State';
@@ -123,13 +144,7 @@ final class YouTrackSetup
         $attached = $attached === null ? null : $projectFields[$attached];
 
         if ($attached !== null && ($attached['field']['name'] ?? null) !== $name) {
-            $this->record('field', $name, SetupStatus::Warning, sprintf(
-                'the project has it as «%s»: agentio refers to the field as %s, rename it back in YouTrack (no second field is created)',
-                (string) ($attached['field']['name'] ?? '?'),
-                $name,
-            ));
-
-            return;
+            $attached['field'] = $this->renameField((array) $attached['field'], $name);
         }
 
         if ($attached !== null) {
@@ -186,9 +201,7 @@ final class YouTrackSetup
         }
 
         if ($field !== null && ($field['name'] ?? null) !== $name) {
-            $this->record('field', $name, SetupStatus::Warning, sprintf('YouTrack has it as «%s»: rename it back to %s and run the setup again (no second field is created)', (string) ($field['name'] ?? '?'), $name));
-
-            return;
+            $field = $this->renameField($field, $name);
         }
 
         $bundle = $this->ensureBundle($kind, $bundleName, $values);
@@ -204,6 +217,34 @@ final class YouTrackSetup
             $defaultId = $this->defaultValues($bundle, $default, $bundleType)[0]['id'] ?? null;
             $this->client->attachCustomField($projectId, $field['id'], $fieldType, $bundle['id'], $bundleType, $defaultId === null, $defaultId);
         }
+    }
+
+    /**
+     * Rename a field found by its name in another language («Этап») to the name the cycle refers to: the MCP
+     * server and the saved searches know a field by its name. The field is global, so other projects that
+     * use it see the new name too.
+     *
+     * @param  array<array-key, mixed>  $field  The custom field: {id, name, localizedName, fieldType}
+     * @return array<array-key, mixed> The field with the new name
+     *
+     * @throws YouTrackException
+     */
+    private function renameField(array $field, string $name): array
+    {
+        $this->record('field', $name, SetupStatus::Update, sprintf('rename the field «%s» to %s (a global field: every project that uses it sees the new name)', (string) ($field['name'] ?? '?'), $name));
+
+        if (! $this->dryRun && is_string($field['id'] ?? null)) {
+            $this->client->updateCustomField($field['id'], ['name' => $name]);
+        }
+
+        if ($this->globalFields !== null) {
+            $this->globalFields = array_map(
+                fn (array $global): array => ($global['id'] ?? null) === ($field['id'] ?? false) ? [...$global, 'name' => $name] : $global,
+                $this->globalFields,
+            );
+        }
+
+        return [...$field, 'name' => $name];
     }
 
     /**
@@ -339,31 +380,96 @@ final class YouTrackSetup
     }
 
     /**
+     * Give every value of the cycle its English name in the bundle: a value with a localized name is shown by
+     * its name, a value named in another language is renamed, a missing value is added.
+     *
      * @param  array<array-key, mixed>  $bundle
      * @param  list<array<string, mixed>>  $values
-     * @return list<mixed> The values of the bundle, the added ones included
+     * @return list<mixed> The values of the bundle, the renamed and added ones included
      *
      * @throws YouTrackException
      */
     private function ensureBundleValues(string $kind, array $bundle, array $values): array
     {
         $all = is_array($bundle['values'] ?? null) ? array_values($bundle['values']) : [];
-        $present = array_map(fn (mixed $value): string => is_array($value) && is_string($value['name'] ?? null) ? $value['name'] : '', $all);
+        $names = array_map(fn (mixed $value): string => is_array($value) && is_string($value['name'] ?? null) ? $value['name'] : '', $all);
         $bundleName = (string) ($bundle['name'] ?? $bundle['id'] ?? '');
+        $cycle = array_map(fn (array $value): string => (string) $value['name'], $values);
 
         foreach ($values as $value) {
-            if (in_array($value['name'], $present, true)) {
+            $name = (string) $value['name'];
+            $key = array_search($name, $names, true);
+
+            if ($key === false) {
+                $key = $this->localizedValue($all, $name, $cycle);
+
+                if ($key !== null) {
+                    $this->record('bundle', $bundleName, SetupStatus::Update, sprintf('rename value «%s» to %s', $names[$key], $name));
+                    $all[$key] = $this->updateValue($kind, $bundle, (array) $all[$key], ['name' => $name, 'localizedName' => null]);
+                    $names[$key] = $name;
+                }
+
+                if ($key === null) {
+                    $this->record('bundle', $bundleName, SetupStatus::Update, 'add value '.$name);
+
+                    if (! $this->dryRun && is_string($bundle['id'] ?? null)) {
+                        $all[] = $this->client->addBundleValue($kind, $bundle['id'], $value);
+                    }
+                }
+
                 continue;
             }
 
-            $this->record('bundle', $bundleName, SetupStatus::Update, 'add value '.(string) $value['name']);
+            $localized = is_array($all[$key]) ? ($all[$key]['localizedName'] ?? null) : null;
 
-            if (! $this->dryRun && is_string($bundle['id'] ?? null)) {
-                $all[] = $this->client->addBundleValue($kind, $bundle['id'], $value);
+            if (is_string($localized) && $localized !== '' && $localized !== $name) {
+                $this->record('bundle', $bundleName, SetupStatus::Update, sprintf('show value %s by its name instead of «%s»', $name, $localized));
+                $all[$key] = $this->updateValue($kind, $bundle, (array) $all[$key], ['localizedName' => null]);
             }
         }
 
-        return $all;
+        return array_values($all);
+    }
+
+    /**
+     * The key of the value named, or shown, in another language as the cycle's value (e.g. «Очередь» for
+     * Backlog), skipping the values that carry a name of the cycle.
+     *
+     * @param  array<int, mixed>  $all  The values of the bundle
+     * @param  list<string>  $cycle  The names of the cycle's values
+     */
+    private function localizedValue(array $all, string $name, array $cycle): ?int
+    {
+        $aliases = self::VALUE_ALIASES[$name] ?? [];
+
+        foreach ($all as $key => $value) {
+            if (! is_array($value) || in_array($value['name'] ?? null, $cycle, true) || ($value['archived'] ?? false) === true) {
+                continue;
+            }
+
+            if (in_array($value['name'] ?? null, $aliases, true) || in_array($value['localizedName'] ?? null, [$name, ...$aliases], true)) {
+                return $key;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * @param  array<array-key, mixed>  $bundle
+     * @param  array<array-key, mixed>  $value
+     * @param  array<string, mixed>  $changes
+     * @return array<array-key, mixed> The value with the changes
+     *
+     * @throws YouTrackException
+     */
+    private function updateValue(string $kind, array $bundle, array $value, array $changes): array
+    {
+        if (! $this->dryRun && is_string($bundle['id'] ?? null) && is_string($value['id'] ?? null)) {
+            $this->client->updateBundleValue($kind, $bundle['id'], $value['id'], $changes);
+        }
+
+        return [...$value, ...$changes];
     }
 
     /**
