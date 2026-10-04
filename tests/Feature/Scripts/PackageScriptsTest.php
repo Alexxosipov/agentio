@@ -33,7 +33,8 @@ function runPackageLoop(string $project, string ...$arguments): Process
 
 function initRepository(string $project): void
 {
-    foreach ([['init', '-q', '-b', 'main'], ['add', '-A'], ['-c', 'user.name=t', '-c', 'user.email=t@example.com', 'commit', '-qm', 'init']] as $git) {
+    // The identity lives in the repository: the scripts commit too, and CI has no global git identity.
+    foreach ([['init', '-q', '-b', 'main'], ['config', 'user.name', 't'], ['config', 'user.email', 't@example.com'], ['config', 'commit.gpgsign', 'false'], ['add', '-A'], ['commit', '-qm', 'init']] as $git) {
         (new Process(['git', ...$git], $project))->mustRun();
     }
 }
