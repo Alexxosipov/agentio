@@ -423,7 +423,12 @@ final readonly class BashGuard
 
     private function currentBranch(string $cwd): ?string
     {
-        $process = new Process(['git', 'branch', '--show-current'], is_dir($cwd) ? $cwd : null, ['GIT_OPTIONAL_LOCKS' => '0']);
+        // Without the directory git would answer for the repository the guard itself runs in.
+        if (! is_dir($cwd)) {
+            return null;
+        }
+
+        $process = new Process(['git', 'branch', '--show-current'], $cwd, ['GIT_OPTIONAL_LOCKS' => '0']);
         $process->run();
         $branch = trim($process->getOutput());
 
