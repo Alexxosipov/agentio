@@ -47,6 +47,7 @@ The first release on GitHub: Composer installs the package from the repository (
 - The guard splits command lines like a shell and closes the bypasses found in an audit: artisan options before the command (`php artisan -n tinker`), `agentio:run --dry-run --kill/--stop`, git aliases and `git -c`/`config`, combined short flags (`git push -fu`), `cd` before a relative path, `cp`/`sed -i`/`>` onto the agentio settings, `find -exec`, `php -i`, `/proc/$$/environ`, `.en?`; and it no longer refuses a plan or a commit message that merely mentions `.env`.
 - `Bash(php -i)` is no longer allowed (it printed the token), and the `tinker` and `get-config` tools of Laravel Boost are denied.
 - The guard no longer takes the branch of the repository it runs in when the directory of the command does not exist.
+- The scripts of the package run through `bash`, so they work when Composer unpacks a release without the executable bit.
 - `agentio:run --dry-run` cannot be combined with `--stop` or `--kill`.
 - Accepting an epic merges `refs/heads/<branch>`: a tag named like the branch no longer wins.
 - An epic branch without commits of its own is no longer accepted as "already merged".

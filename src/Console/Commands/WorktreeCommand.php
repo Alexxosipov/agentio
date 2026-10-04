@@ -59,7 +59,7 @@ final class WorktreeCommand extends Command
         }
 
         return $this->runScript(new Process(
-            [self::packageScript(self::SCRIPT), ...$arguments],
+            [...self::scriptCommand(self::SCRIPT), ...$arguments],
             $settings->basePath(),
             $this->scriptEnvironment($settings, ['EPIC_BRANCH' => Branches::resolve(new Git($settings->basePath()), $epic)]),
             null,

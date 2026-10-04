@@ -49,7 +49,7 @@ final class TestCommand extends Command
         $full = (bool) $this->option('full');
 
         return $this->runScript(new Process(
-            [self::packageScript(self::SCRIPT), ...($full ? [] : $this->testArguments())],
+            [...self::scriptCommand(self::SCRIPT), ...($full ? [] : $this->testArguments())],
             $settings->basePath(),
             $this->scriptEnvironment($settings, ['RUN_TESTS_FULL' => $full ? '1' : '0']),
             null,

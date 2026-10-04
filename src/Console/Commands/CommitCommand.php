@@ -40,7 +40,7 @@ final class CommitCommand extends Command
         $files = (array) $this->argument('files');
 
         return $this->runScript(new Process(
-            [self::packageScript(self::SCRIPT), (string) $this->argument('task'), (string) $this->argument('commit-message'), ...$files],
+            [...self::scriptCommand(self::SCRIPT), (string) $this->argument('task'), (string) $this->argument('commit-message'), ...$files],
             $settings->basePath(),
             $this->scriptEnvironment($settings),
             null,

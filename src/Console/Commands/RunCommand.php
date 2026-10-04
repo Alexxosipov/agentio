@@ -91,7 +91,7 @@ final class RunCommand extends Command
         $this->announceDashboard();
 
         $this->process = new Process(
-            [self::packageScript(self::SCRIPT), ...$this->scriptArguments()],
+            [...self::scriptCommand(self::SCRIPT), ...$this->scriptArguments()],
             $settings->basePath(),
             $this->environment($settings, $policy, $loop),
             null,

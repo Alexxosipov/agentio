@@ -25,7 +25,7 @@ beforeEach(function () {
 function runPackageLoop(string $project, string ...$arguments): Process
 {
     $environment = app(RunCommand::class)->environment(app(Settings::class), MergePolicy::LocalBranch, app(LoopState::class));
-    $process = new Process([RunCommand::packageScript(RunCommand::SCRIPT), ...$arguments], $project, $environment, null, 60);
+    $process = new Process([...RunCommand::scriptCommand(RunCommand::SCRIPT), ...$arguments], $project, $environment, null, 60);
     $process->run();
 
     return $process;

@@ -29,6 +29,17 @@ trait RunsPackageScripts
     }
 
     /**
+     * The command line of a script of the package. It runs through bash, so it works without the executable bit,
+     * which Composer may not restore when it unpacks a release.
+     *
+     * @return list<string>
+     */
+    public static function scriptCommand(string $name): array
+    {
+        return ['bash', self::packageScript($name)];
+    }
+
+    /**
      * The environment of a script: the project (AGENTIO_ROOT) and the settings of config/agentio.php under the
      * names the scripts read. The variables Laravel loaded from the project's .env (APP_ENV, APP_KEY, DB_*, …) are
      * removed (false): inherited by the scripts they would override the .env of every epic worktree and the
