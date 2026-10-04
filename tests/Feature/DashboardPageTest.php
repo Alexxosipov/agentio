@@ -27,6 +27,9 @@ it('renders the dashboard shell with its assets and endpoints', function () {
         ->assertSee('"youtrackUrl":"https://yt.example.com"', false)
         ->assertSee('"epic":"http://localhost/agentio/api/epics/__ID__"', false)
         ->assertSee('"loopLog":"http://localhost/agentio/api/loop-log"', false)
+        ->assertSee('"accept":"http://localhost/agentio/api/epics/__ID__/accept"', false)
+        ->assertSee('"rework":"http://localhost/agentio/api/epics/__ID__/rework"', false)
+        ->assertSee('"actions":true', false)
         ->assertDontSee('secret');
 
     expect($css)->toMatch('/^[0-9a-f]{12}$/')->and($js)->not->toBe($css);

@@ -2,135 +2,102 @@
 
 declare(strict_types=1);
 
+use Illuminate\Support\Facades\Route;
+use Obrazmisli\Agentio\Console\Commands\RunCommand;
 use Obrazmisli\Agentio\Runtime\LoopState;
+use Obrazmisli\Agentio\Runtime\MergePolicy;
+use Obrazmisli\Agentio\Settings;
 use Symfony\Component\Process\Process;
 
-/**
- * A host project with a fake scripts/agent-loop.sh that prints its arguments and environment and exits
- * with the given code, and a fake Claude Code binary.
- */
-function projectWithFakeLoop(int $exitCode = 0): string
-{
-    $project = hostProject();
-    mkdir($project.'/scripts');
-    mkdir($project.'/bin');
+it('passes the settings, the session settings and the MCP configs of the package to the loop', function () {
+    $project = projectForLoop();
+    file_put_contents($project.'/.env', "APP_ENV=local\nexport DB_DATABASE=/srv/main.sqlite\nAGENTIO_TIMEZONE=UTC\nYOUTRACK_URL=x\n");
+    $command = app(RunCommand::class);
+    $package = dirname(__DIR__, 3);
 
-    file_put_contents($project.'/scripts/agent-loop.sh', <<<BASH
-        #!/usr/bin/env bash
-        echo "args: \$*"
-        echo "cwd: \$(pwd)"
-        echo "env: project=\$AGENTIO_PROJECT base=\$BASE_BRANCH policy=\$MERGE_POLICY parallel=\$MAX_PARALLEL tasks=\$MAX_PARALLEL_TASKS interval=\$AGENT_LOOP_INTERVAL"
-        echo "env: worktrees=\$WORKTREES_DIR claude=\$CLAUDE_BIN logs=\$AGENT_LOG_DIR url=\$YOUTRACK_URL token=\${YOUTRACK_TOKEN:+set} tests=\${AGENTIO_TEST_COMMAND:-default}"
-        echo "env: app=\${APP_ENV:-unset} db=\${DB_DATABASE:-unset} timezone=\${AGENTIO_TIMEZONE:-unset} home=\${HOME:+set}"
-        echo "to stderr" >&2
-        exit {$exitCode}
-        BASH);
-    chmod($project.'/scripts/agent-loop.sh', 0755);
-    touch($project.'/scripts/yt.php');
-    touch($project.'/scripts/epic-worktree.sh');
-    file_put_contents($project.'/bin/claude', "#!/usr/bin/env bash\nexit 0\n");
-    chmod($project.'/bin/claude', 0755);
+    $environment = $command->environment(app(Settings::class), MergePolicy::PullRequest, app(LoopState::class));
 
-    config([
-        'agentio.youtrack.url' => 'https://yt.example.com',
-        'agentio.youtrack.token' => 'secret-token',
-        'agentio.youtrack.project' => 'XY',
-        'agentio.base_branch' => 'develop',
-        'agentio.merge_policy' => null,
-        'agentio.max_parallel' => 3,
-        'agentio.max_parallel_tasks' => 4,
-        'agentio.interval' => 60,
-        'agentio.worktrees_path' => $project.'/../worktrees',
-        'agentio.claude_binary' => $project.'/bin/claude',
-        'agentio.logs_path' => $project.'/storage/logs/agents',
-        'agentio.tests.command' => 'vendor/bin/pest --compact',
-    ]);
-    app()->forgetInstance(LoopState::class);
+    expect($environment)->toMatchArray([
+        'AGENTIO_ROOT' => $project,
+        'YOUTRACK_URL' => 'https://yt.example.com',
+        'YOUTRACK_TOKEN' => 'secret-token',
+        'AGENTIO_PROJECT' => 'XY',
+        'BASE_BRANCH' => 'develop',
+        'WORKTREES_DIR' => $project.'/worktrees',
+        'MAX_PARALLEL' => '3',
+        'MAX_PARALLEL_TASKS' => '4',
+        'AGENT_LOOP_INTERVAL' => '60',
+        'CLAUDE_BIN' => $project.'/bin/claude',
+        'MERGE_POLICY' => 'pull-request',
+        'AGENT_LOG_DIR' => $project.'/storage/logs/agents',
+        'AGENTIO_STOP_FILE' => $project.'/storage/logs/agents/stop',
+        'AGENTIO_SESSION_SETTINGS' => $package.'/resources/claude/settings.json',
+        'AGENTIO_MCP_CONFIG' => $package.'/resources/claude/mcp/youtrack.json',
+        'AGENTIO_TEST_COMMAND' => 'vendor/bin/pest --compact',
+        // The variables Laravel loaded from the project .env stay out of the loop and of the agents' sessions.
+        'APP_ENV' => false,
+        'DB_DATABASE' => false,
+    ])->not->toHaveKey('AGENTIO_TIMEZONE');
 
-    return $project;
-}
+    mkdir($project.'/vendor/laravel/boost', 0777, true);
 
-it('runs the loop script with the config in its environment and streams its output', function () {
-    $project = projectWithFakeLoop();
-    file_put_contents($project.'/CLAUDE.md', "MERGE_POLICY: pull-request\n");
+    expect($command->environment(app(Settings::class), MergePolicy::LocalBranch, app(LoopState::class))['AGENTIO_MCP_CONFIG'])
+        ->toBe($package.'/resources/claude/mcp/youtrack.json '.$package.'/resources/claude/mcp/laravel-boost.json');
+});
 
-    $this->artisan('agentio:run', ['--once' => true, '--no-plan' => true, '--epic' => 'XY-7', '--max-parallel-tasks' => '1'])
-        ->expectsOutputToContain('args: --once --no-plan --epic=XY-7 --max-parallel-tasks=1')
-        ->expectsOutputToContain('cwd: '.$project)
-        ->expectsOutputToContain('env: project=XY base=develop policy=pull-request parallel=3 tasks=4 interval=60')
-        ->expectsOutputToContain("env: worktrees={$project}/../worktrees claude={$project}/bin/claude logs={$project}/storage/logs/agents url=https://yt.example.com token=set tests=vendor/bin/pest --compact")
+it('runs the loop of the package in the project and streams its output', function () {
+    projectForLoop(['XY-1']);
+
+    $this->artisan('agentio:run', ['--dry-run' => true])
+        ->expectsOutputToContain('PROJECT=XY MERGE_POLICY=local-branch MAX_PARALLEL=3 MAX_PARALLEL_TASKS=4 BASE_BRANCH=develop')
+        ->expectsOutputToContain('XY-1 Idea')
         ->assertSuccessful();
 });
 
-it('does not pass the variables Laravel loaded from the project .env to the loop', function () {
-    $project = projectWithFakeLoop();
-    file_put_contents($project.'/.env', "APP_ENV=local\nexport DB_DATABASE=/srv/main.sqlite\nAGENTIO_TIMEZONE=UTC\n# NOT_A_KEY=1\n");
-    $loaded = ['APP_ENV' => 'local', 'DB_DATABASE' => '/srv/main.sqlite', 'AGENTIO_TIMEZONE' => 'UTC'];
-
-    // As Laravel's dotenv repository does: $_ENV, $_SERVER and putenv().
-    foreach ($loaded as $key => $value) {
-        [$_ENV[$key], $_SERVER[$key]] = [$value, $value];
-        putenv("{$key}={$value}");
-    }
-
-    try {
-        $this->artisan('agentio:run')->expectsOutputToContain('env: app=unset db=unset timezone=UTC home=set')->assertSuccessful();
-    } finally {
-        foreach (array_keys($loaded) as $key) {
-            unset($_ENV[$key], $_SERVER[$key]);
-            putenv($key);
-        }
-    }
-});
-
-it('passes the project and the base branch of .agentio.json when the config has none', function () {
-    $project = projectWithFakeLoop();
-    file_put_contents($project.'/.agentio.json', json_encode(['project' => 'AB', 'base_branch' => 'trunk']));
+it('takes the project, the base branch and the merge policy from .agentio.json when the config has none', function () {
+    $project = projectForLoop();
+    file_put_contents($project.'/.agentio.json', json_encode(['project' => 'AB', 'base_branch' => 'trunk', 'merge_policy' => 'auto-merge']));
     config(['agentio.youtrack.project' => null, 'agentio.base_branch' => null]);
 
-    $this->artisan('agentio:run')->expectsOutputToContain('env: project=AB base=trunk policy=local-branch')->assertSuccessful();
-});
-
-it('returns the exit code of the loop', function () {
-    projectWithFakeLoop(exitCode: 3);
-
     $this->artisan('agentio:run', ['--dry-run' => true])
-        ->expectsOutputToContain('args: --dry-run')
-        ->assertExitCode(3);
-});
-
-it('prefers the configured merge policy over CLAUDE.md', function () {
-    $project = projectWithFakeLoop();
-    file_put_contents($project.'/CLAUDE.md', "MERGE_POLICY: pull-request\n");
-    config(['agentio.merge_policy' => 'auto-merge']);
-
-    $this->artisan('agentio:run')->expectsOutputToContain('policy=auto-merge')->assertSuccessful();
+        ->expectsOutputToContain('PROJECT=AB MERGE_POLICY=auto-merge MAX_PARALLEL=3 MAX_PARALLEL_TASKS=4 BASE_BRANCH=trunk')
+        ->assertSuccessful();
 
     config(['agentio.merge_policy' => 'whenever']);
 
-    $this->artisan('agentio:run')->expectsOutputToContain('Invalid AGENTIO_MERGE_POLICY')->assertFailed();
+    $this->artisan('agentio:run')->expectsOutputToContain('Invalid merge policy')->assertFailed();
+});
+
+it('returns the exit code of the loop', function () {
+    $project = projectForLoop();
+    mkdir($project.'/storage/logs/agents', 0777, true);
+    file_put_contents($project.'/storage/logs/agents/loop.pid', (string) getmypid());
+
+    $this->artisan('agentio:run', ['--once' => true])->assertExitCode(1);
 });
 
 it('requests a stop without starting the loop', function () {
-    $project = projectWithFakeLoop();
+    $project = projectForLoop();
 
     $this->artisan('agentio:run', ['--stop' => true])
         ->expectsOutputToContain('Stop requested')
-        ->doesntExpectOutputToContain('args:')
         ->assertSuccessful();
 
-    expect($project.'/.agent-stop')->toBeFile();
+    expect($project.'/storage/logs/agents/stop')->toBeFile()
+        ->and($project.'/artisan-calls.log')->not->toBeFile();
 });
 
 it('warns about a leftover stop flag and removes it with --fresh', function () {
-    $project = projectWithFakeLoop();
-    touch($project.'/.agent-stop');
+    $project = projectForLoop();
+    mkdir($project.'/storage/logs/agents', 0777, true);
+    touch($project.'/storage/logs/agents/stop');
 
     $this->artisan('agentio:run', ['--once' => true])
         ->expectsOutputToContain('Use --fresh to remove it.')
         ->assertSuccessful();
 
-    expect($project.'/.agent-stop')->toBeFile();
+    expect($project.'/storage/logs/agents/stop')->toBeFile()
+        ->and(file_get_contents($project.'/storage/logs/agents/loop.log'))->toContain('stop requested');
 
     $this->artisan('agentio:run', ['--dry-run' => true])->doesntExpectOutputToContain('Use --fresh')->assertSuccessful();
 
@@ -138,57 +105,56 @@ it('warns about a leftover stop flag and removes it with --fresh', function () {
         ->expectsOutputToContain('Removed the stop flag')
         ->assertSuccessful();
 
-    expect($project.'/.agent-stop')->not->toBeFile();
+    expect($project.'/storage/logs/agents/stop')->not->toBeFile();
 });
 
 it('explains what is missing before starting', function () {
-    $project = projectWithFakeLoop();
-    unlink($project.'/scripts/yt.php');
-    chmod($project.'/scripts/agent-loop.sh', 0644);
-    config(['agentio.youtrack.token' => null, 'agentio.claude_binary' => 'claude-that-does-not-exist']);
+    $project = projectForLoop();
+    unlink($project.'/.claude/skills/agentio-work-epic/SKILL.md');
+    config(['agentio.youtrack.token' => null, 'agentio.claude_binary' => 'claude-that-does-not-exist', 'agentio.worktrees_path' => null]);
 
     $this->artisan('agentio:run')
-        ->expectsOutputToContain('scripts/yt.php is missing: run php artisan agentio:install')
-        ->expectsOutputToContain('scripts/agent-loop.sh is not executable')
+        ->expectsOutputToContain('The agentio skills are not installed (.claude/skills/agentio-*): run php artisan agentio:install')
+        ->expectsOutputToContain('The worktrees directory is not configured (AGENTIO_WORKTREES_PATH)')
         ->expectsOutputToContain('Claude Code CLI not found (claude-that-does-not-exist)')
         ->expectsOutputToContain('YOUTRACK_TOKEN is not set')
-        ->doesntExpectOutputToContain('args:')
         ->assertFailed();
+
+    expect($project.'/artisan-calls.log')->not->toBeFile();
 });
 
 it('prints the dashboard URL when the UI is enabled', function () {
-    projectWithFakeLoop();
+    projectForLoop();
     Route::get('/agentio-test', fn (): string => 'ok')->name('agentio.index');
 
-    $this->artisan('agentio:run')->expectsOutputToContain('Dashboard: http://localhost/agentio')->assertSuccessful();
+    $this->artisan('agentio:run', ['--dry-run' => true])->expectsOutputToContain('Dashboard: http://localhost/agentio')->assertSuccessful();
 
     config(['agentio.ui.enabled' => false]);
 
-    $this->artisan('agentio:run')->doesntExpectOutputToContain('Dashboard:')->assertSuccessful();
+    $this->artisan('agentio:run', ['--dry-run' => true])->doesntExpectOutputToContain('Dashboard:')->assertSuccessful();
 });
 
-it('forwards SIGTERM to the loop and returns its exit code', function () {
+it('forwards SIGTERM to the loop, which finishes its step and exits', function () {
     if (! extension_loaded('pcntl')) {
         $this->markTestSkipped('pcntl is not available');
     }
 
-    $project = projectWithFakeLoop();
-    file_put_contents($project.'/scripts/agent-loop.sh', "#!/usr/bin/env bash\ntrap 'echo \"loop got TERM\"; exit 5' TERM\necho 'loop started'\nwhile true; do sleep 0.1; done\n");
+    $project = projectForLoop();
     file_put_contents($project.'/artisan.php', sprintf(<<<'PHP'
         <?php
         require %s;
         $app = Orchestra\Testbench\Foundation\Application::create(options: ['extra' => ['providers' => [Obrazmisli\Agentio\AgentioServiceProvider::class]]]);
         $app->setBasePath(__DIR__);
-        config(['agentio.youtrack.url' => 'https://yt.example.com', 'agentio.youtrack.token' => 'secret', 'agentio.claude_binary' => __DIR__.'/bin/claude', 'agentio.logs_path' => __DIR__.'/logs']);
-        exit($app->make(Illuminate\Contracts\Console\Kernel::class)->handle(new Symfony\Component\Console\Input\ArgvInput(['artisan', 'agentio:run']), new Symfony\Component\Console\Output\ConsoleOutput));
+        config(['agentio.youtrack.url' => 'https://yt.example.com', 'agentio.youtrack.token' => 'secret', 'agentio.claude_binary' => __DIR__.'/bin/claude', 'agentio.logs_path' => __DIR__.'/logs', 'agentio.worktrees_path' => __DIR__.'/worktrees']);
+        exit($app->make(Illuminate\Contracts\Console\Kernel::class)->handle(new Symfony\Component\Console\Input\ArgvInput(['artisan', 'agentio:run', '--interval=60']), new Symfony\Component\Console\Output\ConsoleOutput));
         PHP, var_export(dirname(__DIR__, 3).'/vendor/autoload.php', true)));
 
-    $process = new Process([PHP_BINARY, $project.'/artisan.php'], $project, null, null, 30);
+    $process = new Process([PHP_BINARY, $project.'/artisan.php'], $project, null, null, 60);
     $process->start();
-    $process->waitUntil(fn (string $type, string $output): bool => str_contains($output, 'loop started'));
+    $process->waitUntil(fn (string $type, string $output): bool => str_contains($output, 'agent loop started'));
     $process->signal(15);
     $process->wait();
 
-    expect($process->getOutput())->toContain('loop got TERM')
-        ->and($process->getExitCode())->toBe(5);
+    expect($process->getErrorOutput())->toContain('interrupted: finishing the current step and exiting', 'agent loop stopped')
+        ->and($process->getExitCode())->toBe(0);
 });

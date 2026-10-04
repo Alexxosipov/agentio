@@ -18,7 +18,7 @@ function loopState(): array
 {
     $directory = temporaryDirectory();
 
-    return [new LoopState($directory, $directory.'/.agent-stop', 'Asia/Shanghai'), $directory];
+    return [new LoopState($directory, $directory.'/stop', 'Asia/Shanghai'), $directory];
 }
 
 it('lists sessions from pid files and checks whether they are alive', function () {
@@ -72,13 +72,13 @@ it('requests and clears a stop', function () {
     [$state, $directory] = loopState();
 
     expect($state->isStopRequested())->toBeFalse()
-        ->and($state->stopFile())->toBe($directory.'/.agent-stop')
+        ->and($state->stopFile())->toBe($directory.'/stop')
         ->and($state->logsPath())->toBe($directory);
 
     $state->requestStop();
 
     expect($state->isStopRequested())->toBeTrue()
-        ->and($directory.'/.agent-stop')->toBeFile();
+        ->and($directory.'/stop')->toBeFile();
 
     $state->clearStop();
     $state->clearStop();
@@ -126,7 +126,7 @@ it('reads the tail of loop.log', function () {
     [$state, $directory] = loopState();
     file_put_contents($directory.'/loop.log', implode("\n", [
         '[2026-10-03 14:56:35] agent loop started: mode=once policy=local-branch max_parallel=2 interval=300s epic=TP-2',
-        '[2026-10-03 14:57:38] TP-2: started /work-epic (pid 547704, worktree /srv/worktrees/TP-2, log /srv/app/storage/logs/agents/TP-2.log)',
+        '[2026-10-03 14:57:38] TP-2: started /agentio-work-epic (pid 547704, worktree /srv/worktrees/TP-2, log /srv/app/storage/logs/agents/TP-2.log)',
         '',
         'Merge made by the \'ort\' strategy.',
         '[2026-10-03 15:37:41] agent loop stopped',

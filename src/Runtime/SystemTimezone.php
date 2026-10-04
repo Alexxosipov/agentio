@@ -7,7 +7,7 @@ namespace Obrazmisli\Agentio\Runtime;
 use DateTimeZone;
 
 /**
- * The timezone of the machine: scripts/agent-loop.sh writes local time ("date '+%F %T'"), while
+ * The timezone of the machine: the agent loop writes local time ("date '+%F %T'"), while
  * Laravel usually runs in UTC, so the loop's timestamps are read in the machine's timezone.
  */
 final class SystemTimezone

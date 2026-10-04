@@ -6,10 +6,10 @@ namespace Obrazmisli\Agentio\Runtime;
 
 enum SessionKind: string
 {
-    /** /work-epic <ID>: log <ID>.log, pid <ID>.pid */
+    /** /agentio-work-epic <ID>: log <ID>.log, pid <ID>.pid */
     case Epic = 'epic';
 
-    /** /plan <ID>: log plan-<ID>.log */
+    /** /agentio-plan <ID>: log plan-<ID>.log */
     case Plan = 'plan';
 
     public static function fromName(string $name): self

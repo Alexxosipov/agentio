@@ -32,7 +32,7 @@ function dashboardEnvironment(bool $configured = true): string
     }
 
     $logs = temporaryDirectory();
-    app()->instance(LoopState::class, new LoopState($logs, $logs.'/.agent-stop', 'UTC'));
+    app()->instance(LoopState::class, new LoopState($logs, $logs.'/stop', 'UTC'));
 
     return $logs;
 }
@@ -45,15 +45,15 @@ function dashboardEnvironment(bool $configured = true): string
 function projectIssues(): array
 {
     return [
-        apiIssue('TP-1', ['Type' => 'Idea', 'State' => 'Done'], ['relates to' => ['TP-2']], ['idea'], '[IDEA] Профиль пользователя'),
-        apiIssue('TP-2', ['Type' => 'Epic', 'State' => 'In Progress'], ['relates to' => ['TP-1'], 'parent for' => ['TP-3']], ['agent-claimed'], '[EPIC] Аватар'),
-        apiIssue('TP-3', ['Type' => 'Story', 'State' => 'In Progress'], ['subtask of' => ['TP-2'], 'parent for' => ['TP-5', 'TP-6', 'TP-7', 'TP-10']], summary: '[STORY] Загрузка аватара'),
-        apiIssue('TP-5', ['Type' => 'Task', 'State' => 'Done'], ['subtask of' => ['TP-3']], summary: '[TASK] Миграция'),
-        apiIssue('TP-6', ['Type' => 'Task', 'State' => 'In Progress'], ['subtask of' => ['TP-3']], ['agent-claimed'], '[TASK] Обработка'),
-        apiIssue('TP-7', ['Type' => 'Task', 'State' => 'Ready'], ['subtask of' => ['TP-3'], 'depends on' => ['TP-6']], summary: '[TASK] Эндпоинт'),
-        apiIssue('TP-10', ['Type' => 'Task', 'State' => 'Ready'], ['subtask of' => ['TP-3']], summary: '[TASK] Тест'),
-        apiIssue('TP-8', ['Type' => 'Idea', 'State' => 'Backlog'], summary: '[IDEA] Уведомления'),
-        apiIssue('TP-9', ['Type' => 'Epic', 'State' => 'Blocked'], summary: '[EPIC] Платежи'),
+        apiIssue('TP-1', ['Type' => 'Idea', 'Stage' => 'Done'], ['relates to' => ['TP-2']], ['idea'], '[IDEA] Профиль пользователя'),
+        apiIssue('TP-2', ['Type' => 'Epic', 'Stage' => 'In Progress'], ['relates to' => ['TP-1'], 'parent for' => ['TP-3']], ['agent-claimed'], '[EPIC] Аватар'),
+        apiIssue('TP-3', ['Type' => 'Story', 'Stage' => 'In Progress'], ['subtask of' => ['TP-2'], 'parent for' => ['TP-5', 'TP-6', 'TP-7', 'TP-10']], summary: '[STORY] Загрузка аватара'),
+        apiIssue('TP-5', ['Type' => 'Task', 'Stage' => 'Done'], ['subtask of' => ['TP-3']], summary: '[TASK] Миграция'),
+        apiIssue('TP-6', ['Type' => 'Task', 'Stage' => 'In Progress'], ['subtask of' => ['TP-3']], ['agent-claimed'], '[TASK] Обработка'),
+        apiIssue('TP-7', ['Type' => 'Task', 'Stage' => 'Ready'], ['subtask of' => ['TP-3'], 'depends on' => ['TP-6']], summary: '[TASK] Эндпоинт'),
+        apiIssue('TP-10', ['Type' => 'Task', 'Stage' => 'Ready'], ['subtask of' => ['TP-3']], summary: '[TASK] Тест'),
+        apiIssue('TP-8', ['Type' => 'Idea', 'Stage' => 'Backlog'], summary: '[IDEA] Уведомления'),
+        apiIssue('TP-9', ['Type' => 'Epic', 'Stage' => 'Blocked'], summary: '[EPIC] Платежи'),
     ];
 }
 
@@ -101,13 +101,13 @@ function runningLoopLogs(string $logs): void
 {
     file_put_contents($logs.'/loop.log', implode("\n", [
         '[2026-10-03 14:57:38] agent loop started: mode=loop policy=pull-request max_parallel=2 interval=300s',
-        '[2026-10-03 14:57:39] TP-2: started /work-epic (pid 547803)',
+        '[2026-10-03 14:57:39] TP-2: started /agentio-work-epic (pid 547803)',
     ])."\n");
     file_put_contents($logs.'/loop.pid', (string) getmypid());
     file_put_contents($logs.'/TP-2.pid', (string) getmypid());
     file_put_contents($logs.'/TP-2.restarts', '1');
     copy(__DIR__.'/../Fixtures/session.log', $logs.'/TP-2.log');
-    file_put_contents($logs.'/plan-TP-1.log', "===== 2026-10-03 14:40:00 /plan TP-1 in /srv/app =====\n");
+    file_put_contents($logs.'/plan-TP-1.log', "===== 2026-10-03 14:40:00 /agentio-plan TP-1 in /srv/app =====\n");
     touch($logs.'/plan-TP-1.log', time() - 3600);
     file_put_contents($logs.'/TP-2.setup.log', "composer install\n");
 }
@@ -134,7 +134,7 @@ it('reports the header status', function () {
 it('reports a stop request and a stopped loop', function () {
     $logs = dashboardEnvironment(configured: false);
     file_put_contents($logs.'/loop.pid', (string) getmypid());
-    touch($logs.'/.agent-stop');
+    touch($logs.'/stop');
     config(['agentio.merge_policy' => 'something-else']);
 
     $this->getJson('/agentio/api/status')->assertOk()->assertJson([
@@ -177,7 +177,7 @@ it('shows the live sessions with their issue, claim, stage, current tasks and la
 it('lists a session whose pid file is stale among the recent ones', function () {
     $logs = dashboardEnvironment(configured: false);
     file_put_contents($logs.'/TP-4.pid', '999999999');
-    file_put_contents($logs.'/TP-4.log', "===== 2026-10-03 14:00:00 /work-epic TP-4 in /srv =====\n");
+    file_put_contents($logs.'/TP-4.log', "===== 2026-10-03 14:00:00 /agentio-work-epic TP-4 in /srv =====\n");
 
     $this->getJson('/agentio/api/sessions')
         ->assertOk()
@@ -208,8 +208,8 @@ it('builds the pipeline of ideas and epics', function () {
 it('puts finished items after the active ones', function () {
     dashboardEnvironment();
     fakeYouTrack([
-        apiIssue('TP-1', ['Type' => 'Epic', 'State' => 'Done']),
-        apiIssue('TP-2', ['Type' => 'Epic', 'State' => 'Analysis']),
+        apiIssue('TP-1', ['Type' => 'Epic', 'Stage' => 'Done']),
+        apiIssue('TP-2', ['Type' => 'Epic', 'Stage' => 'Analysis']),
     ]);
 
     expect(collect($this->getJson('/agentio/api/pipeline')->json('items'))->pluck('active', 'issue.id')->all())
@@ -246,7 +246,7 @@ it('tails loop.log', function () {
         ->assertOk()
         ->assertJsonPath('exists', true)
         ->assertJsonCount(2, 'entries')
-        ->assertJsonPath('entries.1', ['time' => '2026-10-03T14:57:39+00:00', 'message' => 'TP-2: started /work-epic (pid 547803)', 'issueId' => 'TP-2']);
+        ->assertJsonPath('entries.1', ['time' => '2026-10-03T14:57:39+00:00', 'message' => 'TP-2: started /agentio-work-epic (pid 547803)', 'issueId' => 'TP-2']);
 });
 
 it('reports a missing loop.log', function () {

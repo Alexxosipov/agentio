@@ -7,9 +7,9 @@ namespace Obrazmisli\Agentio\Install;
 use JsonException;
 
 /**
- * The committed .agentio.json of the host project: the YouTrack project and base branch the stubs were
- * installed for, the knowledge base article ids and the hashes of the installed files (a file whose
- * content still matches its hash was not edited by hand and is updated on reinstall).
+ * The committed .agentio.json of the host project: the YouTrack project, the base branch and the merge policy
+ * the skills were installed for, the knowledge base article ids and the hashes of the installed files (a file
+ * whose content still matches its hash was not edited by hand and is updated on reinstall).
  */
 final readonly class Manifest
 {
@@ -24,11 +24,17 @@ final readonly class Manifest
         public ?string $baseBranch = null,
         public array $kb = [],
         public array $files = [],
+        public ?string $mergePolicy = null,
     ) {}
 
     public static function path(string $basePath): string
     {
         return rtrim($basePath, '/').'/'.self::FILE;
+    }
+
+    public static function exists(string $basePath): bool
+    {
+        return is_file(self::path($basePath));
     }
 
     public static function load(string $basePath): self
@@ -44,10 +50,11 @@ final readonly class Manifest
         $data = is_array($data) ? $data : [];
 
         return new self(
-            project: is_string($data['project'] ?? null) && $data['project'] !== '' ? $data['project'] : null,
-            baseBranch: is_string($data['base_branch'] ?? null) && $data['base_branch'] !== '' ? $data['base_branch'] : null,
+            project: self::stringOf($data['project'] ?? null),
+            baseBranch: self::stringOf($data['base_branch'] ?? null),
             kb: self::stringMap($data['kb'] ?? null),
             files: self::stringMap($data['files'] ?? null),
+            mergePolicy: self::stringOf($data['merge_policy'] ?? null),
         );
     }
 
@@ -55,23 +62,34 @@ final readonly class Manifest
      * @param  array<string, string>|null  $kb
      * @param  array<string, string>|null  $files
      */
-    public function with(?string $project = null, ?string $baseBranch = null, ?array $kb = null, ?array $files = null): self
+    public function with(?string $project = null, ?string $baseBranch = null, ?array $kb = null, ?array $files = null, ?string $mergePolicy = null): self
     {
-        return new self($project ?? $this->project, $baseBranch ?? $this->baseBranch, $kb ?? $this->kb, $files ?? $this->files);
+        return new self(
+            $project ?? $this->project,
+            $baseBranch ?? $this->baseBranch,
+            $kb ?? $this->kb,
+            $files ?? $this->files,
+            $mergePolicy ?? $this->mergePolicy,
+        );
     }
 
     public function save(string $basePath): void
     {
-        $kb = $this->kb;
         $files = $this->files;
         ksort($files);
 
         file_put_contents(self::path($basePath), json_encode([
             'project' => $this->project,
             'base_branch' => $this->baseBranch,
-            'kb' => (object) $kb,
+            'merge_policy' => $this->mergePolicy,
+            'kb' => (object) $this->kb,
             'files' => (object) $files,
         ], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR).PHP_EOL);
+    }
+
+    private static function stringOf(mixed $value): ?string
+    {
+        return is_string($value) && $value !== '' ? $value : null;
     }
 
     /**

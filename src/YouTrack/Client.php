@@ -27,9 +27,6 @@ final readonly class Client
     /** Fields of a comment that Comment::fromApi() understands. */
     public const string COMMENT_FIELDS = 'id,text,created,author(login,fullName)';
 
-    /** Fields of an article returned by the article helpers. */
-    public const string ARTICLE_FIELDS = 'id,idReadable,summary,content,updated,parentArticle(id,idReadable),project(id,shortName)';
-
     public const int PAGE_SIZE = 200;
 
     public function __construct(
@@ -61,14 +58,6 @@ final readonly class Client
     public function issueUrl(string $id): string
     {
         return $this->baseUrl().'/issue/'.rawurlencode($id);
-    }
-
-    /**
-     * Link to a knowledge base article in the YouTrack web UI.
-     */
-    public function articleUrl(string $id): string
-    {
-        return $this->baseUrl().'/articles/'.rawurlencode($id);
     }
 
     /**
@@ -187,61 +176,6 @@ final readonly class Client
     }
 
     /**
-     * Knowledge base articles matching a query (all articles when the query is empty).
-     *
-     * @return list<array<array-key, mixed>>
-     *
-     * @throws YouTrackException
-     */
-    public function articles(string $query = '', string $fields = self::ARTICLE_FIELDS): array
-    {
-        return $this->paginate('articles', array_filter(['query' => $query, 'fields' => $fields], fn (string $value): bool => $value !== ''));
-    }
-
-    /**
-     * @return array<array-key, mixed>
-     *
-     * @throws YouTrackException
-     */
-    public function article(string $id, string $fields = self::ARTICLE_FIELDS): array
-    {
-        return $this->get('articles/'.rawurlencode($id), ['fields' => $fields]);
-    }
-
-    /**
-     * Create a knowledge base article. The parent is referenced by its database id (e.g. "155-12").
-     *
-     * @return array<array-key, mixed>
-     *
-     * @throws YouTrackException
-     */
-    public function createArticle(string $projectId, string $summary, string $content, ?string $parentId = null): array
-    {
-        $body = ['project' => ['id' => $projectId], 'summary' => $summary, 'content' => $content];
-
-        if ($parentId !== null) {
-            $body['parentArticle'] = ['id' => $parentId];
-        }
-
-        return $this->post('articles', $body, ['fields' => self::ARTICLE_FIELDS]);
-    }
-
-    /**
-     * Update the summary and/or content of an article.
-     *
-     * @return array<array-key, mixed>
-     *
-     * @throws YouTrackException
-     */
-    public function updateArticle(string $id, ?string $summary = null, ?string $content = null): array
-    {
-        return $this->post('articles/'.rawurlencode($id), array_filter(
-            ['summary' => $summary, 'content' => $content],
-            fn (?string $value): bool => $value !== null,
-        ), ['fields' => self::ARTICLE_FIELDS]);
-    }
-
-    /**
      * A project by its short name, or null when it does not exist or is not visible.
      *
      * @return array<array-key, mixed>|null
@@ -285,7 +219,7 @@ final readonly class Client
     public function projectCustomFields(string $projectId): array
     {
         return $this->paginate('admin/projects/'.rawurlencode($projectId).'/customFields', [
-            'fields' => 'id,$type,canBeEmpty,emptyFieldText,field(id,name,fieldType(id)),bundle(id,name,$type),defaultValues(id,name)',
+            'fields' => 'id,$type,canBeEmpty,emptyFieldText,field(id,name,localizedName,fieldType(id)),bundle(id,name,$type),defaultValues(id,name)',
         ]);
     }
 
@@ -324,7 +258,7 @@ final readonly class Client
     public function customFields(): array
     {
         return $this->paginate('admin/customFieldSettings/customFields', [
-            'fields' => 'id,name,fieldType(id),fieldDefaults(bundle(id)),instances(project(id),bundle(id))',
+            'fields' => 'id,name,localizedName,fieldType(id),fieldDefaults(bundle(id)),instances(project(id),bundle(id))',
         ]);
     }
 
@@ -341,6 +275,16 @@ final readonly class Client
         return $this->post('admin/projects/'.rawurlencode($projectId).'/customFields/'.rawurlencode($projectFieldId), ['$type' => $type, ...$changes], [
             'fields' => 'id,$type,canBeEmpty,field(id,name),bundle(id,name),defaultValues(id,name)',
         ]);
+    }
+
+    /**
+     * Detach a custom field from a project (its values in the project's issues are lost).
+     *
+     * @throws YouTrackException
+     */
+    public function detachProjectCustomField(string $projectId, string $projectFieldId): void
+    {
+        $this->delete('admin/projects/'.rawurlencode($projectId).'/customFields/'.rawurlencode($projectFieldId));
     }
 
     /**

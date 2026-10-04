@@ -44,6 +44,25 @@ final readonly class Comment
     }
 
     /**
+     * A comment from the get_issue_comments tool of the YouTrack MCP server: {author, text, url, createdAt (ms)}.
+     *
+     * @param  array<array-key, mixed>  $raw
+     */
+    public static function fromMcp(array $raw, string $issueId): self
+    {
+        $created = $raw['createdAt'] ?? null;
+        $url = is_string($raw['url'] ?? null) ? $raw['url'] : '';
+
+        return new self(
+            id: preg_match('/focus=Comments-([\w.-]+)/', $url, $match) === 1 ? $match[1] : '',
+            issueId: $issueId,
+            text: is_string($raw['text'] ?? null) ? $raw['text'] : '',
+            author: is_string($raw['author'] ?? null) ? $raw['author'] : null,
+            createdAt: is_int($created) ? CarbonImmutable::createFromTimestampMsUTC($created) : null,
+        );
+    }
+
+    /**
      * @return array{id: string, issueId: string, issueSummary: string|null, text: string, author: string|null, authorName: string|null, createdAt: string|null}
      */
     public function toArray(): array

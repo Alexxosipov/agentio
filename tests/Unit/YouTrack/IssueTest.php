@@ -18,7 +18,6 @@ it('normalises a YouTrack issue', function () {
         'resolved' => 1791010891627,
         'customFields' => [
             ['name' => 'Type', 'value' => ['name' => 'Task']],
-            ['name' => 'State', 'value' => ['name' => 'Done']],
             ['name' => 'Stage', 'value' => ['name' => 'Done']],
             ['name' => 'Assignee', 'value' => ['login' => 'a.osipov', 'fullName' => 'Alexander Osipov']],
             ['name' => 'Estimation', 'value' => ['presentation' => '1d']],
@@ -45,7 +44,6 @@ it('normalises a YouTrack issue', function () {
         ->and($issue->description)->toBe('Details')
         ->and($issue->state())->toBe('Done')
         ->and($issue->type())->toBe('Task')
-        ->and($issue->stage())->toBe('Done')
         ->and($issue->field('Assignee'))->toBe('a.osipov')
         ->and($issue->field('Estimation'))->toBe('1d')
         ->and($issue->field('Notes'))->toBe('Plain text')
@@ -82,7 +80,7 @@ it('tolerates a sparse payload', function () {
 });
 
 it('answers state, type and tag questions', function () {
-    $issue = Issue::fromApi(apiIssue('TP-2', ['Type' => 'Epic', 'State' => 'In Progress'], tags: ['agent-claimed']));
+    $issue = Issue::fromApi(apiIssue('TP-2', ['Type' => 'Epic', 'Stage' => 'In Progress'], tags: ['agent-claimed']));
 
     expect($issue->hasState(State::InProgress))->toBeTrue()
         ->and($issue->hasState(State::Ready, State::Review))->toBeFalse()
@@ -103,15 +101,14 @@ it('recognises ideas by type or by tag', function (array $fields, array $tags, b
 ]);
 
 it('serialises to an array', function () {
-    $issue = Issue::fromApi(apiIssue('TP-3', ['Type' => 'Story', 'State' => 'Ready', 'Stage' => 'Backlog'], ['subtask of' => ['TP-2']], ['idea']));
+    $issue = Issue::fromApi(apiIssue('TP-3', ['Type' => 'Story', 'Stage' => 'Ready'], ['subtask of' => ['TP-2']], ['idea']));
 
     expect($issue->toArray())->toBe([
         'id' => 'TP-3',
         'summary' => 'Summary of TP-3',
         'state' => 'Ready',
         'type' => 'Story',
-        'stage' => 'Backlog',
-        'fields' => ['Type' => 'Story', 'State' => 'Ready', 'Stage' => 'Backlog'],
+        'fields' => ['Type' => 'Story', 'Stage' => 'Ready'],
         'tags' => ['idea'],
         'relations' => ['subtask of' => ['TP-2']],
         'description' => null,
@@ -119,4 +116,35 @@ it('serialises to an array', function () {
         'updatedAt' => '2026-10-03T11:39:10+00:00',
         'resolvedAt' => null,
     ]);
+});
+
+it('normalises an issue of the get_issue tool of the MCP server', function () {
+    $issue = Issue::fromMcp([
+        'id' => 'TP-13',
+        'summary' => '[TASK] Note page',
+        'description' => 'Details',
+        'parentIssue' => ['id' => 'TP-4', 'summary' => '[STORY] View a note'],
+        'tags' => ['agent-claimed', ['id' => '6-1', 'name' => 'idea'], ''],
+        'customFields' => ['Type' => 'Task', 'Stage' => 'In Progress', 'Priority' => 'Обычная', 'Fix versions' => ['1.0', '1.1'], 'Affected versions' => [], 'Assignee' => null],
+        'createdAt' => '2026-10-03 17:13:17',
+        'updatedAt' => '2026-10-03 17:42:13',
+        'resolvedAt' => null,
+    ], ['parent for' => [], 'depends on' => ['TP-9', 'TP-10']]);
+
+    expect($issue->id)->toBe('TP-13')
+        ->and($issue->summary)->toBe('[TASK] Note page')
+        ->and($issue->description)->toBe('Details')
+        ->and($issue->state())->toBe('In Progress')
+        ->and($issue->field('Fix versions'))->toBe('1.0, 1.1')
+        ->and($issue->field('Affected versions'))->toBeNull()
+        ->and($issue->tags)->toBe(['agent-claimed' => 'agent-claimed', 'idea' => '6-1'])
+        ->and($issue->isClaimed())->toBeTrue()
+        ->and($issue->relations)->toBe(['depends on' => ['TP-9', 'TP-10'], 'subtask of' => ['TP-4']])
+        ->and($issue->parentId())->toBe('TP-4')
+        ->and($issue->childIds())->toBe([])
+        ->and($issue->createdAt?->toIso8601String())->toBe('2026-10-03T17:13:17+00:00')
+        ->and($issue->isResolved())->toBeFalse();
+
+    expect(Issue::fromMcp(['id' => 'TP-1', 'summary' => 'Search result', 'customFields' => ['Stage' => 'Done'], 'resolvedAt' => '2026-10-03 19:11:46'])->isResolved())->toBeTrue()
+        ->and(Issue::fromMcp([])->id)->toBe('');
 });

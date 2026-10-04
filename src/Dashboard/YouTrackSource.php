@@ -36,6 +36,8 @@ final class YouTrackSource
 
     private ?ReadinessGraph $graph = null;
 
+    private ?string $generation = null;
+
     /** @var array<string, AgentComments> */
     private array $comments = [];
 
@@ -108,6 +110,17 @@ final class YouTrackSource
             'ok' => $this->isConfigured() && $this->error === null,
             'error' => $this->error,
         ];
+    }
+
+    /**
+     * Forget every cached YouTrack answer (after the dashboard changed issues), here and in the cache store.
+     */
+    public function flush(): void
+    {
+        $this->graph = null;
+        $this->comments = [];
+        $this->generation = bin2hex(random_bytes(8));
+        Cache::forever($this->generationKey(), $this->generation);
     }
 
     /**
@@ -276,8 +289,23 @@ final class YouTrackSource
         return $envelope['value'] ?? null;
     }
 
+    /**
+     * Cache keys carry a generation, so that flush() forgets every answer at once on any cache store.
+     */
     private function cacheKey(string $key): string
     {
-        return 'agentio:'.hash('xxh128', $this->repository->client()->baseUrl().'|'.$this->project()).':'.$key;
+        $generation = $this->generation ??= (string) (Cache::get($this->generationKey()) ?? '0');
+
+        return $this->prefix().':'.$generation.':'.$key;
+    }
+
+    private function generationKey(): string
+    {
+        return $this->prefix().':generation';
+    }
+
+    private function prefix(): string
+    {
+        return 'agentio:'.hash('xxh128', $this->repository->client()->baseUrl().'|'.$this->project());
     }
 }

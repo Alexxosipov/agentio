@@ -129,8 +129,7 @@ it('fetches every page of a collection', function () {
 });
 
 it('builds links to the web UI', function () {
-    expect(client()->issueUrl('TP-1'))->toBe('https://yt.example.com/issue/TP-1')
-        ->and(client()->articleUrl('TP-A-18'))->toBe('https://yt.example.com/articles/TP-A-18');
+    expect(client()->issueUrl('TP-1'))->toBe('https://yt.example.com/issue/TP-1');
 });
 
 it('reads issues, comments and comment activities', function () {
@@ -170,7 +169,7 @@ it('finds a project by its short name', function () {
         ->and(fn () => client()->projectId('NOPE'))->toThrow(YouTrackException::class, 'YouTrack project "NOPE" was not found');
 });
 
-it('reads project settings, bundles, tags, saved searches and articles', function (Closure $call, string $path, array $query) {
+it('reads project settings, bundles, tags and saved searches', function (Closure $call, string $path, array $query) {
     Http::fake(['*' => Http::response([['id' => 'x']])]);
 
     expect($call(client()))->toBe([['id' => 'x']]);
@@ -184,13 +183,11 @@ it('reads project settings, bundles, tags, saved searches and articles', functio
     });
 })->with([
     'project custom fields' => [fn (Client $client): array => $client->projectCustomFields('0-3'), 'admin/projects/0-3/customFields', []],
-    'custom fields' => [fn (Client $client): array => $client->customFields(), 'admin/customFieldSettings/customFields', ['fields' => 'id,name,fieldType(id),fieldDefaults(bundle(id)),instances(project(id),bundle(id))']],
+    'custom fields' => [fn (Client $client): array => $client->customFields(), 'admin/customFieldSettings/customFields', ['fields' => 'id,name,localizedName,fieldType(id),fieldDefaults(bundle(id)),instances(project(id),bundle(id))']],
     'state bundles' => [fn (Client $client): array => $client->bundles('state'), 'admin/customFieldSettings/bundles/state', []],
     'tags' => [fn (Client $client): array => $client->tags('agent'), 'tags', ['query' => 'agent', 'fields' => 'id,name']],
     'all tags' => [fn (Client $client): array => $client->tags(), 'tags', ['fields' => 'id,name']],
     'saved queries' => [fn (Client $client): array => $client->savedQueries(), 'savedQueries', ['fields' => 'id,name,query']],
-    'articles' => [fn (Client $client): array => $client->articles('project: TP'), 'articles', ['query' => 'project: TP']],
-    'all articles' => [fn (Client $client): array => $client->articles(), 'articles', ['fields' => Client::ARTICLE_FIELDS]],
 ]);
 
 it('tells whether a project has issues', function (array $issues, bool $expected) {
@@ -208,12 +205,13 @@ it('tells whether a project has issues', function (array $issues, bool $expected
     'with issues' => [[['id' => '2-1']], true],
 ]);
 
-it('reads a single article', function () {
-    Http::fake(['*' => Http::response(['idReadable' => 'TP-A-1'])]);
+it('detaches a field from a project', function () {
+    Http::fake(['*' => Http::response('')]);
 
-    expect(client()->article('TP-A-1'))->toBe(['idReadable' => 'TP-A-1']);
+    client()->detachProjectCustomField('0-3', '189-20');
 
-    Http::assertSent(fn (Request $request): bool => str_starts_with($request->url(), 'https://yt.example.com/api/articles/TP-A-1?'));
+    Http::assertSent(fn (Request $request): bool => $request->method() === 'DELETE'
+        && parse_url($request->url(), PHP_URL_PATH) === '/api/admin/projects/0-3/customFields/189-20');
 });
 
 it('creates YouTrack settings for the installer', function (Closure $call, string $path, array $body) {
@@ -225,25 +223,10 @@ it('creates YouTrack settings for the installer', function (Closure $call, strin
         && parse_url($request->url(), PHP_URL_PATH) === '/api/'.$path
         && $request->data() === $body);
 })->with([
-    'article' => [
-        fn (Client $client): array => $client->createArticle('0-3', 'Architecture', '# Architecture'),
-        'articles',
-        ['project' => ['id' => '0-3'], 'summary' => 'Architecture', 'content' => '# Architecture'],
-    ],
-    'child article' => [
-        fn (Client $client): array => $client->createArticle('0-3', 'ADR-001', 'Text', '155-1'),
-        'articles',
-        ['project' => ['id' => '0-3'], 'summary' => 'ADR-001', 'content' => 'Text', 'parentArticle' => ['id' => '155-1']],
-    ],
-    'article update' => [
-        fn (Client $client): array => $client->updateArticle('TP-A-1', content: 'New text'),
-        'articles/TP-A-1',
-        ['content' => 'New text'],
-    ],
     'custom field' => [
-        fn (Client $client): array => $client->createCustomField('Stage', 'state[1]'),
+        fn (Client $client): array => $client->createCustomField('State', 'state[1]'),
         'admin/customFieldSettings/customFields',
-        ['name' => 'Stage', 'fieldType' => ['id' => 'state[1]'], 'isAutoAttached' => false],
+        ['name' => 'State', 'fieldType' => ['id' => 'state[1]'], 'isAutoAttached' => false],
     ],
     'project field with bundle' => [
         fn (Client $client): array => $client->attachCustomField('0-3', '161-12', 'StateProjectCustomField', '165-6', 'StateBundle', false),

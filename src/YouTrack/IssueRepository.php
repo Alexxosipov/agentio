@@ -101,7 +101,7 @@ final readonly class IssueRepository
     }
 
     /**
-     * Ideas waiting for planning: Type Idea or tag "idea", State Backlog, not claimed.
+     * Ideas waiting for planning: Type Idea or tag "idea", Stage Backlog, not claimed.
      *
      * @return list<Issue>
      *
@@ -109,9 +109,9 @@ final readonly class IssueRepository
      */
     public function ideas(): array
     {
-        // "State: Backlog" also matches a Stage named Backlog, so State is re-checked here.
+        // The search is narrowed by the query; the Stage is re-checked on the answer.
         return array_values(array_filter(
-            $this->projectIssues('State: Backlog'),
+            $this->projectIssues(State::FIELD.': '.State::Backlog->value),
             fn (Issue $issue): bool => $issue->isIdea() && $issue->hasState(State::Backlog) && ! $issue->isClaimed(),
         ));
     }

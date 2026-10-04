@@ -9,21 +9,24 @@ use Obrazmisli\Agentio\Runtime\MergePolicy;
 
 /**
  * @param  array<string, string|null>  $values
- * @return array<string, string> Path => status
+ * @return string|null "<path> <status>"
  */
-function environmentChanges(Installer $installer, array $values): array
+function environmentChange(Installer $installer, array $values): ?string
 {
-    return collect($installer->writeEnvironment($values))->mapWithKeys(fn (FileChange $change): array => [$change->path => $change->status->value])->all();
+    $change = $installer->writeEnvironment($values);
+
+    return $change instanceof FileChange ? $change->path.' '.$change->status->value : null;
 }
 
-it('reports the files of the connection as created, updated or unchanged', function () {
+it('writes the connection to .env only and reports it as created, updated or unchanged', function () {
     $directory = hostProject();
     $installer = new Installer($directory, dirname(__DIR__, 3).'/stubs', new Placeholders('XY', 'main', MergePolicy::LocalBranch));
-    $values = ['YOUTRACK_URL' => 'https://yt.example.com', 'YOUTRACK_TOKEN' => 'token', 'AGENTIO_PROJECT' => 'XY'];
+    $values = ['YOUTRACK_URL' => 'https://yt.example.com', 'YOUTRACK_TOKEN' => 'token', 'AGENTIO_WORKTREES_PATH' => '/srv/wt'];
 
-    expect(environmentChanges($installer, ['YOUTRACK_URL' => null, 'YOUTRACK_TOKEN' => '']))->toBe([])
-        ->and(environmentChanges($installer, ['AGENTIO_PROJECT' => 'XY']))->toBe(['.env' => 'created'])
-        ->and(environmentChanges($installer, $values))->toBe(['.env' => 'updated', '.claude/settings.local.json' => 'created'])
-        ->and(environmentChanges($installer, $values))->toBe(['.env' => 'unchanged', '.claude/settings.local.json' => 'unchanged'])
-        ->and(environmentChanges($installer, [...$values, 'YOUTRACK_TOKEN' => 'rotated']))->toBe(['.env' => 'updated', '.claude/settings.local.json' => 'updated']);
+    expect(environmentChange($installer, ['YOUTRACK_URL' => null, 'YOUTRACK_TOKEN' => '']))->toBeNull()
+        ->and(environmentChange($installer, ['AGENTIO_WORKTREES_PATH' => '/srv/wt']))->toBe('.env created')
+        ->and(environmentChange($installer, $values))->toBe('.env updated')
+        ->and(environmentChange($installer, $values))->toBe('.env unchanged')
+        ->and(environmentChange($installer, [...$values, 'YOUTRACK_TOKEN' => 'rotated']))->toBe('.env updated')
+        ->and(glob($directory.'/{,.}[!.]*', GLOB_BRACE))->toBe([$directory.'/.env']);
 });

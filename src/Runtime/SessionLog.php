@@ -9,7 +9,7 @@ use Illuminate\Support\Str;
 use Throwable;
 
 /**
- * A Claude Code session log written by scripts/agent-loop.sh: "===== <time> <command> =====" header
+ * A Claude Code session log written by the agent loop: "===== <time> <command> =====" header
  * lines followed by the `--output-format stream-json --verbose` events of the session, one JSON per line.
  *
  * Logs grow to gigabytes, so they are never loaded whole: read() pages forward from a byte offset

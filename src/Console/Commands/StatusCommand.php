@@ -17,7 +17,7 @@ use Symfony\Component\Console\Attribute\AsCommand;
 
 /**
  * A summary of the autonomous cycle: the local loop and its live sessions, and the YouTrack project
- * (counts by Type × State, ideas and ready epics, work in progress, blocked issues with their reasons,
+ * (counts by Type × Stage, ideas and ready epics, work in progress, blocked issues with their reasons,
  * epics awaiting a human).
  */
 #[AsCommand(name: 'agentio:status')]
@@ -182,7 +182,7 @@ final class StatusCommand extends Command
             $event = is_array($session['lastEvent']) ? $session['lastEvent'] : null;
             $this->line(sprintf(
                 '  %s %s (pid %s, since %s)',
-                $session['kind'] === 'plan' ? '/plan' : '/work-epic',
+                $session['kind'] === 'plan' ? '/agentio-plan' : '/agentio-work-epic',
                 $session['issueId'],
                 $session['pid'] ?? '?',
                 $session['startedAt'] ?? '?',

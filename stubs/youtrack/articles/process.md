@@ -1,12 +1,12 @@
-> Заготовка, созданная `php artisan agentio:install --youtrack`.
+> Заготовка, созданная `php artisan agentio:setup-youtrack`.
 
 Процесс разработки: человек заводит идеи и принимает результат, всё остальное делают агенты Claude Code (планирование, аналитика, архитектура, код, тесты, ревью). YouTrack — единственный источник правды.
 
 ## Правила
 - Иерархия: `[IDEA]` → `[EPIC]` → `[STORY]` → `[TASK]`; поле `Type` совпадает с префиксом summary.
-- Статусы (State): Backlog → Analysis → Ready → In Progress → Review → Done, плюс Blocked. Поле Stage (колонки Kanban-доски) выводится из State автоматически.
+- Статусы — поле Stage: Backlog → Analysis → Ready → In Progress → Review → Done, плюс Blocked. Колонки доски строятся по Stage.
 - Задача берётся в работу, когда она Ready, её зависимости выполнены и нет метки `agent-claimed`.
 - Контекст работы — только в комментариях `[AGENT:START|DECISION|BLOCKED|DONE|RELEASE]`.
 - Вопросы к человеку — `[AGENT:BLOCKED]`: ответьте комментарием и верните прежний статус.
 
-Полные правила для агентов — скилл `.claude/skills/youtrack-workflow` в репозитории. Подробное руководство для людей — дочерняя статья «Руководство по автоматизации».
+Полные правила для агентов — скилл `.claude/skills/agentio-youtrack-workflow` в репозитории; агенты работают с YouTrack через его MCP-сервер. Подробное руководство для людей — дочерняя статья «Руководство по автоматизации».

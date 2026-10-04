@@ -25,7 +25,12 @@ Route::prefix('api')->name('agentio.api.')->group(function (): void {
     Route::get('board', [ApiController::class, 'board'])->name('board');
     Route::get('events', [ApiController::class, 'events'])->name('events');
     Route::get('loop-log', [ApiController::class, 'loopLog'])->name('loop-log');
-    Route::get('epics/{id}', [ApiController::class, 'epic'])
-        ->where('id', '[A-Za-z][A-Za-z0-9_]*-[0-9]+|__ID__')
-        ->name('epic');
+
+    Route::where(['id' => '[A-Za-z][A-Za-z0-9_]*-[0-9]+|__ID__'])->group(function (): void {
+        Route::get('epics/{id}', [ApiController::class, 'epic'])->name('epic');
+        Route::get('epics/{id}/review', [ApiController::class, 'review'])->name('review');
+        Route::get('epics/{id}/diff', [ApiController::class, 'diff'])->name('diff');
+        Route::post('epics/{id}/accept', [ApiController::class, 'accept'])->name('accept');
+        Route::post('epics/{id}/rework', [ApiController::class, 'rework'])->name('rework');
+    });
 });

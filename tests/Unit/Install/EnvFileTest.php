@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 use Obrazmisli\Agentio\Install\EnvFile;
 
-it('reads values the way scripts/yt.php does', function () {
+it('reads values the way Laravel does', function () {
     $file = temporaryDirectory().'/.env';
     file_put_contents($file, "A=plain # comment\nexport B=\"quoted # not a comment\"\nC='single'\nEMPTY=\n#D=commented\n");
     $env = new EnvFile($file);

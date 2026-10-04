@@ -26,6 +26,10 @@
         filters: load('filters', { epic: '', type: '', q: '' }),
         timer: null,
         seq: 0,
+        forms: {},
+        results: {},
+        diffs: {},
+        busy: null,
         lastSuccess: null,
         offline: false,
     };
@@ -346,7 +350,7 @@
             const label = loop.status === 'stopping' ? 'останавливается (стоп-флаг)' : loop.label;
             pills.push(`<span class="pill ${cls}" title="Автономный цикл agent-loop.sh"><span class="dot"></span>Цикл: <b>${esc(label)}</b>${loop.pid ? ` <span class="muted">pid ${esc(loop.pid)}</span>` : ''}</span>`);
             if (loop.stopRequested && loop.status !== 'stopping') {
-                pills.push('<span class="pill warn" title="Файл .agent-stop: цикл не продолжит работу"><span class="dot"></span>стоп-флаг</span>');
+                pills.push('<span class="pill warn" title="Стоп-флаг (php artisan agentio:run --stop): цикл не продолжит работу"><span class="dot"></span>стоп-флаг</span>');
             }
             pills.push(`<span class="pill" title="Живые сессии Claude Code"><span>Сессий: <b>${esc(st.sessions.alive)}</b></span></span>`);
             pills.push(`<span class="pill" title="MERGE_POLICY"><span>Слияние: <b>${esc(st.mergePolicy)}</b></span></span>`);
@@ -431,7 +435,7 @@
     function sessionCard(s, stages) {
         const issue = s.issue;
         const status = issue && issue.status;
-        const kind = s.kind === 'plan' ? 'Планирование · /plan' : 'Эпик · /work-epic';
+        const kind = s.kind === 'plan' ? 'Планирование · /agentio-plan' : 'Эпик · /agentio-work-epic';
         const running = s.startedAt ? `идёт ${esc(duration(Date.now() - date(s.startedAt).getTime()))}` : '';
         const current = issue && issue.current && issue.current.length
             ? '<div class="current-tasks">' + issue.current.map((t) => `<div class="current-task">${typeBadge(t.type)}${idLink(t.id, t.url)}<span class="summary" title="${esc(t.summary)}">${esc(t.summary)}</span>${stateBadge(t.state)}${ownerChip(t.owner, t.since)}</div>`).join('') + '</div>'
@@ -701,6 +705,240 @@
         patchSlot('epic-events', feed(e.events));
     }
 
+    /* ---------- review & acceptance ---------- */
+
+    const FILE_STATUS = { A: 'добавлен', M: 'изменён', D: 'удалён', T: 'тип изменён' };
+    const VERDICT = { APPROVED: ['одобрена', 'v-ok'], CHANGES_REQUESTED: ['есть замечания', 'v-warn'], BLOCKED: ['заблокирована', 'v-err'] };
+
+    function reviewForm(id) {
+        return S.forms[id] || (S.forms[id] = { removeWorktree: true, deleteBranch: false, close: true, story: '', remark: '' });
+    }
+
+    function plural(n, one, few, many) {
+        const mod10 = n % 10;
+        const mod100 = n % 100;
+        return n + ' ' + (mod10 === 1 && mod100 !== 11 ? one : mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14) ? few : many);
+    }
+
+    function diffView(diff) {
+        if (!diff) {
+            return '<div class="empty">загрузка…</div>';
+        }
+        if (diff.error) {
+            return `<div class="empty err-text">${esc(diff.error)}</div>`;
+        }
+        const lines = diff.diff.replace(/\n$/, '').split('\n').map((line) => {
+            const cls = /^(diff |index |--- |\+\+\+ |new file|deleted file|old mode|new mode|similarity|Binary files)/.test(line) ? 'd-meta'
+                : line.startsWith('@@') ? 'd-hunk' : line.startsWith('+') ? 'd-add' : line.startsWith('-') ? 'd-del' : '';
+            return `<span class="${cls}">${esc(line) || ' '}</span>`;
+        });
+        return `<pre class="diff">${lines.join('\n')}</pre>${diff.truncated ? '<div class="empty">Дифф обрезан: он слишком большой для панели.</div>' : ''}`;
+    }
+
+    function fileRow(id, file) {
+        const key = 'diff:' + id + ':' + file.path;
+        const open = S.open.has(key);
+        const counts = file.added === null ? '<span class="faint">бинарный</span>'
+            : `<span class="add">+${esc(file.added)}</span><span class="del">−${esc(file.deleted)}</span>`;
+        return `<details class="fold file" data-key="${esc(key)}" data-diff="${esc(file.path)}"${open ? ' open' : ''}>`
+            + `<summary><span class="fstatus f-${esc(file.status)}" title="${esc(FILE_STATUS[file.status] || file.status)}">${esc(file.status)}</span>`
+            + `<span class="path mono" title="${esc(file.path)}">${esc(file.path)}</span><span class="counts">${counts}</span></summary>`
+            + (open ? diffView(S.diffs[key]) : '')
+            + '</details>';
+    }
+
+    function checkRow(check) {
+        const [icon, cls] = check.ok === true ? ['✓', 'c-ok'] : check.ok === false ? ['✗', 'c-err'] : ['?', 'c-unknown'];
+        return `<li class="check ${cls}"><span class="icon" aria-hidden="true">${icon}</span><span>${esc(check.label)}${check.detail ? ` <span class="muted">— ${linkIds(esc(check.detail))}</span>` : ''}</span></li>`;
+    }
+
+    function reviewBody(r, id) {
+        const b = r.branch;
+        if (!b) {
+            return empty(`В главном каталоге нет ветки <code>epic/${esc(id)}-*</code>: эпик ещё не начат, или ветку удалили после слияния.`);
+        }
+        const facts = [
+            `<span class="mono"><b>${esc(b.name)}</b> → ${esc(r.base)}</span>`,
+            b.head ? `<span class="mono faint">${esc(b.head)}</span>` : '',
+            b.merged ? `<span class="badge v-ok">уже в ${esc(r.base)}</span>` : '',
+            `<span>${esc(plural(b.ahead, 'коммит', 'коммита', 'коммитов'))} · ${esc(plural(b.files.length, 'файл', 'файла', 'файлов'))} · <span class="add">+${esc(b.added)}</span> <span class="del">−${esc(b.deleted)}</span></span>`,
+            b.behind ? `<span class="warn-text">${esc(r.base)} ушла вперёд на ${esc(plural(b.behind, 'коммит', 'коммита', 'коммитов'))}</span>` : '',
+        ].filter(Boolean).join('');
+        const wt = b.worktree;
+        const worktree = wt && wt.exists
+            ? `<div class="review-worktree small muted">Worktree: <span class="mono">${esc(wt.path)}</span>${safeUrl(wt.url) ? ` · запустить: <code>cd ${esc(wt.path)} &amp;&amp; php artisan serve --port=${esc((wt.url.match(/:(\d+)/) || [])[1] || '8000')}</code> → <a href="${esc(wt.url)}" target="_blank" rel="noopener">${esc(wt.url)}</a>` : ''}</div>`
+            : '';
+
+        const summaryKey = 'review-summary:' + id;
+        const expanded = S.expanded.has(summaryKey);
+        const summary = r.summary
+            ? `<div class="subhead">Итог оркестратора · [AGENT:DONE] <span class="faint" title="${esc(fullTime(r.summary.createdAt))}">${esc(ago(r.summary.createdAt))}</span></div>`
+              + `<div class="feed-body${expanded ? '' : ' clamped'}">${md(r.summary.body)}</div>`
+              + `<button type="button" class="more" data-action="expand" data-key="${esc(summaryKey)}">${expanded ? 'свернуть' : 'показать полностью'}</button>`
+            : '';
+        const stories = r.stories.length
+            ? '<div class="subhead">Истории</div><div class="review-stories">' + r.stories.map((s) => {
+                const [label, cls] = VERDICT[s.verdict] || ['ревью не было', ''];
+                return `<div class="list-row">${idLink(s.id, s.url)}<span class="summary" title="${esc(s.summary)}">${esc(s.summary)}</span>${stateBadge(s.state)}<span class="badge ${cls}" title="${esc(s.verdictAt ? fullTime(s.verdictAt) : '')}">${esc(label)}</span></div>`;
+            }).join('') + '</div>'
+            : '';
+
+        const commitsKey = 'commits:' + id;
+        const commits = b.commits.length
+            ? `<details class="fold review-fold" data-key="${esc(commitsKey)}"${S.open.has(commitsKey) ? ' open' : ''}><summary>Коммиты · ${esc(b.commits.length)}${b.ahead > b.commits.length ? ` из ${esc(b.ahead)}` : ''}</summary><ul class="commits">`
+              + b.commits.map((c) => `<li><span class="mono faint" title="${esc(c.hash)}">${esc(c.short)}</span><span class="subject">${linkIds(esc(c.subject))}</span><span class="faint small nowrap" title="${esc(fullTime(c.date))}">${esc(c.author)} · ${esc(clock(c.date))}</span></li>`).join('')
+              + '</ul></details>'
+            : '';
+        const filesKey = 'files:' + id;
+        const files = b.files.length
+            ? `<details class="fold review-fold" data-key="${esc(filesKey)}"${S.open.has(filesKey) || !S.open.has('closed:' + filesKey) ? ' open' : ''}><summary>Изменённые файлы · ${esc(b.files.length)} <span class="faint small">нажмите на файл, чтобы увидеть дифф</span></summary><div class="files">`
+              + b.files.map((f) => fileRow(id, f)).join('')
+              + '</div></details>'
+            : '';
+
+        return `<div class="review-head"><div class="review-facts">${facts}</div>${worktree}</div>`
+            + `<div class="review-grid"><div class="review-main">${summary}${stories}</div>`
+            + `<div class="review-side"><div class="subhead">Проверки перед слиянием</div><ul class="checks">${r.checks.map(checkRow).join('')}</ul></div></div>`
+            + commits + files;
+    }
+
+    function reviewActions(r, epic, id) {
+        if (!epic || epic.state !== 'Review' || !r.branch) {
+            return '';
+        }
+        if (!cfg.actions || !r.actions) {
+            return '<div class="review-actions"><div class="muted small">Действия в панели отключены (<code>AGENTIO_UI_ACTIONS=false</code>): примите эпик по руководству, раздел 6.5.</div></div>';
+        }
+        const busy = S.busy !== null;
+        const merged = r.branch.merged;
+        const policyNote = r.mergePolicy === 'local-branch' ? '' : ` Политика <code>${esc(r.mergePolicy)}</code>: если эпик сливается через PR, слейте PR и примите эпик после этого.`;
+        const accept = '<div class="action-card"><h3>Принять</h3>'
+            + `<p class="muted small">${merged
+                ? `Ветка уже в <code>${esc(r.base)}</code>: останется убрать worktree и закрыть задачи.`
+                : `<code>git merge --no-ff ${esc(r.branch.name)}</code> в <code>${esc(r.base)}</code> главного каталога. Push не выполняется.${policyNote}`}</p>`
+            + '<label class="check-option"><input type="checkbox" data-field="removeWorktree"> удалить worktree эпика</label>'
+            + '<label class="check-option"><input type="checkbox" data-field="deleteBranch"> удалить ветку эпика</label>'
+            + '<label class="check-option"><input type="checkbox" data-field="close"> перевести истории (из Review) и эпик в Done</label>'
+            + `<div class="action-foot"><button type="button" class="btn primary" data-action="accept"${busy || !r.canAccept ? ' disabled' : ''}>${S.busy === 'accept' ? 'Сливаю…' : merged ? 'Принять' : 'Принять и слить'}</button>`
+            + (r.canAccept ? '' : '<span class="small muted">Сначала устраните то, что отмечено ✗.</span>') + '</div></div>';
+        const options = r.stories.map((s) => `<option value="${esc(s.id)}">${esc(s.id)} · ${esc(s.summary.slice(0, 70))}</option>`).join('');
+        const rework = '<div class="action-card"><h3>Вернуть на доработку</h3>'
+            + '<p class="muted small">В выбранной истории появится задача с замечанием (Ready), история и эпик вернутся в Ready, и цикл продолжит эпик в том же worktree.</p>'
+            + `<select data-field="story" aria-label="История"><option value="">Выберите историю…</option>${options}</select>`
+            + '<textarea data-field="remark" rows="4" placeholder="Что не так и как должно быть: файл, сценарий, ожидаемое поведение"></textarea>'
+            + `<div class="action-foot"><button type="button" class="btn" data-action="rework"${busy || !r.stories.length ? ' disabled' : ''}>${S.busy === 'rework' ? 'Отправляю…' : 'Вернуть на доработку'}</button></div></div>`;
+        return `<div class="review-actions" data-form="${esc(id)}">${accept}${rework}</div>`;
+    }
+
+    function reviewResult(id) {
+        const res = S.results[id];
+        if (!res) {
+            return '';
+        }
+        const list = (items) => (items && items.length ? `<ul>${items.map((item) => `<li>${linkIds(esc(item))}</li>`).join('')}</ul>` : '');
+        return `<div class="notice ${res.ok ? 'ok' : ''}"><div><b>${linkIds(esc(res.message))}</b>${list(res.details)}${list(res.warnings)}</div></div>`;
+    }
+
+    /** Put the remembered form values back after the actions were re-rendered. */
+    function restoreForm(id) {
+        const form = reviewForm(id);
+        viewSlot.querySelectorAll(`[data-form="${CSS.escape(id)}"] [data-field]`).forEach((el) => {
+            if (el.type === 'checkbox') {
+                el.checked = Boolean(form[el.dataset.field]);
+            } else {
+                el.value = form[el.dataset.field] ?? '';
+            }
+        });
+    }
+
+    function renderReview() {
+        const id = S.route.id;
+        const r = S.data['review:' + id];
+        const epic = (S.data['epic:' + id] || {}).epic;
+        const section = viewSlot.querySelector('[data-slot="review-panel"]');
+        if (!section) {
+            return;
+        }
+        section.hidden = !r || (!r.branch && !(epic && epic.state === 'Review'));
+        if (section.hidden) {
+            return;
+        }
+        patchSlot('review-count', r.branch ? (r.branch.merged ? `слита в ${esc(r.base)}` : epic && epic.state === 'Review' ? 'ждёт решения человека' : 'изменения ветки') : '');
+        patchSlot('review', reviewBody(r, id));
+        if (patchSlot('review-actions', reviewActions(r, epic, id))) {
+            restoreForm(id);
+        }
+        patchSlot('review-result', reviewResult(id));
+    }
+
+    async function loadDiff(key, path) {
+        const id = S.route.id;
+        try {
+            S.diffs[key] = await getJson(cfg.endpoints.diff.replace('__ID__', encodeURIComponent(id)) + '?file=' + encodeURIComponent(path));
+        } catch (e) {
+            S.diffs[key] = { error: 'Не удалось загрузить дифф: ' + e.message };
+        }
+        render();
+    }
+
+    function acceptedText(data) {
+        return [
+            data.merged ? `Ветка ${data.branch} слита в ${data.base} (${data.commit}).` : `Ветка ${data.branch} уже была в ${data.base}.`,
+            data.worktreeRemoved ? 'Worktree удалён.' : '',
+            data.branchDeleted ? 'Ветка удалена.' : '',
+            data.closed.length ? `В Done: ${data.closed.join(', ')}.` : '',
+        ].filter(Boolean).join(' ');
+    }
+
+    async function act(kind) {
+        const id = S.route.id;
+        const r = S.data['review:' + id];
+        const form = reviewForm(id);
+        if (!r || !r.branch || S.busy !== null) {
+            return;
+        }
+        let body;
+        if (kind === 'accept') {
+            const steps = [
+                r.branch.merged ? null : `слить ${r.branch.name} в ${r.base}`,
+                form.removeWorktree ? 'удалить worktree' : null,
+                form.deleteBranch ? 'удалить ветку' : null,
+                form.close ? 'закрыть истории и эпик в YouTrack' : null,
+            ].filter(Boolean);
+            if (!window.confirm(`Принять эпик ${id}: ${steps.join(', ') || 'ничего не менять'}?`)) {
+                return;
+            }
+            body = { removeWorktree: form.removeWorktree, deleteBranch: form.deleteBranch, close: form.close };
+        } else {
+            if (!form.story || !form.remark.trim()) {
+                S.results[id] = { ok: false, message: 'Выберите историю и опишите замечание.' };
+                render();
+                return;
+            }
+            if (!window.confirm(`Вернуть эпик ${id} на доработку с замечанием к ${form.story}?`)) {
+                return;
+            }
+            body = { story: form.story, remark: form.remark };
+        }
+
+        S.busy = kind;
+        delete S.results[id];
+        render();
+        try {
+            const data = await postJson(cfg.endpoints[kind].replace('__ID__', encodeURIComponent(id)), body);
+            S.results[id] = kind === 'accept'
+                ? { ok: true, message: acceptedText(data), warnings: data.warnings }
+                : { ok: true, message: `Создана задача ${data.task}, эпик возвращён в Ready: цикл продолжит его в том же worktree.`, warnings: data.warnings };
+            if (kind === 'rework') {
+                form.remark = '';
+            }
+        } catch (e) {
+            S.results[id] = { ok: false, message: e.message, details: e.details };
+        }
+        S.busy = null;
+        tick();
+    }
+
     /* ---------- layout ---------- */
 
     const LAYOUTS = {
@@ -721,6 +959,8 @@
         log: () => '<div data-slot="notice"></div><section class="panel"><div class="panel-head"><h2>Журнал цикла · loop.log</h2><span class="count">последние строки, новые внизу</span></div><div class="scroll scroll-log tall" data-slot="log" data-autoscroll></div></section>',
         epic: () => '<a class="back" href="#/">← к обзору</a><div data-slot="notice"></div>'
             + '<section class="panel" data-slot="epic-head"></section>'
+            + '<section class="panel review" data-slot="review-panel" hidden><div class="panel-head"><h2>Ветка и приёмка</h2><span class="count" data-slot="review-count"></span></div>'
+            + '<div data-slot="review"></div><div data-slot="review-actions"></div><div data-slot="review-result"></div></section>'
             + '<div class="epic-grid"><div class="col">'
             + '<section class="panel"><div class="panel-head"><h2>Истории и задачи</h2><span class="count" data-slot="tree-count"></span></div><div data-slot="tree"></div></section>'
             + '<section class="panel"><div class="panel-head"><h2>События</h2><span class="count">[AGENT:*] по эпику</span></div><div class="scroll scroll-epic" data-slot="epic-events"></div></section>'
@@ -786,10 +1026,28 @@
             patchSlot('log', renderLoopLog(0));
         } else if (view === 'epic') {
             renderEpic();
+            renderReview();
         }
     }
 
     /* ---------- data ---------- */
+
+    async function postJson(url, body) {
+        const response = await fetch(url, {
+            method: 'POST',
+            headers: { Accept: 'application/json', 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest', ...(cfg.csrf ? { 'X-CSRF-TOKEN': cfg.csrf } : {}) },
+            credentials: 'same-origin',
+            body: JSON.stringify(body),
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) {
+            const error = new Error(response.status === 419 ? 'Сессия истекла: обновите страницу.' : data.message || `HTTP ${response.status}.`);
+            error.status = response.status;
+            error.details = Array.isArray(data.details) ? data.details : [];
+            throw error;
+        }
+        return data;
+    }
 
     async function getJson(url) {
         const response = await fetch(url, { headers: { Accept: 'application/json' }, credentials: 'same-origin', cache: 'no-store' });
@@ -813,6 +1071,7 @@
             urls.loopLog = e.loopLog;
         } else if (view === 'epic') {
             urls['epic:' + S.route.id] = e.epic.replace('__ID__', encodeURIComponent(S.route.id));
+            urls['review:' + S.route.id] = e.review.replace('__ID__', encodeURIComponent(S.route.id));
             if (!S.data.pipeline) {
                 urls.pipeline = e.pipeline;
             }
@@ -880,6 +1139,10 @@
             S.expanded.has(key) ? S.expanded.delete(key) : S.expanded.add(key);
             render();
         }
+        const action = event.target.closest('[data-action="accept"], [data-action="rework"]');
+        if (action && !action.disabled) {
+            act(action.dataset.action);
+        }
     });
 
     document.addEventListener('change', (event) => {
@@ -888,6 +1151,8 @@
             S.showDone = target.checked;
             save('showDone', S.showDone);
             render();
+        } else if (target.matches('[data-form] [data-field]')) {
+            reviewForm(target.closest('[data-form]').dataset.form)[target.dataset.field] = target.type === 'checkbox' ? target.checked : target.value;
         } else if (target.matches('[data-filter]')) {
             S.filters[target.dataset.filter] = target.value;
             save('filters', S.filters);
@@ -900,6 +1165,8 @@
             S.filters.q = event.target.value;
             save('filters', S.filters);
             render();
+        } else if (event.target.matches('[data-form] textarea[data-field]')) {
+            reviewForm(event.target.closest('[data-form]').dataset.form)[event.target.dataset.field] = event.target.value;
         }
     });
 
@@ -907,6 +1174,11 @@
         const key = event.target.dataset && event.target.dataset.key;
         if (key) {
             event.target.open ? S.open.add(key) : S.open.delete(key);
+            event.target.open ? S.open.delete('closed:' + key) : S.open.add('closed:' + key);
+            const path = event.target.dataset.diff;
+            if (event.target.open && path !== undefined && !S.diffs[key]) {
+                loadDiff(key, path);
+            }
             const slot = event.target.closest('[data-slot]');
             if (slot) {
                 slot.__html = null;

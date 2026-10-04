@@ -7,7 +7,8 @@ namespace Obrazmisli\Agentio\YouTrack;
 use Carbon\CarbonImmutable;
 
 /**
- * An issue normalised from the YouTrack REST representation (see Client::ISSUE_FIELDS).
+ * An issue normalised from the YouTrack REST representation (see Client::ISSUE_FIELDS) or from the answer of
+ * the get_issue tool of the YouTrack MCP server (see fromMcp()).
  */
 final readonly class Issue
 {
@@ -75,6 +76,49 @@ final readonly class Issue
         );
     }
 
+    /**
+     * An issue from the get_issue tool of the YouTrack MCP server. Its answer names the parent but not the other
+     * links, so the children ("parent for") and the dependencies ("depends on") are passed in.
+     *
+     * @param  array<array-key, mixed>  $raw
+     * @param  array<string, list<string>>  $relations  Relation => linked issue ids
+     */
+    public static function fromMcp(array $raw, array $relations = []): self
+    {
+        $fields = [];
+
+        foreach (is_array($raw['customFields'] ?? null) ? $raw['customFields'] : [] as $name => $value) {
+            if (is_string($name)) {
+                $fields[$name] = self::fieldValue($value);
+            }
+        }
+
+        $tags = [];
+
+        foreach (is_array($raw['tags'] ?? null) ? $raw['tags'] : [] as $tag) {
+            $name = is_array($tag) ? ($tag['name'] ?? null) : $tag;
+
+            if (is_string($name) && $name !== '') {
+                $tags[$name] = is_array($tag) && is_scalar($tag['id'] ?? null) ? (string) $tag['id'] : $name;
+            }
+        }
+
+        $parent = is_array($raw['parentIssue'] ?? null) && is_string($raw['parentIssue']['id'] ?? null) ? $raw['parentIssue']['id'] : null;
+        $relations = array_filter([...$relations, 'subtask of' => $parent === null ? [] : [$parent]], fn (array $ids): bool => $ids !== []);
+
+        return new self(
+            id: is_string($raw['id'] ?? null) ? $raw['id'] : '',
+            summary: is_string($raw['summary'] ?? null) ? $raw['summary'] : '',
+            fields: $fields,
+            tags: $tags,
+            relations: $relations,
+            description: is_string($raw['description'] ?? null) ? $raw['description'] : null,
+            createdAt: self::dateTime($raw['createdAt'] ?? null),
+            updatedAt: self::dateTime($raw['updatedAt'] ?? null),
+            resolvedAt: self::dateTime($raw['resolvedAt'] ?? null),
+        );
+    }
+
     public function field(string $name): ?string
     {
         return $this->fields[$name] ?? null;
@@ -82,17 +126,12 @@ final readonly class Issue
 
     public function state(): ?string
     {
-        return $this->field('State');
+        return $this->field(State::FIELD);
     }
 
     public function type(): ?string
     {
         return $this->field('Type');
-    }
-
-    public function stage(): ?string
-    {
-        return $this->field('Stage');
     }
 
     public function hasState(State ...$states): bool
@@ -166,7 +205,7 @@ final readonly class Issue
     }
 
     /**
-     * @return array{id: string, summary: string, state: string|null, type: string|null, stage: string|null, fields: array<string, string|null>, tags: list<string>, relations: array<string, list<string>>, description: string|null, createdAt: string|null, updatedAt: string|null, resolvedAt: string|null}
+     * @return array{id: string, summary: string, state: string|null, type: string|null, fields: array<string, string|null>, tags: list<string>, relations: array<string, list<string>>, description: string|null, createdAt: string|null, updatedAt: string|null, resolvedAt: string|null}
      */
     public function toArray(): array
     {
@@ -175,7 +214,6 @@ final readonly class Issue
             'summary' => $this->summary,
             'state' => $this->state(),
             'type' => $this->type(),
-            'stage' => $this->stage(),
             'fields' => $this->fields,
             'tags' => $this->tagNames(),
             'relations' => $this->relations,
@@ -217,6 +255,24 @@ final readonly class Issue
         }
 
         return null;
+    }
+
+    /**
+     * A "Y-m-d H:i:s" time of the MCP server (in the time zone of the token owner, UTC by default).
+     */
+    private static function dateTime(mixed $value): ?CarbonImmutable
+    {
+        if (is_int($value)) {
+            return self::timestamp($value);
+        }
+
+        if (! is_string($value) || $value === '') {
+            return null;
+        }
+
+        $time = CarbonImmutable::createFromFormat('Y-m-d H:i:s', $value, 'UTC');
+
+        return $time instanceof CarbonImmutable ? $time : null;
     }
 
     private static function timestamp(mixed $milliseconds): ?CarbonImmutable

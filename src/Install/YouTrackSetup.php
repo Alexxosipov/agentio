@@ -6,25 +6,37 @@ namespace Obrazmisli\Agentio\Install;
 
 use Obrazmisli\Agentio\YouTrack\Client;
 use Obrazmisli\Agentio\YouTrack\IssueType;
+use Obrazmisli\Agentio\YouTrack\Mcp\Tools;
 use Obrazmisli\Agentio\YouTrack\State;
 use Obrazmisli\Agentio\YouTrack\Tag;
 use Obrazmisli\Agentio\YouTrack\YouTrackException;
 
 /**
- * Configures a YouTrack project for the autonomous cycle, idempotently: the State, Type and Stage fields
- * with their bundles, the idea / agent-claimed tags, the "<KEY>: …" saved searches and the knowledge base
- * tree. Everything is looked up by name first (an article preferably under its expected parent); existing
- * entities are never deleted, renamed or moved, an existing bundle only gets the missing values and an
- * existing article is never changed, so the articles of an older tree stay where they are. A bundle the
- * project shares with other projects, or the default bundle new projects get, is never changed: an empty
- * project is switched to a bundle of its own ("<KEY> States"), a project with issues gets a warning.
- * New issues default to State Backlog, Type Task and Stage Backlog when the field has no default among
- * the cycle's values.
+ * Configures a YouTrack project for the autonomous cycle, idempotently, so it can run any number of times:
+ * the values of the project's own Stage and Type fields, the idea / agent-claimed tags, the "<KEY>: …" saved
+ * searches and the knowledge base tree.
+ *
+ * Fields: the cycle uses the fields YouTrack gives new projects — Stage (the status of an issue) and Type
+ * («Тип») — and never creates a second field of the same meaning: a field is found by its name or its
+ * localized name, and only the missing values are added to its bundle (Stage keeps its own values, e.g.
+ * Develop or Test, next to the cycle's). A bundle the project shares with other projects, or the default
+ * bundle new projects get, is never changed: an empty project is switched to a bundle of its own
+ * ("<KEY> Stages"), a project with issues gets a warning. New issues default to Stage Backlog and Type Task
+ * when the field has no default among the cycle's values. A State field («Состояние») is not used by the
+ * cycle: it is reported and left as is.
+ *
+ * Fields, bundles, tags, saved searches and the project id need the REST API (the MCP server has no tools
+ * for them); the knowledge base articles are found, created and updated through the MCP server. Existing
+ * entities are never deleted, renamed or moved; an existing article is never changed, except the automation
+ * guide, which is a copy of the manual of the installed agentio version.
  */
 final class YouTrackSetup
 {
-    /** Stage values (the Kanban board columns); Stage is derived from State. */
-    public const array STAGES = ['Backlog', 'Develop', 'Review', 'Test', 'Staging', 'Done'];
+    /** Names of a field in other UI languages: the Type field of a Russian YouTrack is «Тип». */
+    public const array FIELD_ALIASES = ['Stage' => ['Этап'], 'Type' => ['Тип'], 'State' => ['Состояние']];
+
+    /** The status field of other YouTrack projects; the cycle keeps the status in Stage (State::FIELD). */
+    public const string UNUSED_STATE = 'State';
 
     /** @var list<SetupAction> */
     private array $actions = [];
@@ -37,6 +49,7 @@ final class YouTrackSetup
 
     public function __construct(
         private readonly Client $client,
+        private readonly Tools $tools,
         private readonly KnowledgeBase $knowledgeBase,
         private readonly bool $dryRun = false,
     ) {}
@@ -51,12 +64,12 @@ final class YouTrackSetup
         $claimed = Tag::Claimed->value;
 
         return [
-            $project.': идеи без плана' => "project: {$project} tag: idea State: Backlog tag: -{{$claimed}}",
-            $project.': готовые эпики' => "project: {$project} Type: Epic State: Ready tag: -{{$claimed}}",
-            $project.': готовые задачи' => "project: {$project} Type: Task State: Ready tag: -{{$claimed}}",
-            $project.': заблокированные (причина в [AGENT:BLOCKED])' => "project: {$project} State: Blocked",
+            $project.': идеи без плана' => "project: {$project} tag: idea Stage: Backlog tag: -{{$claimed}}",
+            $project.': готовые эпики' => "project: {$project} Type: Epic Stage: Ready tag: -{{$claimed}}",
+            $project.': готовые задачи' => "project: {$project} Type: Task Stage: Ready tag: -{{$claimed}}",
+            $project.': заблокированные (причина в [AGENT:BLOCKED])' => "project: {$project} Stage: Blocked",
             $project.': в работе у агентов' => "project: {$project} tag: {{$claimed}}",
-            $project.': эпики на приёмке' => "project: {$project} Type: Epic State: Review",
+            $project.': эпики на приёмке' => "project: {$project} Type: Epic Stage: Review",
         ];
     }
 
@@ -72,28 +85,19 @@ final class YouTrackSetup
     {
         $this->actions = [];
         $projectId = $this->client->projectId($project);
-        $fields = [];
-
-        foreach ($this->client->projectCustomFields($projectId) as $field) {
-            $name = $field['field']['name'] ?? null;
-
-            if (is_string($name)) {
-                $fields[$name] = $field;
-            }
-        }
+        $fields = array_values(array_filter($this->client->projectCustomFields($projectId), fn (array $field): bool => is_array($field['field'] ?? null)));
 
         $states = array_map(fn (State $state): array => ['name' => $state->value, 'isResolved' => $state === State::Done], State::cases());
         $types = array_map(fn (IssueType $type): array => ['name' => $type->value], IssueType::cases());
-        $stages = array_map(fn (string $stage): array => ['name' => $stage, 'isResolved' => $stage === 'Done'], self::STAGES);
 
-        $this->ensureField($project, $projectId, $fields, 'State', 'state', $project.' States', $states, State::Backlog->value);
+        $this->ensureField($project, $projectId, $fields, State::FIELD, 'state', $project.' Stages', $states, State::Backlog->value);
         $this->ensureField($project, $projectId, $fields, 'Type', 'enum', $project.' Types', $types, IssueType::Task->value);
-        $this->ensureField($project, $projectId, $fields, 'Stage', 'state', $project.' Stages', $stages, self::STAGES[0]);
+        $this->unusedState($fields);
 
         $this->ensureTags([Tag::Idea->value, Tag::Claimed->value]);
         $this->ensureSavedSearches(self::savedSearches($project));
 
-        return $this->ensureArticles($project, $projectId, $placeholders);
+        return $this->ensureArticles($project, $placeholders);
     }
 
     /**
@@ -105,7 +109,7 @@ final class YouTrackSetup
     }
 
     /**
-     * @param  array<string, array<array-key, mixed>>  $projectFields  Field name => project custom field
+     * @param  list<array<array-key, mixed>>  $projectFields  The project custom fields
      * @param  'state'|'enum'  $kind
      * @param  list<array<string, mixed>>  $values
      *
@@ -115,7 +119,18 @@ final class YouTrackSetup
     {
         $bundleType = $kind === 'state' ? 'StateBundle' : 'EnumBundle';
         $fieldType = ucfirst($kind).'ProjectCustomField';
-        $attached = $projectFields[$name] ?? null;
+        $attached = $this->matching(array_map(fn (array $field): array => (array) $field['field'], $projectFields), $name, $kind);
+        $attached = $attached === null ? null : $projectFields[$attached];
+
+        if ($attached !== null && ($attached['field']['name'] ?? null) !== $name) {
+            $this->record('field', $name, SetupStatus::Warning, sprintf(
+                'the project has it as «%s»: agentio refers to the field as %s, rename it back in YouTrack (no second field is created)',
+                (string) ($attached['field']['name'] ?? '?'),
+                $name,
+            ));
+
+            return;
+        }
 
         if ($attached !== null) {
             $bundle = is_array($attached['bundle'] ?? null) ? $attached['bundle'] : [];
@@ -129,7 +144,8 @@ final class YouTrackSetup
             $current = (string) ($bundle['name'] ?? $bundle['id']);
 
             if (! $this->isShared($name, $projectId, $bundle['id'])) {
-                $this->record('field', $name, SetupStatus::Exists, 'bundle '.$current);
+                $localized = $attached['field']['localizedName'] ?? null;
+                $this->record('field', $name, SetupStatus::Exists, 'bundle '.$current.(is_string($localized) && $localized !== '' && $localized !== $name ? ", shown as «{$localized}»" : ''));
                 $full = $this->findBundle($kind, 'id', $bundle['id']) ?? $bundle;
                 $full['values'] = $this->ensureBundleValues($kind, $full, $values);
                 $this->ensureDefault($projectId, $attached, $name, $full, $values, $default, $bundleType);
@@ -160,9 +176,7 @@ final class YouTrackSetup
             return;
         }
 
-        $bundle = $this->ensureBundle($kind, $bundleName, $values);
-
-        $field = $this->globalField($name);
+        $field = $this->globalField($name, $kind);
         $globalType = $kind.'[1]';
 
         if ($field !== null && ($field['fieldType']['id'] ?? null) !== $globalType) {
@@ -170,6 +184,14 @@ final class YouTrackSetup
 
             return;
         }
+
+        if ($field !== null && ($field['name'] ?? null) !== $name) {
+            $this->record('field', $name, SetupStatus::Warning, sprintf('YouTrack has it as «%s»: rename it back to %s and run the setup again (no second field is created)', (string) ($field['name'] ?? '?'), $name));
+
+            return;
+        }
+
+        $bundle = $this->ensureBundle($kind, $bundleName, $values);
 
         if ($field === null) {
             $this->record('field', $name.' (global)', SetupStatus::Create, $globalType);
@@ -182,6 +204,46 @@ final class YouTrackSetup
             $defaultId = $this->defaultValues($bundle, $default, $bundleType)[0]['id'] ?? null;
             $this->client->attachCustomField($projectId, $field['id'], $fieldType, $bundle['id'], $bundleType, $defaultId === null, $defaultId);
         }
+    }
+
+    /**
+     * A State field («Состояние») attached to the project is not read by the cycle: reported, never changed.
+     *
+     * @param  list<array<array-key, mixed>>  $projectFields
+     */
+    private function unusedState(array $projectFields): void
+    {
+        if ($this->matching(array_map(fn (array $field): array => (array) $field['field'], $projectFields), self::UNUSED_STATE, 'state') !== null) {
+            $this->record('field', self::UNUSED_STATE, SetupStatus::Warning, 'not used by agentio: the cycle keeps the status of an issue in Stage; build the board columns on Stage and set Stage on issues that only have a State');
+        }
+    }
+
+    /**
+     * The key of the field with the name, or else with one of its localized names, of the kind.
+     *
+     * @param  list<array<array-key, mixed>>  $fields  Custom fields: {name, localizedName, fieldType: {id}}
+     * @param  'state'|'enum'  $kind
+     */
+    private function matching(array $fields, string $name, string $kind): ?int
+    {
+        foreach ($fields as $key => $field) {
+            if (($field['name'] ?? null) === $name) {
+                return $key;
+            }
+        }
+
+        $aliases = self::FIELD_ALIASES[$name] ?? [];
+
+        foreach ($fields as $key => $field) {
+            $type = is_array($field['fieldType'] ?? null) ? ($field['fieldType']['id'] ?? null) : null;
+            $named = in_array($field['name'] ?? null, $aliases, true) || in_array($field['localizedName'] ?? null, [$name, ...$aliases], true);
+
+            if ($named && ($type === null || $type === $kind.'[1]')) {
+                return $key;
+            }
+        }
+
+        return null;
     }
 
     /**
@@ -261,7 +323,7 @@ final class YouTrackSetup
      */
     private function isShared(string $fieldName, string $projectId, string $bundleId): bool
     {
-        $field = $this->globalField($fieldName) ?? [];
+        $field = $this->globalField($fieldName, null) ?? [];
 
         if (is_array($field['fieldDefaults'] ?? null) && is_array($field['fieldDefaults']['bundle'] ?? null) && ($field['fieldDefaults']['bundle']['id'] ?? null) === $bundleId) {
             return true;
@@ -359,60 +421,120 @@ final class YouTrackSetup
     }
 
     /**
+     * Find (preferably under the expected parent) or create the knowledge base articles through the MCP server.
+     *
      * @return array<string, string>
      *
      * @throws YouTrackException
      */
-    private function ensureArticles(string $project, string $projectId, Placeholders $placeholders): array
+    private function ensureArticles(string $project, Placeholders $placeholders): array
     {
         $byTitle = [];
 
-        foreach ($this->client->articles('project: '.$project) as $article) {
-            if (is_string($article['summary'] ?? null) && ($article['project']['shortName'] ?? $project) === $project) {
-                $byTitle[$article['summary']][] = $article;
+        foreach ($this->tools->searchArticles('project: '.$project) as $article) {
+            if (is_string($article['summary'] ?? null) && is_string($article['id'] ?? null) && str_starts_with($article['id'], $project.'-')) {
+                $parent = is_array($article['parentArticle'] ?? null) ? ($article['parentArticle']['id'] ?? null) : null;
+                $byTitle[$article['summary']][] = ['id' => $article['id'], 'parent' => is_string($parent) ? $parent : null];
             }
         }
 
         $ids = [];
-        $internalIds = [];
+        $guide = null;
 
         foreach ($this->knowledgeBase->keys() as $key) {
             $title = $this->knowledgeBase->title($key);
             $parent = $this->knowledgeBase->parent($key);
-            $parentId = $parent === null ? null : ($internalIds[$parent] ?? null);
+            $parentId = $parent === null ? null : ($ids[$parent] ?? null);
             $candidates = $byTitle[$title] ?? [];
-            $article = array_values(array_filter(
-                $candidates,
-                fn (array $candidate): bool => ($candidate['parentArticle']['id'] ?? null) === $parentId,
-            ))[0] ?? $candidates[0] ?? null;
+            usort($candidates, fn (array $left, array $right): int => Tools::number($left['id']) <=> Tools::number($right['id']));
+            $article = array_values(array_filter($candidates, fn (array $candidate): bool => $candidate['parent'] === $parentId))[0] ?? $candidates[0] ?? null;
+
+            if ($key === KnowledgeBase::GUIDE) {
+                // The guide refers to the other articles (and to itself): it is written once all ids are known.
+                $guide = ['article' => $article, 'parentId' => $parentId];
+
+                if ($article !== null) {
+                    $ids[$key] = $article['id'];
+                }
+
+                continue;
+            }
 
             if ($article === null) {
                 $this->record('article', $title, SetupStatus::Create, $parent === null ? 'top level' : 'under «'.$this->knowledgeBase->title($parent).'»');
 
-                if ($this->dryRun) {
-                    continue;
+                if (! $this->dryRun) {
+                    $ids[$key] = $this->tools->createArticle($project, $title, $this->knowledgeBase->content($key, $placeholders->withKb($ids)), $parentId);
                 }
 
-                $article = $this->client->createArticle(
-                    $projectId,
-                    $title,
-                    $this->knowledgeBase->content($key, $placeholders->withKb($ids)),
-                    $parentId,
-                );
-            } else {
-                $this->record('article', $title, SetupStatus::Exists, (string) ($article['idReadable'] ?? ''));
+                continue;
             }
 
-            if (is_string($article['idReadable'] ?? null)) {
-                $ids[$key] = $article['idReadable'];
-            }
+            $this->record('article', $title, SetupStatus::Exists, $article['id']);
+            $ids[$key] = $article['id'];
+        }
 
-            if (is_string($article['id'] ?? null)) {
-                $internalIds[$key] = $article['id'];
-            }
+        if ($guide !== null) {
+            $ids = $this->ensureGuide($project, $guide['article'], $guide['parentId'], $ids, $placeholders);
         }
 
         return $ids;
+    }
+
+    /**
+     * The automation guide is a copy of the manual of the installed agentio version: created, or updated when
+     * its content differs.
+     *
+     * @param  array{id: string, parent: string|null}|null  $article
+     * @param  array<string, string>  $ids
+     * @return array<string, string>
+     *
+     * @throws YouTrackException
+     */
+    private function ensureGuide(string $project, ?array $article, ?string $parentId, array $ids, Placeholders $placeholders): array
+    {
+        $key = KnowledgeBase::GUIDE;
+        $title = $this->knowledgeBase->title($key);
+        $parent = $this->knowledgeBase->parent($key);
+
+        if ($article === null) {
+            $this->record('article', $title, SetupStatus::Create, $parent === null ? 'top level' : 'under «'.$this->knowledgeBase->title($parent).'»');
+
+            if ($this->dryRun) {
+                return $ids;
+            }
+
+            $created = $this->knowledgeBase->content($key, $placeholders->withKb($ids));
+            $ids[$key] = $this->tools->createArticle($project, $title, $created, $parentId);
+            $content = $this->knowledgeBase->content($key, $placeholders->withKb($ids));
+
+            if ($content !== $created) {
+                $this->tools->updateArticleContent($ids[$key], $content);
+            }
+
+            return $ids;
+        }
+
+        $content = $this->knowledgeBase->content($key, $placeholders->withKb($ids));
+
+        if (self::normalized($this->tools->articleContent($article['id'])) === self::normalized($content)) {
+            $this->record('article', $title, SetupStatus::Exists, $article['id']);
+
+            return $ids;
+        }
+
+        $this->record('article', $title, SetupStatus::Update, $article['id'].': the manual of the installed agentio version');
+
+        if (! $this->dryRun) {
+            $this->tools->updateArticleContent($article['id'], $content);
+        }
+
+        return $ids;
+    }
+
+    private static function normalized(string $content): string
+    {
+        return trim(str_replace("\r\n", "\n", $content));
     }
 
     /**
@@ -438,17 +560,24 @@ final class YouTrackSetup
      *
      * @throws YouTrackException
      */
-    private function globalField(string $name): ?array
+    private function globalField(string $name, ?string $kind): ?array
     {
         $this->globalFields ??= $this->client->customFields();
 
-        foreach ($this->globalFields as $field) {
-            if (($field['name'] ?? null) === $name) {
-                return $field;
+        if ($kind === null) {
+            foreach ($this->globalFields as $field) {
+                if (($field['name'] ?? null) === $name) {
+                    return $field;
+                }
             }
+
+            return null;
         }
 
-        return null;
+        /** @var 'state'|'enum' $kind */
+        $key = $this->matching($this->globalFields, $name, $kind);
+
+        return $key === null ? null : $this->globalFields[$key];
     }
 
     private static function withoutSorting(string $query): string

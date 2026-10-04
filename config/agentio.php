@@ -10,10 +10,12 @@ return [
     |--------------------------------------------------------------------------
     |
     | YouTrack is the source of truth for the autonomous cycle: ideas, epics,
-    | stories, tasks, agent comments and the knowledge base. The token is only
-    | ever read from the environment. "project" is the project's short name;
-    | when it is not set, the project agentio:install recorded in .agentio.json
-    | is used (then "TP").
+    | stories, tasks, agent comments and the knowledge base. The agents and the
+    | loop work with it through its MCP server (<url>/mcp); the REST API is used
+    | only where MCP has no tool: the project setup and the dashboard. The token
+    | is only ever read from the environment (.env, written by agentio:install).
+    | "project" is the project's short name; when it is not set, the project
+    | agentio:install recorded in .agentio.json is used (then "TP").
     |
     */
 
@@ -30,11 +32,14 @@ return [
     | Autonomous Loop
     |--------------------------------------------------------------------------
     |
-    | Settings passed to scripts/agent-loop.sh. When "merge_policy" is null the
-    | `MERGE_POLICY:` line of the project's CLAUDE.md is used, exactly like the
-    | loop script does (local-branch, pull-request or auto-merge). When
-    | "base_branch" is null, the branch recorded in .agentio.json is used
-    | (then "main").
+    | Settings of the agent loop (php artisan agentio:run). When "base_branch" or
+    | "merge_policy" (local-branch, pull-request or auto-merge) is null, the one
+    | agentio:install recorded in .agentio.json is used (then "main" and
+    | "local-branch"). "worktrees_path" is where the git worktrees of the epics
+    | are created; agentio:install asks for it and writes it to .env (it has no
+    | default: the loop refuses to start without it). "worktree_setup" is an
+    | optional shell command run last in every new epic worktree with the epic
+    | id as $1 (seeders, extra services, ...).
     |
     */
 
@@ -48,20 +53,24 @@ return [
 
     'interval' => (int) env('AGENTIO_INTERVAL', 300),
 
-    'worktrees_path' => env('AGENTIO_WORKTREES_PATH', base_path('../worktrees')),
+    'worktrees_path' => env('AGENTIO_WORKTREES_PATH'),
+
+    'worktree_setup' => env('AGENTIO_WORKTREE_SETUP'),
 
     'claude_binary' => env('AGENTIO_CLAUDE_BIN', 'claude'),
+
+    'claude_model' => env('AGENTIO_CLAUDE_MODEL'),
 
     /*
     |--------------------------------------------------------------------------
     | Tests
     |--------------------------------------------------------------------------
     |
-    | Commands of scripts/run-tests.sh, which the agents use for every test
-    | run: "command" gets the script arguments (e.g. --filter=Profile), and
-    | "full_command" is the full quality gate (RUN_TESTS_FULL=1). Null keeps
-    | the script defaults: `php artisan test --compact`, and `composer test`
-    | when composer.json has a "test" script.
+    | Commands of php artisan agentio:test, which the agents use for every test
+    | run: "command" gets the arguments (e.g. --filter=Profile), and
+    | "full_command" is the full quality gate (agentio:test --full). Null keeps
+    | the defaults: `php artisan test --compact`, and `composer test` when
+    | composer.json has a "test" script.
     |
     */
 
@@ -75,35 +84,17 @@ return [
     | Logs
     |--------------------------------------------------------------------------
     |
-    | Where scripts/agent-loop.sh writes its files: loop.log, <ID>.log and
-    | <ID>.pid for epic sessions, plan-<ID>.log for planning sessions. The
-    | loop writes local time; "timezone" is that time zone (null detects
-    | the machine's time zone from $TZ, /etc/timezone or /etc/localtime).
+    | Where the agent loop writes its files: loop.log, <ID>.log and <ID>.pid
+    | for epic sessions, plan-<ID>.log for planning sessions, and the stop
+    | flag. The loop writes local time; "timezone" is that time zone (null
+    | detects the machine's time zone from $TZ, /etc/timezone or
+    | /etc/localtime).
     |
     */
 
     'logs_path' => env('AGENTIO_LOGS_PATH', storage_path('logs/agents')),
 
     'timezone' => env('AGENTIO_TIMEZONE'),
-
-    /*
-    |--------------------------------------------------------------------------
-    | Stage Map
-    |--------------------------------------------------------------------------
-    |
-    | The Stage field feeds the YouTrack Kanban board and is derived from State.
-    |
-    */
-
-    'stage_map' => [
-        'Backlog' => 'Backlog',
-        'Analysis' => 'Backlog',
-        'Ready' => 'Backlog',
-        'Blocked' => 'Backlog',
-        'In Progress' => 'Develop',
-        'Review' => 'Review',
-        'Done' => 'Done',
-    ],
 
     /*
     |--------------------------------------------------------------------------
@@ -115,7 +106,10 @@ return [
     | listed emails. Override it with Agentio::auth(fn ($request) => ...).
     | The page polls its JSON endpoints every "poll" seconds; YouTrack
     | responses are cached for "cache" seconds (0 disables the cache; failures
-    | are cached for at least 30 seconds).
+    | are cached for at least 30 seconds). "actions" allows accepting an epic
+    | in Review from the page (merging its branch into the base branch of
+    | this checkout) and sending it back for rework; false makes the page
+    | read-only.
     |
     */
 
@@ -126,6 +120,7 @@ return [
         'middleware' => ['web'],
         'poll' => (int) env('AGENTIO_UI_POLL', 5),
         'cache' => (int) env('AGENTIO_UI_CACHE', 5),
+        'actions' => (bool) env('AGENTIO_UI_ACTIONS', true),
         'allowed_emails' => array_values(array_filter(array_map(
             trim(...),
             explode(',', (string) env('AGENTIO_ALLOWED_EMAILS', '')),

@@ -7,7 +7,7 @@ namespace Obrazmisli\Agentio\Runtime;
 use Carbon\CarbonImmutable;
 
 /**
- * A line of loop.log: "[2026-10-03 14:57:38] TP-2: started /work-epic (...)".
+ * A line of loop.log: "[2026-10-03 14:57:38] TP-2: started /agentio-work-epic (...)".
  */
 final readonly class LoopLogEntry
 {

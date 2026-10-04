@@ -1,0 +1,718 @@
+# Руководство по автоматизации разработки (YouTrack + Claude Code)
+
+Человек заводит идею в YouTrack и принимает результат. Всё остальное делают агенты Claude Code: требования, системную аналитику, архитектуру, задачи, код, тесты и ревью.
+
+- Копия этого руководства в базе знаний YouTrack — статья **{{kb.guide}} «Руководство по автоматизации»** (дочерняя к {{kb.process}}). Исходник — в пакете: `vendor/obrazmisli/agentio/resources/docs/AUTONOMOUS_WORKFLOW.md`.
+- Правила процесса: иерархия, статусы, готовность, захват, комментарии. Для людей — статья **{{kb.process}} «Процесс разработки»**, для агентов — скилл `.claude/skills/agentio-youtrack-workflow/SKILL.md`. Если они расходятся, прав `php artisan agentio:yt`.
+- Пакет `obrazmisli/agentio` добавляет в проект только скиллы `.claude/skills/agentio-*`, манифест `.agentio.json` и ключи в `.env` (команда `php artisan agentio:install`). Скрипты цикла, настройки сессий агентов и это руководство остаются в пакете. Проект YouTrack настраивает `php artisan agentio:setup-youtrack`, цикл запускается `php artisan agentio:run`, сводка — `php artisan agentio:status`, наблюдение в браузере — страница `/agentio`.
+
+**Содержание:**
+1. Обзор
+2. Требования и первичная настройка
+3. Работа с задачами
+4. Запуск и остановка
+5. Наблюдение
+6. Ревью и приёмка эпика
+7. Blocked, сбои и частые проблемы
+8. Безопасность
+9. Шпаргалка
+
+---
+
+## 1. Обзор
+
+### 1.1. Что делает система
+
+YouTrack (проект `{{project}}`, инстанс из `YOUTRACK_URL`) — единственный источник правды. В нём лежат задачи, их связи, база знаний и весь контекст работы агентов (комментарии `[AGENT:*]`). Агент может продолжить работу с любого места только по данным YouTrack.
+
+Цикл `php artisan agentio:run` раз в 5 минут делает три вещи:
+- подбирает завершившиеся сессии;
+- находит готовые эпики и для каждого запускает отдельную сессию Claude Code (`/agentio-work-epic`) в собственном git worktree и на собственной ветке `epic/<ID>-<slug>`;
+- находит идеи без плана и планирует их (`/agentio-plan`).
+
+С YouTrack агенты работают только через его MCP-сервер (`<YOUTRACK_URL>/mcp`, инструменты `mcp__youtrack__*`) и через `php artisan agentio:yt`, который обращается к тому же MCP-серверу. REST API YouTrack используют только `agentio:setup-youtrack` (поля, наборы значений, метки, сохранённые поиски), `agentio:install` при создании проекта и средства наблюдения — `agentio:status` и `/agentio` (им нужны весь граф связей и лента комментариев, которых MCP не отдаёт).
+
+Результат — ветка эпика, которую проверяет и сливает человек.
+
+### 1.2. Роли
+
+| Роль | Чем реализована | Что делает | Какие статусы двигает |
+|---|---|---|---|
+| Владелец продукта (человек) | YouTrack UI, терминал | Заводит идеи, отвечает на вопросы `[AGENT:BLOCKED]`, принимает и сливает эпики | Blocked → прежний статус; EPIC/STORY → Done после слияния |
+| Менеджер проекта (PM) | скилл `agentio-project-manager` (в составе `/agentio-plan`) | Пишет требования к идее, создаёт EPIC → STORY → TASK, расставляет зависимости, переводит в Ready, разбирает блокировки | Idea: Backlog → Analysis → Done/Blocked; EPIC/STORY/TASK: Analysis → Ready |
+| Системный аналитик | скилл `agentio-system-analyst` | Раскладывает требования по модулям и фичам, ведёт статьи «Системной аналитики» (карта модулей, «Общие требования», статьи модулей и фич), ищет противоречия, пишет сводку влияния | → Blocked при противоречии |
+| Архитектор | скилл `agentio-laravel-architect` | Проектирует эпик (данные, маршруты, интерфейс, очереди), пишет ADR, задаёт порядок реализации и параллельные группы | — |
+| Оркестратор эпика | скилл-команда `/agentio-work-epic` | Захватывает эпик, раздаёт задачи разработчикам (независимые — параллельно), запускает ревью историй, прогоняет полный набор тестов | EPIC: Ready → In Progress → Review; STORY: Ready → In Progress → Review |
+| Разработчик | субагент `general-purpose` со скиллом `agentio-develop-task` | Реализует одну TASK: код, тесты, линтеры, коммит, `[AGENT:DONE]` | TASK: Ready → In Progress → Done |
+| Ревьюер | субагент `general-purpose` со скиллом `agentio-review-story` | Проверяет STORY по критериям приёмки и ADR; замечания оформляет новыми TASK | STORY → Blocked на 3-м раунде замечаний |
+
+Общие правила процесса все роли берут из фонового скилла `agentio-youtrack-workflow` (его не вызывают командой, агенты загружают его сами): иерархия, статусы, захват, шаблоны задач и комментариев, работа с инструментами MCP.
+
+### 1.3. Поток работы
+
+```
+[IDEA] (Backlog)
+   │  /agentio-plan — agentio-project-manager → agentio-system-analyst → agentio-laravel-architect → декомпозиция
+   ▼
+[EPIC] → [STORY] → [TASK]  (Ready, с зависимостями)        идея → Done
+   │  php artisan agentio:run: worktree <worktrees>/<EPIC>, ветка epic/<EPIC>-<slug>
+   ▼
+/agentio-work-epic: субагент agentio-develop-task по каждой TASK (параллельно, если файлы не пересекаются)
+   │                субагент agentio-review-story по каждой STORY (APPROVED или новые TASK-замечания)
+   ▼
+полный прогон тестов → [AGENT:DONE] → EPIC: Review
+   │
+   ▼
+человек: проверка → merge в {{base_branch}} → EPIC и STORY: Done
+```
+
+`<worktrees>` — каталог worktree эпиков, выбранный при установке (`AGENTIO_WORKTREES_PATH`, вне проекта).
+
+### 1.4. Иерархия задач
+
+| Уровень | Префикс summary | Поле `Type` | Родитель (`subtask of`) | Смысл |
+|---|---|---|---|---|
+| Идея | `[IDEA]` | `Idea` + метка `idea` | — | Сырой запрос человека |
+| Эпик | `[EPIC]` | `Epic` | — (с идеей связан `relates to`) | Законченная ценность. Один оркестратор, один worktree, одна ветка |
+| История | `[STORY]` | `Story` | EPIC | Один сценарий с критериями приёмки Given/When/Then |
+| Задача | `[TASK]` | `Task` | STORY | Атомарное изменение для одного субагента |
+
+Связи: `subtask of` — иерархия; `depends on` / `is required for` — зависимости (циклы запрещены); `relates to` — идея ↔ эпики, смежные задачи.
+
+### 1.5. Статусы (поле Stage)
+
+Процесс ведётся одним полем **Stage** — полем статуса, которое YouTrack даёт новым проектам: `Backlog → Analysis → Ready → In Progress → Review → Done`, плюс `Blocked` из любого состояния. Поле State («Состояние»), если оно есть в проекте, агенты не читают и не меняют.
+
+| Stage | IDEA | EPIC / STORY / TASK |
+|---|---|---|
+| Backlog | ждёт `/agentio-plan` | заведена, описание неполное |
+| Analysis | идёт планирование | идёт аналитика, архитектура, декомпозиция |
+| Ready | — | полностью описана, её можно брать (если выполнено правило готовности) |
+| In Progress | — | захвачена агентом (метка `agent-claimed`) |
+| Review | — | STORY прошла ревью; EPIC — ветка готова и ждёт человека |
+| Blocked | ждёт ответа человека | ждёт человека, причина в последнем `[AGENT:BLOCKED]` |
+| Done | план создан | TASK реализована и закоммичена; STORY и EPIC приняты после слияния |
+
+**Правило готовности.** TASK берётся в работу, когда выполнены все три условия:
+- она в `Ready`;
+- все её зависимости, включая унаследованные от STORY и EPIC, в `Done` (зависимости внутри того же эпика достаточно быть в `Review`);
+- на ней нет метки `agent-claimed`.
+
+EPIC берётся, когда он в `Ready`, его зависимости-эпики в `Done`, метки `agent-claimed` нет и хотя бы одна его TASK готова. Готовность вычисляет `php artisan agentio:yt ready-epics` / `ready-tasks <EPIC>`. Сохранённые поиски YouTrack дают только кандидатов.
+
+- Агенты меняют Stage через MCP (`update_issue` с `customFields={"Stage": …}`), всегда после комментария `[AGENT:*]` с причиной. Захват и освобождение — `php artisan agentio:yt claim` / `release`: они ведут и метку `agent-claimed`.
+- Человек меняет Stage в интерфейсе YouTrack (3.8).
+- Доска: если нужна Agile-доска YouTrack, создайте её вручную с колонками по полю Stage. Kanban с колонками по Stage есть и на странице `/agentio` (вкладка Kanban).
+
+### 1.6. Где что лежит
+
+**В проекте** (больше agentio ничего в проект не добавляет):
+
+| Путь | Назначение |
+|---|---|
+| `.claude/skills/agentio-*` | Скиллы агентов (коммитятся): `agentio-youtrack-workflow` (фоновые правила, `references/mcp-tools.md`, `comment-templates.md`, `issue-templates.md`), `agentio-project-manager`, `agentio-system-analyst` (`references/article-templates.md`), `agentio-laravel-architect` (`references/epic-design-template.md`, `adr-template.md`), `agentio-develop-task`, `agentio-review-story` и команды `/agentio-plan <ID\|текст>`, `/agentio-work-epic <EPIC>`, `/agentio-dispatch`, `/agentio-status` |
+| `.agentio.json` | Манифест (коммитится): проект YouTrack, базовая ветка, политика слияния, ID статей базы знаний, хеши установленных файлов |
+| `.env` | `YOUTRACK_URL`, `YOUTRACK_TOKEN`, `AGENTIO_WORKTREES_PATH` (не коммитится) |
+| `config/agentio.php` | Только если вы опубликовали конфиг (`php artisan vendor:publish --tag=agentio-config`); без него всё задаётся в `.env` |
+| `storage/logs/agents/` | Логи и служебные файлы цикла: `loop.log`, `loop.pid`, `stop`, `<EPIC>.log`, `<EPIC>.pid`, `<EPIC>.restarts`, `<EPIC>.setup.log`, `plan-<IDEA>.log`, `plan-<IDEA>.pid` |
+| `storage/logs/tests/` | Вывод прогонов `php artisan agentio:test` |
+| `<worktrees>/<EPIC>` | Рабочие копии эпиков (вне проекта) |
+
+**В пакете** (`vendor/obrazmisli/agentio`, в проект не копируется):
+
+| Путь | Назначение |
+|---|---|
+| `vendor/obrazmisli/agentio/scripts` | `agent-loop.sh` (цикл), `epic-worktree.sh` (worktree эпика), `agent-commit.sh` (коммит перечисленных файлов под блокировкой), `run-tests.sh` (тесты с выводом в файл). Запускаются только через команды `php artisan agentio:*`: без окружения, которое задаёт команда, скрипты отказываются работать |
+| `resources/claude/settings.json` | Настройки headless-сессий: белый и чёрный списки, хук `agentio:guard` |
+| `resources/claude/mcp/youtrack.json`, `laravel-boost.json` | MCP-серверы headless-сессий (Laravel Boost — если он есть в проекте) |
+| `resources/docs/AUTONOMOUS_WORKFLOW.md` | Это руководство |
+
+**Команды:**
+
+| Команда | Назначение |
+|---|---|
+| `php artisan agentio:install` | Установка и обновление: подключение к YouTrack, MCP-сервер в Claude Code, проект, ветка, политика слияния, каталог worktree, скиллы (2.2) |
+| `php artisan agentio:setup-youtrack` | Настройка проекта YouTrack: значения Stage и Type, метки, сохранённые поиски, база знаний (2.6) |
+| `php artisan agentio:run` | Цикл агентов (4) |
+| `php artisan agentio:status` | Сводка: цикл, живые сессии, счётчики и блокировки в YouTrack |
+| `php artisan agentio:yt <действие>` | Вычисления процесса через MCP: готовность, дерево эпика, проверка графа, захват, дерево базы знаний (`php artisan agentio:yt help`) |
+| `php artisan agentio:worktree <EPIC> [--remove]` | Создать и подготовить или удалить worktree эпика |
+| `php artisan agentio:test [аргументы]`, `--full` | Тесты с выводом в файл и уборкой процессов браузерных тестов |
+| `php artisan agentio:commit <TASK> "<сообщение>" <файлы…>` | Коммит только перечисленных файлов под блокировкой (для параллельных субагентов) |
+| `php artisan agentio:log <ID\|plan-ID\|путь> [--lines=N] [--follow]` | Лог сессии агента в человекочитаемом виде |
+| `php artisan agentio:guard` | Скрытая: хук PreToolUse для Bash в headless-сессиях |
+| `/agentio` | Веб-страница наблюдения за процессом |
+
+**В YouTrack:** проект `{{project}}` с полями Stage и Type, метками `idea` и `agent-claimed`, сохранёнными поисками «{{project}}: …» и базой знаний (1.7). **В Claude Code** (вне репозитория): MCP-сервер `youtrack` с токеном в `~/.claude.json` (2.4).
+
+### 1.7. База знаний
+
+Статьи YouTrack проекта {{project}} — общая память агентов. Дерево с ID: `php artisan agentio:yt kb-tree` (или `kb-tree <ID статьи>` — одна ветка).
+
+| Раздел | Кто ведёт | Что в нём |
+|---|---|---|
+| «Обзор продукта» {{kb.overview}} | человек, аналитик | что за продукт, для кого, ключевые возможности |
+| «Системная аналитика» {{kb.analysis}} | `agentio-system-analyst` | карта модулей; «Общие требования» {{kb.analysis.common}} (роли и права, сквозные НФТ, внешние системы, глобальные ограничения); модули (например «Пользователи») и под ними фичи (например «Регистрация»). Статья фичи — одна компактная статья со всеми применимыми аспектами: цель, сценарии, требования `FR` и бизнес-правила `BR`, модель данных, интерфейсы, НФТ, риски |
+| «Архитектура» {{kb.architecture}} | `agentio-laravel-architect` | обзор, физическая «Модель данных», ADR, проекты эпиков «Эпик <ID>: …» со ссылками на статьи фич |
+| «Процесс разработки» {{kb.process}}, «Руководство по автоматизации» {{kb.guide}} | `agentio:setup-youtrack` | правила процесса и это руководство |
+| «Глоссарий» {{kb.glossary}} | аналитик | термины предметной области |
+
+Модули и фичи аналитик создаёт сам по мере появления: мелкое изменение — правка статьи существующей фичи, новая возможность — новая статья фичи в модуле, новая область продукта — новый модуль и строка в карте модулей. Правки человека в статьях агенты сохраняют (статьи переписываются только после чтения полного текста).
+
+---
+
+## 2. Требования и первичная настройка
+
+### 2.1. Окружение машины
+
+| Что | Проверка |
+|---|---|
+| PHP с расширениями `curl`, `mbstring` (желательно `posix`, `intl` и `pcntl`) | `php -m` |
+| composer, git; проект — git-репозиторий, `.env` в `.gitignore` | `composer -V && git --version` |
+| `setsid` (util-linux; на macOS — `brew install util-linux`), желательно `flock` | `command -v setsid flock` |
+| bun или npm — если у проекта есть фронтенд-сборка | `bun -v` / `npm -v` |
+| Claude Code, вход выполнен | `claude --version`, `claude -p "ok"` |
+| Всё, что нужно самому проекту для тестов (БД, Redis, браузеры для браузерных тестов и т. п.) | — |
+
+`php artisan agentio:install` проверяет эти предусловия и печатает, чего не хватает. `php artisan agentio:run` не стартует без установленных скиллов, без `AGENTIO_WORKTREES_PATH`, без Claude Code и без `YOUTRACK_URL` / `YOUTRACK_TOKEN`; сам цикл при старте проверяет `php`, `git`, `composer`, `setsid` и `claude` (или то, что задано в `AGENTIO_CLAUDE_BIN`). Менеджер JS-пакетов `php artisan agentio:worktree` выбирает по lock-файлу (`bun.lock` → bun, `package-lock.json` → npm); без lock-файла или без скрипта `build` в `package.json` фронтенд-шаги пропускаются.
+
+`php artisan agentio:test` сам включает `zend.assertions=1`: многие системные php.ini выключают `assert()`, и строгий гейт покрытия падает на строках с `assert()`.
+
+### 2.2. Токен и установка
+
+1. YouTrack → аватар → **Profile** → **Account Security** → **Tokens** → **New token…**, scope: *YouTrack*.
+2. Скопируйте токен (`perm-…`). Он показывается один раз.
+3. Установите пакет и запустите установку:
+
+```bash
+composer require obrazmisli/agentio --dev
+php artisan agentio:install
+```
+
+Команда спрашивает по порядку:
+1. **URL YouTrack.** Пустое значение — установка без YouTrack (подключите его позже повторным запуском).
+2. **Токен** (ввод скрыт). Если токен уже есть в окружении или в `.env`, команда предложит его оставить.
+3. Проверяет доступ через MCP-сервер YouTrack (`get_current_user`) и печатает, под кем вошла. При ошибке объясняет, что не так, и предлагает ввести URL и токен заново.
+4. Проверяет, есть ли в Claude Code MCP-сервер `youtrack` (`claude mcp get youtrack`), и если нет — добавляет его (2.4).
+5. **Краткое имя проекта** (проверяется через MCP). Если проекта нет, предлагает создать его (лидер — владелец токена; нужны права на создание проектов).
+6. **Базовую ветку** — от неё создаются ветки `epic/*`, в неё человек сливает эпики.
+7. **Политику слияния**: `local-branch`, `pull-request` или `auto-merge` (6.7).
+8. **Каталог worktree эпиков.** Спрашивается явно и должен быть вне проекта (worktree внутри проекта попали бы в `git status`); предлагается каталог `<имя проекта>-worktrees` рядом с проектом. Записывается в `.env` как `AGENTIO_WORKTREES_PATH`.
+9. Настроить ли проект YouTrack сейчас (то же, что `agentio:setup-youtrack`, 2.6).
+
+Затем команда устанавливает скиллы, записывает `.agentio.json` и `.env` и печатает следующие шаги. **Следующий шаг после установки — закоммитить `.claude/skills/agentio-*` и `.agentio.json` в `{{base_branch}}`:** worktree эпиков создаются из этой ветки, и без закоммиченных скиллов цикл эпик не запустит.
+
+Без терминала или с `--no-interaction` команда ничего не спрашивает и берёт значения из опций и окружения: `--youtrack-url=`, `--token=`, `--project=`, `--create-project`, `--project-name=`, `--base-branch=`, `--merge-policy=`, `--worktrees=` (обязательна, если `AGENTIO_WORKTREES_PATH` не задан), `--mcp-scope=local|user`, `--setup-youtrack`. Несуществующий проект создаётся только с `--create-project`. `--dry-run` показывает план и ничего не меняет.
+
+Повторный запуск безопасен (например, после обновления пакета): неизменившиеся скиллы остаются как есть, скиллы, которые никто не правил, обновляются, отредактированные пропускаются с предупреждением (`--force` перезаписывает), файлы скиллов, которых больше нет в пакете, удаляются, если их не правили.
+
+Токен не печатается нигде — ни в выводе, ни в `--dry-run`, ни в ошибках; `--token=` остаётся в истории shell, поэтому лучше prompt или переменная `YOUTRACK_TOKEN`. В репозиторий токен не попадает никогда: он лежит только в `.env` (установщик проверяет, что `.env` игнорируется git) и в собственной конфигурации MCP Claude Code (`~/.claude.json`).
+
+### 2.3. Переменные окружения
+
+`agentio:install` записывает в `.env` проекта (существующие ключи заменяет на месте, недостающие дописывает):
+
+```dotenv
+YOUTRACK_URL=https://<instance>.youtrack.cloud
+YOUTRACK_TOKEN=perm-...
+AGENTIO_WORKTREES_PATH=/home/<user>/projects/<проект>-worktrees
+```
+
+Проект, базовая ветка и политика слияния хранятся в `.agentio.json`; переменные `AGENTIO_PROJECT`, `AGENTIO_BASE_BRANCH`, `AGENTIO_MERGE_POLICY` в `.env` их переопределяют (если эти ключи уже есть в `.env`, установщик обновляет и их). Все команды `agentio:*` читают `.env` сами, `agentio:run` передаёт значения циклу и агентам — `export` не нужен. Полный список настроек — в 4.6.
+
+### 2.4. MCP-сервер YouTrack
+
+**Для агентов цикла** ничего настраивать не нужно. Цикл запускает их с `--strict-mcp-config --mcp-config vendor/obrazmisli/agentio/resources/claude/mcp/youtrack.json` (и `laravel-boost.json`, если проект использует Laravel Boost). В файле стоят подстановки, значения которых `agentio:run` берёт из `.env` и передаёт в окружение цикла:
+
+```json
+"youtrack": {
+    "type": "http",
+    "url": "${YOUTRACK_URL}/mcp",
+    "headers": { "Authorization": "Bearer ${YOUTRACK_TOKEN}" }
+}
+```
+
+**Для вашей интерактивной работы** (`claude` в каталоге проекта) сервер добавил `agentio:install`, если в Claude Code его ещё не было:
+
+```bash
+claude mcp add --transport http --scope local youtrack <YOUTRACK_URL>/mcp --header "Authorization: Bearer <token>"
+```
+
+- Область `local`: Claude Code хранит сервер в `~/.claude.json` под путём проекта — он виден только вам и только в этом каталоге и никогда не попадает в репозиторий.
+- `php artisan agentio:install --mcp-scope=user` добавляет сервер для всех ваших проектов.
+- Проверка: `claude mcp get youtrack` или `claude mcp list` (сервер `youtrack` подключён), внутри сессии — `/mcp`.
+- Сменили токен — запустите `php artisan agentio:install` ещё раз: он обновит `.env` и заново добавит сервер с новым токеном.
+
+**В worktree эпика** (другой каталог) сервер из области `local` не виден. Для интерактивной работы там установите с `--mcp-scope=user`, или один раз добавьте сервер для этого каталога (`claude mcp add …`, как выше, из каталога worktree), или просто отдайте эпик циклу: `php artisan agentio:run --once --epic=<ID>`.
+
+### 2.5. Проверка
+
+```bash
+claude mcp get youtrack            # MCP-сервер youtrack есть в Claude Code
+php artisan agentio:yt ideas       # доступ через MCP работает: список идей (может быть пустым)
+php artisan agentio:status         # цикл, сессии, счётчики по типам и статусам: доступ к REST работает
+php artisan agentio:run --dry-run  # что запустил бы цикл; ничего не меняет
+```
+
+### 2.6. Схема проекта {{project}} в YouTrack
+
+`php artisan agentio:setup-youtrack [--project=KEY] [--dry-run]` настраивает проект. Его предлагает запустить `agentio:install`, и его можно запускать сколько угодно раз: команда находит всё по имени и ничего не создаёт дважды, ничего не удаляет, не переименовывает и не переносит; `--dry-run` только показывает план.
+
+- **Stage**: Backlog, Analysis, Ready, In Progress, Review, Blocked, Done. Второе поле статуса команда не создаёт: она находит поле Stage проекта по имени или по локализованному имени и только дописывает недостающие значения в его набор (собственные значения YouTrack — Develop, Test, Staging — остаются, цикл их не использует).
+- **Type** («Тип»): Idea, Epic, Story, Task — так же.
+- Наборы значений (bundle), общие с другими проектами или выдаваемые YouTrack каждому новому проекту по умолчанию, команда не меняет: пустой проект переводится на собственные наборы «{{project}} Stages» / «{{project}} Types», для проекта с задачами выводится предупреждение.
+- Значения по умолчанию для новых задач: Stage `Backlog`, Type `Task` (команда ставит их, если у поля нет значения по умолчанию из этих списков).
+- Метки: `idea`, `agent-claimed`.
+- Связи — стандартные типы YouTrack: `Depend` (depends on / is required for), `Subtask` (subtask of / parent for), `Relates`.
+- Сохранённые поиски: «{{project}}: готовые эпики», «{{project}}: готовые задачи», «{{project}}: заблокированные (причина в [AGENT:BLOCKED])», «{{project}}: идеи без плана», «{{project}}: в работе у агентов», «{{project}}: эпики на приёмке».
+- База знаний (статьи создаются через MCP; новые — короткие заготовки, существующие с тем же заголовком не меняются): «Обзор продукта» {{kb.overview}}, «Системная аналитика» {{kb.analysis}} с картой модулей и «Общие требования» {{kb.analysis.common}} (модули и фичи создаёт аналитик; статьи прежней структуры по 7 слоям, если есть, остаются как архив), «Архитектура» {{kb.architecture}} ({{kb.architecture.overview}}, {{kb.architecture.data_model}}), ADR {{kb.adr}} (ADR-001 {{kb.adr.001}}), «Глоссарий» {{kb.glossary}}, «Процесс разработки» {{kb.process}}, «Руководство по автоматизации» {{kb.guide}}. Исключение — «Руководство по автоматизации»: команда держит его равным этому руководству установленной версии agentio.
+- ID статей записываются в `.agentio.json`, установленные скиллы перерисовываются с ними (закоммитьте изменения).
+
+**Поле State («Состояние»)** в проекте agentio не использует: `agentio:setup-youtrack` предупреждает о нём и оставляет как есть. Если проект настраивался прежней версией agentio, статус задач хранился в State: перенесите его в Stage (в YouTrack — массовое изменение поля Stage по поиску `State: <значение>`) и постройте доску по Stage.
+
+---
+
+## 3. Работа с задачами
+
+### 3.1. Добавить идею
+
+**Вариант 1: YouTrack UI.** Создайте задачу в проекте {{project}}:
+- Summary: `[IDEA] <коротко>`.
+- Описание: свободный текст — что нужно, кому и зачем. Технические детали не обязательны.
+- Поля: `Type = Idea`, `Stage = Backlog`.
+- Метка: `idea`.
+
+Цикл считает идеей задачу с меткой `idea` **или** `Type = Idea`, в `Stage = Backlog` и без `agent-claimed`. Проверка: `php artisan agentio:yt ideas`. Ближайший проход цикла её спланирует. Можно не ждать:
+
+```bash
+claude "/agentio-plan {{project}}-1"
+```
+
+**Вариант 2: из терминала.** Агент сам создаст идею и сразу её спланирует:
+
+```bash
+claude "/agentio-plan Страница профиля пользователя с загрузкой аватара"
+```
+
+### 3.2. Что происходит при планировании
+
+`/agentio-plan` проходит процедуру `agentio-project-manager` целиком:
+1. Захватывает идею (`[AGENT:START]`, Stage → Analysis).
+2. Дописывает в описание идеи раздел `## Требования`: цель, пользователи, границы, критерии успеха.
+3. `agentio-system-analyst` раскладывает требования по модулям и фичам: правит статьи существующих фич или создаёт новые (и новые модули с записью в карте модулей), обновляет «Общие требования» и «Глоссарий» и оставляет в идее `[AGENT:DECISION]` со сводкой влияния — таблицей «Модуль | Фича | Статья | Что изменено».
+4. Создаёт эпики (Stage Analysis, связь `relates to` с идеей). `agentio-laravel-architect` пишет для каждого статью «Эпик {{project}}-N: …» под «Архитектурой», при необходимости ADR, а также порядок реализации.
+5. Декомпозирует эпики на STORY (критерии Given/When/Then) и TASK (по шаблону). Расставляет `depends on` по логике и по пересечению файлов; все миграции эпика выстраивает в цепочку.
+6. Проверяет `php artisan agentio:yt validate <IDEA>` и переводит описанное в Ready в порядке TASK → STORY → EPIC.
+7. Пишет в идею `[AGENT:DONE]` с эпиками, статьями, первой волной задач и деревом. Идея → Done.
+
+Лог сессии: `php artisan agentio:log plan-{{project}}-1`. Идеи планируются по одной: параллельные аналитики перезаписывали бы статьи друг друга. Повторный `/agentio-plan` по уже спланированной идее ничего не дублирует, а только доделывает недостающее.
+
+### 3.3. Ответить на вопросы аналитика или PM
+
+Если без человека не обойтись (бизнес-правило, роль, объём, внешняя система), агент не додумывает:
+1. Он пишет в идею `[AGENT:BLOCKED]`: «Что мешает», «Что нужно от человека» (обычно варианты 1/2/3), «Как продолжить». Идея переходит в `Blocked`.
+2. Вы отвечаете **комментарием в той же задаче**, например «Вариант 2, лимит 5 МБ». Если ответ меняет суть идеи, поправьте и описание.
+3. Верните прежний статус. Для идеи это `Backlog`: в интерфейсе YouTrack, поле Stage.
+4. Следующий проход цикла (или `claude "/agentio-plan {{project}}-1"`) продолжит планирование. Агент читает все комментарии, включая ваш ответ.
+
+С заблокированными EPIC, STORY и TASK — то же самое, только статус возвращается в `Ready` (см. раздел 7).
+
+### 3.4. Добавить историю или задачу в существующий эпик
+
+**Попросить агента** (рекомендуется). PM сам оформит задачи по шаблонам, расставит зависимости и проверит граф:
+
+```bash
+claude "Примени agentio-project-manager: в эпик {{project}}-2 добавить историю — пользователь может удалить аватар. Критерии: ..."
+```
+
+**Вручную в YouTrack:**
+1. STORY: summary `[STORY] …`, `Type = Story`, родитель (**subtask of**) — EPIC, описание по шаблону (сценарий и критерии приёмки Given/When/Then).
+2. TASK: summary `[TASK] …`, `Type = Task`, родитель — STORY (не эпик!). Описание по шаблону: Контекст, Что сделать, Критерии приёмки, Затрагиваемые области кода, Вне рамок. Шаблоны лежат в `.claude/skills/agentio-youtrack-workflow/references/issue-templates.md`.
+3. Если задача трогает те же файлы, что и другая незакрытая задача, добавьте зависимость (3.6).
+4. Когда описание полное, переведите TASK и STORY в `Ready`.
+5. Проверьте граф: `php artisan agentio:yt validate {{project}}-2` и `php artisan agentio:yt tree {{project}}-2` (у готовой задачи метка `[READY]`).
+
+Если эпик в работе (`In Progress`), оркестратор подхватит новую готовую задачу в одной из следующих волн. Если эпик в `Review` или `Done`, верните его в `Ready`: цикл продолжит работу в том же worktree и на той же ветке.
+
+### 3.5. Изменить требования
+
+Порядок такой: сначала статья фичи, потом задачи. Уже сделанные TASK не переписываются — под изменение создаются новые.
+
+```bash
+claude "Примени agentio-project-manager и agentio-system-analyst: изменение требований к эпику {{project}}-2 — <что меняется и почему>"
+```
+
+Если правите вручную: исправьте описание STORY или TASK, которые ещё не взяты (`Ready`/`Backlog`), и статью фичи в «Системной аналитике». В задаче оставьте комментарий, что изменилось. Задачу в `In Progress` не правьте молча: агент уже работает по старому описанию. Дождитесь её завершения и добавьте новую TASK.
+
+### 3.6. Добавить зависимость
+
+«A зависит от B» — A не начнётся, пока B не в `Done` (или не в `Review` внутри того же эпика):
+- **YouTrack UI**: в задаче A → Link issue → **depends on** → B.
+- **Агент**: `link_issues(targetIssueId=A, linkType="depends on", issueToLinkId=B)`.
+
+Затем проверьте отсутствие циклов: `php artisan agentio:yt validate <EPIC>` (при ошибках структуры — код выхода 2). Зависимость, поставленная на STORY или EPIC, наследуется всеми их задачами. Межэпиковые зависимости ставятся на уровне EPIC → EPIC.
+
+### 3.7. Задача вне эпика
+
+Цикл берёт в работу **только эпики**. TASK без цепочки TASK → STORY → EPIC не попадёт ни в `ready-epics`, ни в `ready-tasks`, а `validate` пометит её как ошибку структуры. Варианты:
+- положить задачу в подходящую STORY существующего эпика (3.4);
+- завести небольшой эпик: `[EPIC] Техдолг …` → `[STORY] …` → `[TASK] …`, все поля `Type`, родители, Stage `Ready`, затем `validate`;
+- описать её как идею (`[IDEA]`) и отдать планированию.
+
+Правила для любого способа:
+- префикс summary совпадает с `Type`;
+- у TASK родитель — STORY, у STORY — EPIC;
+- в `Ready` переводится только полностью описанное;
+- после правок нужен `validate`.
+
+### 3.8. Сменить статус вручную
+
+Меняйте поле Stage в интерфейсе YouTrack и оставляйте рядом комментарий с причиной: агенты читают комментарии как журнал работы. Больше ничего синхронизировать не нужно. Текущий статус из терминала: `php artisan agentio:yt state {{project}}-42`.
+
+Не снимайте метку `agent-claimed` руками у задачи, с которой работает живая сессия. Чтобы снять захват, используйте `php artisan agentio:yt release` (раздел 7).
+
+---
+
+## 4. Запуск и остановка
+
+### 4.1. Посмотреть, что будет запущено (ничего не меняет)
+
+```bash
+php artisan agentio:run --dry-run  # идеи, возобновляемые и готовые эпики, первая волна задач, дерево, блокировки
+claude "/agentio-dispatch"         # то же с пояснениями: что запустится и почему задача не берётся
+```
+
+### 4.2. Один проход
+
+```bash
+php artisan agentio:run --once            # спланировать идеи, запустить готовые эпики и дождаться конца их сессий
+php artisan agentio:run --once --no-wait  # запустить и сразу выйти; сессии работают в фоне
+```
+
+`php artisan agentio:run` запускает цикл из пакета и передаёт ему настройки из `.env`, `.agentio.json` и `config/agentio.php`. Напрямую скрипт цикла не запускается: без окружения, которое задаёт команда, он отказывается работать.
+
+### 4.3. Постоянный режим в фоне
+
+```bash
+nohup php artisan agentio:run > /dev/null 2>&1 &
+tail -f storage/logs/agents/loop.log
+```
+
+Второй цикл в том же каталоге не стартует: работающий цикл держит `storage/logs/agents/loop.pid`. Проверка — `php artisan agentio:status` или `pgrep -fa agent-loop.sh`.
+
+### 4.4. Ограничить работу
+
+```bash
+php artisan agentio:run --once --epic={{project}}-2    # только этот эпик; идеи не планируются
+php artisan agentio:run --no-plan                      # не планировать идеи, только работать над эпиками
+php artisan agentio:run --once --max-parallel=0        # только спланировать идеи, эпики не запускать
+php artisan agentio:run --interval=600                 # проход раз в 10 минут
+```
+
+### 4.5. Ручной запуск оркестратора эпика (интерактивно)
+
+Так видно всё в реальном времени, и можно вмешаться:
+
+```bash
+php artisan agentio:worktree {{project}}-2   # создаст (или переиспользует) и подготовит <worktrees>/{{project}}-2, печатает путь
+cd <worktrees>/{{project}}-2
+claude "/agentio-work-epic {{project}}-2"
+```
+
+- `/agentio-work-epic` проверяет, что текущая ветка — `epic/{{project}}-2-*`; в главном каталоге он откажется работать.
+- MCP-сервер `youtrack`, добавленный с областью `local`, в каталоге worktree не виден (см. 2.4): установите с `--mcp-scope=user` или добавьте сервер для этого каталога.
+- Интерактивная сессия работает с обычными разрешениями Claude Code (спрашивает вас), а не с настройками headless-сессий из пакета.
+- Без интерактива то же самое делает `php artisan agentio:run --once --epic={{project}}-2`, а ход работы виден в `php artisan agentio:log {{project}}-2 --follow`.
+
+### 4.6. Параметры
+
+Опции `php artisan agentio:run`: `--once`, `--dry-run`, `--kill`, `--stop` (поставить флаг остановки и выйти), `--fresh` (снять оставшийся флаг остановки перед запуском), `--epic={{project}}-N`, `--no-plan`, `--no-wait`, `--interval=SEC`, `--max-parallel=N`, `--max-parallel-tasks=N`.
+
+Настройки задаются в `.env` (в скобках — ключ `config/agentio.php`; опубликовать конфиг: `php artisan vendor:publish --tag=agentio-config`):
+
+| Переменная | По умолчанию | Смысл |
+|---|---|---|
+| `YOUTRACK_URL`, `YOUTRACK_TOKEN` (`youtrack.url`, `youtrack.token`) | — (обязательны) | Доступ к YouTrack |
+| `AGENTIO_PROJECT` (`youtrack.project`) | из `.agentio.json` (`{{project}}`) | Ключ проекта YouTrack |
+| `AGENTIO_BASE_BRANCH` (`base_branch`) | из `.agentio.json` (`{{base_branch}}`) | От какой ветки создаются `epic/*` |
+| `AGENTIO_MERGE_POLICY` (`merge_policy`) | из `.agentio.json` (`{{merge_policy}}`) | Политика слияния (6.7) |
+| `AGENTIO_WORKTREES_PATH` (`worktrees_path`) | — (обязательна, задаётся при установке) | Где создаются worktree эпиков |
+| `AGENTIO_WORKTREE_SETUP` (`worktree_setup`) | — | Shell-команда, которая выполняется последней в новом worktree; ID эпика — `$1` (сидеры, свои сервисы и т. п.) |
+| `AGENTIO_MAX_PARALLEL` (`max_parallel`) | 2 | Сколько эпиков (worktree) работает одновременно |
+| `AGENTIO_MAX_PARALLEL_TASKS` (`max_parallel_tasks`) | 2 | Сколько субагентов `agentio-develop-task` работает параллельно внутри эпика |
+| `AGENTIO_INTERVAL` (`interval`) | 300 | Пауза между проходами, сек |
+| `AGENTIO_CLAUDE_BIN` (`claude_binary`) | `claude` | Исполняемый файл Claude Code |
+| `AGENTIO_CLAUDE_MODEL` (`claude_model`) | — | Модель агентов (`opus`, `sonnet`, …) |
+| `AGENTIO_TEST_COMMAND`, `AGENTIO_FULL_TEST_COMMAND` (`tests.command`, `tests.full_command`) | `php artisan test --compact`; `composer test` (если есть такой скрипт) | Команды `php artisan agentio:test`: узкий прогон и полный гейт (`--full`) |
+| `AGENTIO_LOGS_PATH` (`logs_path`) | `storage/logs/agents` | Логи, pid-файлы и флаг остановки цикла |
+| `AGENTIO_TIMEZONE` (`timezone`) | часовой пояс машины | Часовой пояс времени в логах цикла |
+| `AGENTIO_YOUTRACK_TIMEOUT`, `AGENTIO_YOUTRACK_RETRIES` (`youtrack.timeout`, `youtrack.retries`) | 30; 2 | Таймаут запроса к YouTrack, сек; повторы при сбое |
+| `AGENTIO_UI_*`, `AGENTIO_ALLOWED_EMAILS` (`ui.*`) | — | Страница `/agentio`: включение, путь, домен, частота опроса, кэш, доступ (5) |
+
+`php artisan agentio:worktree` берёт ещё две переменные из окружения shell (не из `.env`): `WORKTREE_SQLITE` (1; 0 — оставить настройки БД из `.env.example`) и `WORKTREE_PORT_BASE` (8100; порт `APP_URL` = база + номер эпика). Сессию эпика, оборвавшуюся до Review, цикл возобновляет до 3 раз подряд.
+
+### 4.7. Что делает один проход
+
+1. **Подбор завершившихся сессий.** Эпик в `Review` — готов к приёмке (с политикой `auto-merge` без remote цикл сам сливает его в `{{base_branch}}`; при `pull-request` и `auto-merge` с открытым PR удаляет worktree). Эпик ещё `In Progress` — сессия оборвалась, следующий проход её возобновит (счётчик `<EPIC>.restarts`). После 3 обрывов подряд эпик получает `[AGENT:BLOCKED]` со ссылкой на `php artisan agentio:log <EPIC>` и переходит в `Blocked`.
+2. **Запуск эпиков** в пределах `AGENTIO_MAX_PARALLEL`: сначала свои незавершённые (захвачены этой машиной, worktree есть, процесс не жив), потом готовые. Для каждого:
+   - цикл проверяет, что `.claude/skills/agentio-work-epic/SKILL.md` закоммичен в `{{base_branch}}`: worktree создаются из неё;
+   - `php artisan agentio:worktree <ID>` создаёт worktree `<worktrees>/<ID>` на ветке `epic/<ID>-<slug>` с собственным окружением: `.env` из `.env.example` (без токена), свой `APP_KEY`, своя SQLite-БД, свои префиксы кэша, очередей и cookie, `APP_URL=http://localhost:<8100 + номер эпика>`, `composer install`, миграции, `storage:link`; если есть lock-файл bun или npm — установка JS-пакетов и, при наличии скрипта `build`, сборка фронтенда до 3 попыток; в конце — команда из `AGENTIO_WORKTREE_SETUP`, если она задана;
+   - затем в фоне запускается headless-сессия `/agentio-work-epic <ID>` с логом `storage/logs/agents/<ID>.log`. Уже работающий эпик повторно не запускается.
+3. **Планирование идей** по одной (`/agentio-plan <IDEA>`, лог `plan-<IDEA>.log`), затем ещё раз запуск эпиков: только что спланированные могут быть уже готовы.
+
+**Headless-сессии** запускаются как `claude -p … --permission-mode dontAsk` со всем необходимым из пакета: `--settings` — `resources/claude/settings.json` пакета, объединённый с правилами allow/deny из `.claude/settings.json` проекта (если он есть); `--strict-mcp-config --mcp-config` — MCP-конфиги пакета (2.4).
+
+Сессия эпика работает со скиллами и версией пакета (её `vendor`) **из своего worktree**, то есть из ветки эпика. Изменения в `{{base_branch}}` попадут в уже созданный эпик только после слияния `{{base_branch}}` в его ветку.
+
+### 4.8. Остановка
+
+```bash
+php artisan agentio:run --stop     # создать флаг storage/logs/agents/stop: цикл доработает текущий шаг и выйдет; сессии эпиков доработают сами
+php artisan agentio:run --fresh    # снять флаг и запустить (иначе цикл сразу выйдет)
+php artisan agentio:run --kill     # прервать работающие сессии эпиков (SIGTERM группе процессов)
+```
+
+- **Ctrl+C** в терминале цикла (и SIGTERM процессу `agentio:run` — он передаёт сигнал циклу) работает как `--stop`: цикл завершает текущий шаг и выходит, запущенные сессии продолжают работать (они запущены через `setsid`).
+- Текущее планирование идеи цикл дожидается до конца.
+- После `--kill` захват эпика сохраняется, и следующий запуск его возобновит. Но каждое такое завершение до Review засчитывается как попытка в счётчик обрывов (не больше 3).
+
+### 4.9. Возобновление после обрыва
+
+Ничего специально делать не нужно: просто запустите цикл снова (`--once` или фоновый режим).
+- Эпик `In Progress` с захватом этой машины (owner `<hostname>:<worktrees>/<ID>`) и живым worktree будет возобновлён.
+- `claim` вернёт `RESUMED`. Оркестратор восстановит состояние по YouTrack и git: осиротевшие TASK `In Progress`, незакоммиченные изменения, истории, ждущие ревью. В эпик он запишет `[AGENT:DECISION] Возобновление: …`.
+- Разработчик задачи продолжит со своего `[AGENT:START]` / `[AGENT:DONE]`, сверяясь с `git log --grep=<TASK>`.
+
+Если эпик захвачен другой машиной или старым путём, цикл его не тронет. Что делать — см. раздел 7.
+
+---
+
+## 5. Наблюдение
+
+| Что | Команда / место |
+|---|---|
+| Сводка: что в работе, что заблокировано, что ждёт вас | `php artisan agentio:status` (`--json`; `--local` — без YouTrack), `claude "/agentio-status"` |
+| Всё сразу в браузере: цикл, сессии и их последние действия, конвейер идей и эпиков, Kanban по Stage, блокировки, лента `[AGENT:*]`, приёмка эпиков (раздел 6) | страница `/agentio` (в окружении `local` — всем, иначе — по gate `viewAgentio`: пользователям из `AGENTIO_ALLOWED_EMAILS`) |
+| Что запустится и почему задача не берётся | `claude "/agentio-dispatch"`, `php artisan agentio:run --dry-run` |
+| Дерево эпика с готовностью и ожиданиями | `php artisan agentio:yt tree {{project}}-2` (`[READY]`, `[CLAIMED]`, `waits:{{project}}-…`) |
+| Заблокированные и ждущие зависимостей | `php artisan agentio:yt blocked` |
+| Захваченные эпики и их владельцы | `php artisan agentio:yt claimed-epics` |
+| Идеи к планированию / готовые эпики / готовые задачи | `php artisan agentio:yt ideas`, `ready-epics`, `ready-tasks {{project}}-2` |
+| Полный контекст задачи | YouTrack UI (описание, связи, комментарии `[AGENT:*]`) и `php artisan agentio:yt tree <EPIC>`; агент читает его через MCP (`get_issue` и все страницы `get_issue_comments`) |
+| Лента действий агента | `php artisan agentio:log {{project}}-2 --lines=60`; в реальном времени — `--follow` |
+| Лог планирования | `php artisan agentio:log plan-{{project}}-1` |
+| Журнал цикла | `tail -f storage/logs/agents/loop.log` |
+| Подготовка worktree | `storage/logs/agents/{{project}}-2.setup.log` |
+| Коммиты эпика | `git log --oneline {{base_branch}}..epic/{{project}}-2-<slug>` |
+| Доска | Kanban на `/agentio`; Agile-доска YouTrack с колонками по Stage, если вы её создали |
+| Сохранённые поиски | «{{project}}: в работе у агентов», «{{project}}: заблокированные …», «{{project}}: эпики на приёмке» и др. |
+
+**Как читать `agentio:log`.** `== session …` — старт сессии с моделью и каталогом. `💬` — текст агента. `🔧 Инструмент: аргумент` — вызов инструмента. `↳` — действие субагента. `⚠️` — ошибка инструмента (например, отклонённая команда). `== result: … cost=$… duration=…min` — итог сессии.
+
+**Как читать `loop.log`.** `agent loop started: mode=… policy=… max_parallel=…`, `{{project}}-2: preparing worktree`, `{{project}}-2: started /agentio-work-epic (pid …)`, `{{project}}-2: session finished, epic state: Review` → `ready for human review on branch …`, `ended before Review (attempt 1/3), will be resumed`.
+
+**Комментарии `[AGENT:*]` в задачах** — журнал работы, читается сверху вниз:
+- `[AGENT:START]` — кто захватил (`owner: host:/путь[#суффикс]`), ветка, worktree, план и затрагиваемые файлы;
+- `[AGENT:DECISION]` — принятое решение и отвергнутые варианты. Сюда же относятся сводка влияния аналитика, порядок реализации от архитектора, прогресс оркестратора и вердикт ревью `CHANGES REQUESTED (раунд N)`;
+- `[AGENT:BLOCKED]` — что мешает и что нужно **от вас**;
+- `[AGENT:DONE]` — что сделано, хеши коммитов, как проверить, результаты тестов, что осталось. В STORY — вердикт `APPROVED`;
+- `[AGENT:RELEASE]` — захват снят без завершения.
+
+Активный владелец задачи — самый ранний `[AGENT:START]` после последнего `DONE`/`BLOCKED`/`RELEASE`.
+
+---
+
+## 6. Ревью и приёмка эпика
+
+### 6.1. Где результат
+
+Эпик в `Review` (поиск «{{project}}: эпики на приёмке», раздел «Awaiting a human (Review)» в `php artisan agentio:status`). В `loop.log` будет строка `ready for human review on branch epic/{{project}}-2-<slug> (worktree kept: <worktrees>/{{project}}-2)`.
+- Ветка: `git branch --list 'epic/{{project}}-2-*'`.
+- Worktree: `<worktrees>/{{project}}-2`.
+
+### 6.2. Что смотреть в `[AGENT:DONE]` эпика
+
+- STORY и их вердикты (все `APPROVED`).
+- Список коммитов (`git log --oneline {{base_branch}}..HEAD`): каждый коммит начинается с ID задачи.
+- Результат полного прогона (`php artisan agentio:test --full`).
+- Ветка или PR и команды приёмки.
+- Созданная смежная работа: новые TASK в Backlog, которые требуют вашего решения.
+
+Также проверьте `[AGENT:DONE]` по STORY: там описано, каким тестом подтверждён каждый критерий приёмки.
+
+### 6.3. Посмотреть изменения и запустить приложение
+
+```bash
+git log --oneline {{base_branch}}..epic/{{project}}-2-<slug>
+git diff {{base_branch}}...epic/{{project}}-2-<slug> --stat
+cd <worktrees>/{{project}}-2
+grep APP_URL .env                    # http://localhost:<8100 + номер эпика>, для {{project}}-2 — 8102
+php artisan serve --port=8102        # откройте APP_URL; очереди — php artisan queue:work (или как принято в проекте)
+```
+
+У worktree собственные `.env` (свой `APP_KEY`, без токена YouTrack), SQLite-база (`database/database.sqlite`) и префиксы кэша и очередей, так что он не мешает главному каталогу. Фронтенд в нём уже собран (если у проекта есть сборка).
+
+### 6.4. Прогнать тесты
+
+```bash
+cd <worktrees>/{{project}}-2
+php artisan agentio:test --full              # полный гейт проекта (AGENTIO_FULL_TEST_COMMAND, по умолчанию composer test)
+php artisan agentio:test --filter=Profile    # выборочно (AGENTIO_TEST_COMMAND, по умолчанию php artisan test --compact)
+```
+
+Вывод пишется в `storage/logs/tests/<время>-<pid>.log`, на экран — краткий итог и `exit=… log=…`. Не передавайте вывод тестов в `tail` через конвейер: см. 7.2.
+
+### 6.5. Принять
+
+**Из панели.** Откройте эпик на странице `/agentio` (`#/epic/{{project}}-2`). В блоке «Ветка и приёмка» — коммиты, изменённые файлы с диффами, итог оркестратора, вердикты историй и проверки перед слиянием. Кнопка «Принять и слить» делает `git merge --no-ff` ветки эпика в `{{base_branch}}` главного каталога (без push) и, по отмеченным пунктам, удаляет worktree и ветку и переводит истории из `Review` и эпик в `Done`. Слияние не начнётся, если по эпику идёт сессия агента, в worktree есть незакоммиченное, главный каталог не на `{{base_branch}}` или в нём есть незакоммиченные изменения. Слияние с конфликтом отменяется, панель покажет конфликтующие файлы — тогда слейте вручную. Если ветка уже в `{{base_branch}}` (например, PR слит), кнопка только убирает worktree и закрывает задачи. Отключить действия в панели: `AGENTIO_UI_ACTIONS=false`.
+
+**Вручную:**
+
+```bash
+cd <главный каталог проекта>                     # ветка {{base_branch}}, рабочее дерево чистое
+git merge --no-ff epic/{{project}}-2-<slug>
+php artisan agentio:yt tree {{project}}-2                 # ID историй эпика
+php artisan agentio:worktree {{project}}-2 --remove       # удалить worktree (откажется, если в нём есть незакоммиченное); ветка остаётся
+git branch -d epic/{{project}}-2-<slug>                   # по желанию
+```
+
+Затем в YouTrack переведите каждую STORY и сам эпик в `Done` (поле Stage). Закрытие можно поручить агенту: `claude "Примени agentio-project-manager: закрой эпик {{project}}-2 после слияния"`. Он проверит слияние (`git branch --merged {{base_branch}}`) и закроет STORY и EPIC.
+
+### 6.6. Вернуть на доработку
+
+**Из панели.** В блоке «Вернуть на доработку» выберите историю и опишите замечание. Панель создаст в истории TASK `[TASK] Review: …` (Ready) с замечанием, оставит комментарий в истории и эпике и вернёт историю и эпик в `Ready`.
+
+**Вручную:**
+
+1. Оставьте комментарий в эпике или нужной STORY: что не так.
+2. Создайте TASK с замечанием в нужной STORY (`[TASK] …`, `Type = Task`, родитель — STORY, описание по шаблону, `Stage = Ready`). Можно попросить агента: `claude "Примени agentio-project-manager: замечания по эпику {{project}}-2 — ..."`.
+3. По желанию переведите STORY в `Ready`, чтобы она ушла из колонки Review. После новых задач оркестратор снова запустит ревью этой истории.
+4. Верните эпик в `Ready` (поле Stage в YouTrack).
+
+Цикл продолжит работу **в том же worktree и на той же ветке**. Не удаляйте worktree, пока эпик не принят.
+
+### 6.7. Политики слияния
+
+Политика выбирается при установке (`agentio:install`, опция `--merge-policy=…`) и записывается в `.agentio.json`; переменная `AGENTIO_MERGE_POLICY` в `.env` её переопределяет. При установке выбрано `{{merge_policy}}`. Чтобы сменить политику для всех, запустите `php artisan agentio:install --merge-policy=…` (он перепишет `.agentio.json` и скиллы) и закоммитьте изменения.
+
+| Значение | Что делают агенты | Что делает цикл | Кто сливает |
+|---|---|---|---|
+| `local-branch` | Ничего не пушат, ветка остаётся в worktree | Пишет в лог, что эпик готов к приёмке | Человек, локально |
+| `pull-request` | `git push -u origin <ветка>`, `gh pr create` | Если PR есть, удаляет worktree | Человек, в PR |
+| `auto-merge` | Как `pull-request`, плюс `gh pr merge --auto --merge` | Без remote — локальный `git merge --no-ff` в `{{base_branch}}`, только если главный каталог чистый и стоит на `{{base_branch}}`; при конфликте оставляет человеку | Автоматически |
+
+Для PR нужны `origin`, установленный `gh` и выполненный `gh auth login`. Push в `{{base_branch}}` агентам запрещён при любой политике.
+
+---
+
+## 7. Blocked, сбои и частые проблемы
+
+### 7.1. Разбор Blocked
+
+1. Найдите заблокированные: `php artisan agentio:yt blocked` (с причинами), поиск «{{project}}: заблокированные …» или `claude "/agentio-status"`.
+2. Прочитайте последний `[AGENT:BLOCKED]`: что мешает, что нужно от вас, что уже сделано, как продолжить.
+3. Ответьте **комментарием в задаче**. Если ответ меняет требования, поправьте описание или статью.
+4. Верните статус, который был до блокировки: обычно `Ready` для TASK/STORY/EPIC и `Backlog` для идеи (поле Stage в YouTrack).
+5. Если заблокирован **эпик** (его сессия встала), сначала разблокируйте вложенные задачи, потом верните эпик в `Ready`. Цикл продолжит в том же worktree.
+
+Можно поручить разбор PM: `claude "Примени agentio-project-manager: разбери блокировки"`. Если вы ответили комментарием, он внесёт ответ в описание или статью и вернёт статус. Если ответа нет, он ничего не делает.
+
+### 7.2. Частые проблемы
+
+| Симптом | Причина и решение |
+|---|---|
+| `YOUTRACK_URL is not set …`, `YOUTRACK_URL and YOUTRACK_TOKEN must be set …` | Нет значений в `.env`. Запустите `php artisan agentio:install` (2.2). |
+| `The agentio skills are not installed …` или `The worktrees directory is not configured (AGENTIO_WORKTREES_PATH) …` | Установка не завершена: запустите `php artisan agentio:install`. |
+| `ERROR: the agentio skills (.claude/skills/agentio-*) are not committed to {{base_branch}}` | Скиллы не закоммичены в базовую ветку, и worktree их не получит. Закоммитьте `.claude/skills/agentio-*` и `.agentio.json`. |
+| В логе агента нет инструментов `mcp__youtrack__*` | Неверный токен или URL в `.env`. Проверьте: `php artisan agentio:yt ideas`. Сессии цикла берут MCP из конфига пакета с этими значениями (2.4). |
+| В интерактивном `claude` нет сервера `youtrack` или `/mcp` показывает его как failed | Проверьте `claude mcp get youtrack`. Нет сервера или устарел токен — запустите `php artisan agentio:install` (он добавит сервер заново). В каталоге worktree сервер из области `local` не виден (2.4). |
+| Тесты «висят» после прохождения | Сиротский процесс `playwright run-server` от браузерных тестов держит stdout, и `<тесты> \| tail` ждёт вечно. Запускайте тесты **только** через `php artisan agentio:test`: он пишет вывод в файл и убивает такие процессы своего каталога. Вручную: `pkill -f '^node .*playwright run-server'`. |
+| Строгий гейт покрытия падает на строках с `assert()` | Системный php.ini с `zend.assertions=-1`. Используйте `php artisan agentio:test --full` (включает assertions сам) или выставьте `zend.assertions = 1`. |
+| В логе агента `⚠️` с отказом в разрешении на команду с `$(...)`, обратными кавычками или `$VAR` | Headless-агенты работают в `--permission-mode dontAsk`: команды с подстановками не совпадают с белым списком и отклоняются без вопроса. Поэтому `claim` сам берёт ветку и worktree из git, а скиллы требуют писать значения буквально. Если агенту нужна новая безопасная команда, добавьте правило в `.claude/settings.json` проекта → `permissions.allow` и закоммитьте в `{{base_branch}}`: цикл объединяет эти правила с настройками пакета. |
+| Отказ `agentio guard: …` | Хук `agentio:guard` отклонил команду агента. Так задумано (раздел 8): агент должен выбрать безопасный путь или написать `[AGENT:BLOCKED]`. |
+| `claim` вернул `LOST: {{project}}-… is claimed by …` (код 3) | Задачу держит другой владелец, и агент её не трогает. Это нормально при гонке двух агентов или машин. Если владелец «мёртв» (старый путь, другая машина), снимите захват: `php artisan agentio:yt release {{project}}-2 --state=Ready --comment="[AGENT:RELEASE] перезапуск на другой машине"`. |
+| Эпик в `In Progress`, но никто не работает | Сессия оборвалась. Следующий проход возобновит её, если worktree на этой машине и owner совпадает (`php artisan agentio:yt claimed-epics`). Иначе — `release`, как в строке выше. |
+| Две сессии одного эпика / повторный запуск | Цикл не запускает эпик, у которого жив процесс из `<EPIC>.pid`. Не запускайте два цикла одновременно и не стартуйте `/agentio-work-epic` вручную для эпика, с которым работает цикл. Проверка: `pgrep -fa agent-loop.sh`, `php artisan agentio:yt claimed-epics`. Повторный `/agentio-plan` по идее и повторный `/agentio-work-epic` безопасны: они продолжают с места остановки. |
+| Эпик сам ушёл в `Blocked` с текстом «сессия /agentio-work-epic 3 раза подряд завершилась…» | Сессия обрывалась до Review больше 3 раз подряд (сюда же считаются `--kill`). Смотрите `php artisan agentio:log {{project}}-2 --lines=100`, устраните причину и верните эпик в `Ready`. |
+| `worktree setup failed, see …/{{project}}-2.setup.log` | Частые причины: нет сети для `composer`/`npm`/`bun`, не прошли миграции, не собрался фронтенд (делается 3 попытки). Повтор: `php artisan agentio:worktree {{project}}-2`. |
+| Агент «не видит» задачу как готовую | `php artisan agentio:yt tree <EPIC>` покажет `waits:` (незакрытые зависимости, в том числе унаследованные) или `[CLAIMED]`. TASK вне иерархии TASK → STORY → EPIC цикл не берёт (3.7). |
+| Изменения в скиллах не действуют в эпике | Сессия эпика использует скиллы и `vendor` своего worktree. Закоммитьте изменения в `{{base_branch}}` и влейте `{{base_branch}}` в ветку эпика, либо дождитесь следующего эпика. |
+| `Another agent loop is already running` | Цикл в этом каталоге уже работает (`storage/logs/agents/loop.pid`). Остановите его (`php artisan agentio:run --stop`) или дождитесь выхода. Если процесса нет, а файл остался — удалите `loop.pid`. |
+| Цикл сразу выходит со `stop requested` | Остался флаг остановки `storage/logs/agents/stop`: запустите с `--fresh`. |
+| `agentio:setup-youtrack` предупреждает о поле State | agentio хранит статус в Stage. Если задачи размечены только по State (проект настроен прежней версией agentio), перенесите значения в Stage и постройте доску по Stage (2.6). |
+| `agentio:setup-youtrack`: набор значений Stage или Type общий с другими проектами | В проекте уже есть задачи, поэтому команда не меняет общий набор. Дайте проекту собственный набор значений в YouTrack и запустите команду снова. |
+| Две машины работают с одним YouTrack | Захват защищает от гонки: проигравший получает `LOST`. Worktree, pid-файлы и логи видны только локально. |
+
+---
+
+## 8. Безопасность
+
+- **Режим разрешений.** Headless-агенты запускаются с `--permission-mode dontAsk`. Им разрешено только то, что перечислено в `permissions.allow` настроек пакета (`resources/claude/settings.json`: чтение и правка файлов проекта, `mcp__youtrack__*`, `Skill`, `php artisan agentio:yt|test|commit|log`, git без разрушительных операций, тесты и линтеры) и в `.claude/settings.json` проекта; остальное отклоняется без вопроса. Цикл передаёт эти правила через `--settings`: в каталоге, которому не подтверждено доверие (а новый worktree эпика всегда такой), Claude Code игнорирует `allow` из `.claude/settings.json` проекта. Список `deny`:
+  - `git push --force`, push в `{{base_branch}}`/`main`/`master`/`HEAD`;
+  - `reset --hard`, `clean`, `rebase`, `checkout {{base_branch}}`, `worktree remove`;
+  - `composer require/remove/update`, `bun add/remove/update`, `npm install <пакет>/uninstall/update`, `sudo`;
+  - чтение `.env` (в нём токен YouTrack; MCP-сервер и `agentio:yt` подключаются сами), `.env.production`/`.env.staging`, `~/.claude.json` (там MCP-сервер с токеном), `~/.ssh`, `~/.config/gh`.
+- **Самозащита.** Агентам запрещено править `.claude/settings.json`, `.agentio.json`, скиллы `.claude/skills/agentio-*` и `vendor/` — то есть свои настройки, скрипты и хук.
+- **Хук `php artisan agentio:guard`** (PreToolUse для Bash, подключён в настройках пакета) — второй рубеж. Он запрещает:
+  - push в защищённые ветки, force/mirror push, push и удаление веток кроме `epic/*`;
+  - `reset --hard`, `clean`, `stash`, переписывание истории, `checkout`/`restore` всего дерева, `worktree remove/prune`;
+  - `rm`/`mv`/`chmod`/`find -delete` вне каталога проекта (и разрешённых `additionalDirectories`) и внутри `.git`;
+  - `git -C` вне проекта;
+  - чтение секретов, в том числе `.env`, `php artisan config:show agentio` и ключей `agentio.youtrack…` (настройки приложения агенты смотрят в `.env.example`, `config/*` и `config:show <ключ>`);
+  - любое упоминание `YOUTRACK_TOKEN`, вывод `ANTHROPIC_*`, `printenv`, `env`;
+  - `php artisan agentio:install`, `agentio:setup-youtrack`, `agentio:worktree`, `tinker` и `agentio:run` без `--dry-run` — их запускают люди и цикл;
+  - `sudo` и разрушительные системные команды.
+- **Зависимости.** Новые пакеты агентам запрещены: они спрашивают через `[AGENT:BLOCKED]`.
+- **Коммиты.** Агенты коммитят только свои файлы через `php artisan agentio:commit`, а `git add -A`/`.` и `commit -a` запрещены правилами процесса.
+- **Изоляция окружения.** Каждый worktree получает свой `.env` из `.env.example` (локальное окружение, свой `APP_KEY`, своя SQLite-БД, без токена). Главный `.env` агенты не используют и не читают; `agentio:run` убирает его переменные (`APP_*`, `DB_*` и т. п.) из окружения сессий.
+- **Токены.** `YOUTRACK_TOKEN` живёт только в `.env` (он не коммитится; установщик проверяет, что `.env` игнорируется git) и в конфигурации MCP Claude Code (`~/.claude.json`). Сессиям цикла он передаётся через окружение и подстановку `${YOUTRACK_TOKEN}` в MCP-конфиге пакета; в репозиторий, логи и комментарии он не попадает. Скомпрометированный токен отзовите в Profile → Account Security → Tokens и запустите `php artisan agentio:install` с новым.
+
+---
+
+## 9. Шпаргалка
+
+```bash
+# Установка и настройка
+composer require obrazmisli/agentio --dev
+php artisan agentio:install                        # URL, токен, MCP-сервер, проект, ветка, политика, каталог worktree, скиллы
+YOUTRACK_TOKEN=perm-... php artisan agentio:install --no-interaction --youtrack-url=https://<instance>.youtrack.cloud --project={{project}} --worktrees=../<проект>-worktrees --setup-youtrack
+php artisan agentio:setup-youtrack --dry-run       # план настройки YouTrack; без --dry-run — применить (безопасно повторять)
+git add .claude/skills/agentio-* .agentio.json && git commit -m "Install agentio"
+claude mcp get youtrack                            # MCP-сервер youtrack в Claude Code
+php artisan agentio:yt ideas && php artisan agentio:status
+
+# Идеи и планирование
+claude "/agentio-plan <текст идеи>"              # создать идею и спланировать
+claude "/agentio-plan {{project}}-1"             # спланировать существующую идею
+php artisan agentio:yt ideas                     # идеи, ждущие планирования
+php artisan agentio:yt validate {{project}}-2    # проверить структуру эпика или идеи
+
+# Цикл
+php artisan agentio:run --dry-run      # что будет запущено
+php artisan agentio:run --once [--epic={{project}}-2] [--no-plan] [--no-wait] [--max-parallel=N]
+nohup php artisan agentio:run > /dev/null 2>&1 &
+php artisan agentio:run --stop         # остановить цикл (флаг storage/logs/agents/stop); --fresh — снять флаг и запустить
+php artisan agentio:run --kill         # прервать сессии эпиков (захват сохраняется)
+
+# Ручной оркестратор
+php artisan agentio:worktree {{project}}-2 && cd <worktrees>/{{project}}-2 && claude "/agentio-work-epic {{project}}-2"
+
+# Наблюдение
+php artisan agentio:status [--json]   |   /agentio в браузере
+claude "/agentio-status"   |   claude "/agentio-dispatch"
+php artisan agentio:yt blocked | claimed-epics | ready-epics | tree {{project}}-2 | ready-tasks {{project}}-2 | state {{project}}-5
+php artisan agentio:yt kb-tree [{{kb.analysis}}] [--depth=1]   # дерево базы знаний с ID статей
+php artisan agentio:log {{project}}-2 --follow
+tail -f storage/logs/agents/loop.log
+
+# Статусы: поле Stage в YouTrack UI
+php artisan agentio:yt release {{project}}-42 --state=Ready --comment="[AGENT:RELEASE] ..."   # снять захват
+
+# Приёмка
+cd <worktrees>/{{project}}-2 && php artisan agentio:test --full && php artisan serve --port=8102
+git merge --no-ff epic/{{project}}-2-<slug>      # затем STORY и EPIC → Done в YouTrack
+php artisan agentio:worktree {{project}}-2 --remove
+
+# Доработка
+# новые TASK в Ready, затем эпик → Ready в YouTrack
+```

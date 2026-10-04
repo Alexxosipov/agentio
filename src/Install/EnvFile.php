@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Obrazmisli\Agentio\Install;
 
 /**
- * A dotenv file of the host project (.env): reads values the way scripts/yt.php does and sets keys in place,
+ * A dotenv file of the host project (.env): reads values the way Laravel does and sets keys in place,
  * keeping every other line. A key that is already there is replaced on its line, a new key is appended.
  */
 final readonly class EnvFile

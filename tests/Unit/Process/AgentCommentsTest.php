@@ -72,7 +72,7 @@ it('knows which kinds end a claim', function (AgentCommentKind $kind, bool $ends
     [AgentCommentKind::Release, true],
 ]);
 
-it('finds the owner of the active claim like scripts/yt.php', function (array $texts, ?string $owner) {
+it('finds the owner of the active claim like agentio:yt claim', function (array $texts, ?string $owner) {
     $comments = AgentComments::fromComments(array_map(comment(...), $texts));
 
     expect($comments->claimOwner())->toBe($owner)

@@ -43,7 +43,7 @@ it('remembers the first failure and returns the fallback', function () {
 it('caches answers for the configured time and failures for at least half a minute', function () {
     Http::fake(['yt.example.com/api/issues?*' => Http::sequence()
         ->push(['error_description' => 'Server down'], 503)
-        ->push([apiIssue('TP-1', ['Type' => 'Epic', 'State' => 'Ready'])])
+        ->push([apiIssue('TP-1', ['Type' => 'Epic', 'Stage' => 'Ready'])])
         ->push([])]);
 
     expect(fn () => source()->issues())->toThrow(YouTrackException::class, 'Server down');
@@ -68,7 +68,7 @@ it('restores cached issues from a store that does not unserialize objects (Larav
         'cache.serializable_classes' => false,
     ]);
     Http::fake([
-        'yt.example.com/api/issues?*' => Http::response([apiIssue('TP-1', ['Type' => 'Epic', 'State' => 'Ready'])]),
+        'yt.example.com/api/issues?*' => Http::response([apiIssue('TP-1', ['Type' => 'Epic', 'Stage' => 'Ready'])]),
         'yt.example.com/api/activities?*' => Http::response([[
             'author' => ['login' => 'agent'],
             'added' => [['id' => '1', 'text' => '[AGENT:START] go', 'created' => 1791010361184, 'issue' => ['idReadable' => 'TP-1']]],
@@ -90,10 +90,10 @@ it('restores cached issues from a store that does not unserialize objects (Larav
 });
 
 it('reads YouTrack again when a cache entry is not its own', function (mixed $entry) {
-    Http::fake(['yt.example.com/api/issues?*' => Http::response([apiIssue('TP-1', ['Type' => 'Epic', 'State' => 'Ready'])])]);
+    Http::fake(['yt.example.com/api/issues?*' => Http::response([apiIssue('TP-1', ['Type' => 'Epic', 'Stage' => 'Ready'])])]);
     source()->issues();
 
-    Cache::put('agentio:'.hash('xxh128', 'https://yt.example.com|TP').':issues', $entry, 60);
+    Cache::put('agentio:'.hash('xxh128', 'https://yt.example.com|TP').':0:issues', $entry, 60);
 
     expect(source()->issues()[0]->id)->toBe('TP-1');
 
@@ -104,7 +104,7 @@ it('reads YouTrack again when a cache entry is not its own', function (mixed $en
 ]);
 
 it('reads YouTrack every time when the cache is disabled', function () {
-    Http::fake(['yt.example.com/api/issues?*' => Http::response([apiIssue('TP-1', ['Type' => 'Epic', 'State' => 'Ready'])])]);
+    Http::fake(['yt.example.com/api/issues?*' => Http::response([apiIssue('TP-1', ['Type' => 'Epic', 'Stage' => 'Ready'])])]);
 
     expect(source(0)->issues()[0]->id)->toBe('TP-1')
         ->and(source(0)->issues())->toHaveCount(1);
@@ -125,8 +125,8 @@ it('takes the cache time from the config by default', function () {
 
 it('loads linked issues of other projects and ignores missing ones', function () {
     Http::fake([
-        'yt.example.com/api/issues?*' => Http::response([apiIssue('TP-1', ['Type' => 'Task', 'State' => 'Ready'], ['depends on' => ['EXT-1', 'GONE-1']])]),
-        'yt.example.com/api/issues/EXT-1?*' => Http::response(apiIssue('EXT-1', ['Type' => 'Task', 'State' => 'Done'])),
+        'yt.example.com/api/issues?*' => Http::response([apiIssue('TP-1', ['Type' => 'Task', 'Stage' => 'Ready'], ['depends on' => ['EXT-1', 'GONE-1']])]),
+        'yt.example.com/api/issues/EXT-1?*' => Http::response(apiIssue('EXT-1', ['Type' => 'Task', 'Stage' => 'Done'])),
         'yt.example.com/api/issues/GONE-1?*' => Http::response(['error_description' => 'Not found'], 404),
         'yt.example.com/api/issues/BROKEN-1?*' => Http::response(['error_description' => 'Boom'], 500),
     ]);
@@ -142,4 +142,20 @@ it('strips the type prefix agents put in summaries', function () {
     expect(YouTrackSource::summary('[EPIC] Аватар'))->toBe('Аватар')
         ->and(YouTrackSource::summary('[task]  Тест'))->toBe('Тест')
         ->and(YouTrackSource::summary('Без префикса [TASK]'))->toBe('Без префикса [TASK]');
+});
+
+it('forgets the cached answers after a flush', function () {
+    Http::fake(['yt.example.com/api/issues?*' => Http::sequence()
+        ->push([apiIssue('TP-1', ['Type' => 'Epic', 'Stage' => 'Review'])])
+        ->push([apiIssue('TP-1', ['Type' => 'Epic', 'Stage' => 'Done'])])]);
+
+    expect(source()->issues()[0]->state())->toBe('Review')
+        ->and(source()->issues()[0]->state())->toBe('Review');
+
+    source()->flush();
+
+    expect(source()->issues()[0]->state())->toBe('Done')
+        ->and(source()->issues()[0]->state())->toBe('Done');
+
+    Http::assertSentCount(2);
 });

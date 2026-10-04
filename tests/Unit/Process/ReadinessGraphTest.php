@@ -156,7 +156,7 @@ it('loads unknown issues through the resolver once', function () {
     $graph = new ReadinessGraph([], function (string $id) use (&$calls): ?Issue {
         $calls++;
 
-        return $id === 'EXT-1' ? Issue::fromApi(apiIssue('EXT-1', ['State' => 'Done'])) : null;
+        return $id === 'EXT-1' ? Issue::fromApi(apiIssue('EXT-1', ['Stage' => 'Done'])) : null;
     });
 
     expect($graph->find('EXT-1')?->state())->toBe('Done')

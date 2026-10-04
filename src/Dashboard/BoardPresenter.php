@@ -10,7 +10,7 @@ use Obrazmisli\Agentio\YouTrack\State;
 use Obrazmisli\Agentio\YouTrack\YouTrackException;
 
 /**
- * The Kanban board: every issue of the project in a column per State.
+ * The Kanban board: every issue of the project in a column per Stage.
  */
 final readonly class BoardPresenter
 {

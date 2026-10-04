@@ -163,10 +163,10 @@ it('follows the planning of an idea through analysis, architecture and decomposi
 
 it('takes the planning stage of an idea from the epics it already created', function () {
     $issues = [
-        Issue::fromApi(apiIssue('TP-1', ['Type' => 'Idea', 'State' => 'Analysis'], ['relates to' => ['TP-2', 'TP-9']])),
-        Issue::fromApi(apiIssue('TP-2', ['Type' => 'Epic', 'State' => 'Analysis'], ['relates to' => ['TP-1'], 'parent for' => ['TP-3']])),
-        Issue::fromApi(apiIssue('TP-3', ['Type' => 'Story', 'State' => 'Backlog'], ['subtask of' => ['TP-2']])),
-        Issue::fromApi(apiIssue('TP-9', ['Type' => 'Task', 'State' => 'Done'])),
+        Issue::fromApi(apiIssue('TP-1', ['Type' => 'Idea', 'Stage' => 'Analysis'], ['relates to' => ['TP-2', 'TP-9']])),
+        Issue::fromApi(apiIssue('TP-2', ['Type' => 'Epic', 'Stage' => 'Analysis'], ['relates to' => ['TP-1'], 'parent for' => ['TP-3']])),
+        Issue::fromApi(apiIssue('TP-3', ['Type' => 'Story', 'Stage' => 'Backlog'], ['subtask of' => ['TP-2']])),
+        Issue::fromApi(apiIssue('TP-9', ['Type' => 'Task', 'Stage' => 'Done'])),
     ];
     $graph = new ReadinessGraph($issues);
     $resolver = new PipelineStageResolver($graph);

@@ -6,7 +6,7 @@ namespace Obrazmisli\Agentio\Runtime;
 
 enum SessionEventType: string
 {
-    /** "===== <time> /work-epic TP-2 in <dir> =====" written by the loop before a session starts. */
+    /** "===== <time> /agentio-work-epic TP-2 in <dir> =====" written by the loop before a session starts. */
     case SessionStart = 'session_start';
 
     /** The session initialised (model, working directory). */

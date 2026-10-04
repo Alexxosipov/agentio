@@ -13,7 +13,7 @@ use OutOfBoundsException;
 
 /**
  * The issue graph of a project and the readiness rules of the youtrack-workflow skill
- * (the same rules as scripts/yt.php):
+ * (php artisan agentio:yt computes them the same way for the loop and the agents):
  *
  * - dependencies are inherited from all ancestors (a TASK waits for what its STORY and EPIC depend on);
  * - a dependency is met when it is Done, or in Review inside the same epic (its code is on the epic branch);
@@ -279,7 +279,7 @@ final class ReadinessGraph
     }
 
     /**
-     * Number of tasks under the issue by State (tasks without a State are counted under "").
+     * Number of tasks under the issue by Stage (tasks without a Stage are counted under "").
      *
      * @return array<string, int>
      */

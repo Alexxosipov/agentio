@@ -7,19 +7,21 @@ namespace Obrazmisli\Agentio\Runtime;
 use Carbon\CarbonImmutable;
 
 /**
- * Local state of the autonomous loop, read from the files scripts/agent-loop.sh keeps in the logs directory:
+ * Local state of the autonomous loop, read from the files the agent loop keeps in the logs directory:
  *
  * - loop.log            the loop's own log ("[Y-m-d H:i:s] message");
- * - loop.pid            pid of the running loop process (kept by scripts/agent-loop.sh while it runs);
- * - <ID>.pid / <ID>.log epic sessions (/work-epic), <ID>.restarts their restart counter;
- * - plan-<ID>.pid / plan-<ID>.log planning sessions (/plan);
- * - .agent-stop         in the project root: the loop exits after the current step.
+ * - loop.pid            pid of the running loop process (kept by the agent loop while it runs);
+ * - <ID>.pid / <ID>.log epic sessions (/agentio-work-epic), <ID>.restarts their restart counter;
+ * - plan-<ID>.pid / plan-<ID>.log planning sessions (/agentio-plan);
+ * - stop               the stop flag: the loop exits after the current step.
  */
 final readonly class LoopState
 {
     public const string LOOP_LOG = 'loop.log';
 
     public const string LOOP_PID = 'loop.pid';
+
+    public const string STOP_FILE = 'stop';
 
     /**
      * @param  string|null  $timezone  Timezone of the loop's local timestamps (defaults to PHP's timezone)
@@ -50,6 +52,10 @@ final readonly class LoopState
      */
     public function requestStop(): void
     {
+        if (! is_dir(dirname($this->stopFile))) {
+            mkdir(dirname($this->stopFile), 0755, true);
+        }
+
         touch($this->stopFile);
     }
 

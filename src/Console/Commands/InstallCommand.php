@@ -6,6 +6,7 @@ namespace Obrazmisli\Agentio\Console\Commands;
 
 use Illuminate\Console\Command;
 use Obrazmisli\Agentio\Install\Check;
+use Obrazmisli\Agentio\Install\ClaudeMcp;
 use Obrazmisli\Agentio\Install\EnvFile;
 use Obrazmisli\Agentio\Install\FileChange;
 use Obrazmisli\Agentio\Install\FileStatus;
@@ -14,19 +15,29 @@ use Obrazmisli\Agentio\Install\KnowledgeBase;
 use Obrazmisli\Agentio\Install\Manifest;
 use Obrazmisli\Agentio\Install\Placeholders;
 use Obrazmisli\Agentio\Install\Preconditions;
-use Obrazmisli\Agentio\Install\SetupAction;
-use Obrazmisli\Agentio\Install\SetupStatus;
 use Obrazmisli\Agentio\Install\YouTrackAccess;
-use Obrazmisli\Agentio\Install\YouTrackSetup;
 use Obrazmisli\Agentio\Runtime\MergePolicy;
+use Obrazmisli\Agentio\Settings;
 use Obrazmisli\Agentio\YouTrack\Client;
+use Obrazmisli\Agentio\YouTrack\Mcp\McpClient;
+use Obrazmisli\Agentio\YouTrack\Mcp\Tools;
 use Obrazmisli\Agentio\YouTrack\YouTrackException;
+use RuntimeException;
 use Symfony\Component\Console\Attribute\AsCommand;
+use Symfony\Component\Process\Process;
 
 use function Laravel\Prompts\confirm;
 use function Laravel\Prompts\password;
+use function Laravel\Prompts\select;
 use function Laravel\Prompts\text;
 
+/**
+ * Installs the agent cycle into the project: asks for the YouTrack connection and checks it through the MCP
+ * server, adds the youtrack MCP server to Claude Code when it has none, asks for the YouTrack project, the base
+ * branch, the merge policy and the directory of the epic worktrees, optionally configures the YouTrack project
+ * (agentio:setup-youtrack) and installs the skills into .claude/skills — the only files it adds to the project
+ * besides .agentio.json; the scripts and the manual stay in the package.
+ */
 #[AsCommand(name: 'agentio:install')]
 final class InstallCommand extends Command
 {
@@ -39,150 +50,141 @@ final class InstallCommand extends Command
         {--project= : YouTrack project short name (default: .agentio.json, then AGENTIO_PROJECT)}
         {--create-project : Create the YouTrack project when it does not exist (asked when interactive)}
         {--project-name= : Name of the YouTrack project to create (default: its short name)}
-        {--base-branch= : Branch the epic branches start from (default: .agentio.json, then AGENTIO_BASE_BRANCH)}
-        {--merge-policy= : local-branch, pull-request or auto-merge (default: AGENTIO_MERGE_POLICY, then CLAUDE.md)}
-        {--youtrack : Also configure the YouTrack project: fields, tags, saved searches, knowledge base (asked when interactive)}
-        {--force : Overwrite installed files that differ from the stubs}
+        {--base-branch= : Branch the epic branches start from (default: .agentio.json, then the current branch)}
+        {--merge-policy= : local-branch, pull-request or auto-merge (default: .agentio.json, then local-branch)}
+        {--worktrees= : Directory of the epic worktrees, outside the project (default: AGENTIO_WORKTREES_PATH; asked when interactive)}
+        {--mcp-scope=local : Scope of the youtrack MCP server added to Claude Code: local (this project, private) or user}
+        {--setup-youtrack : Also configure the YouTrack project (agentio:setup-youtrack; asked when interactive)}
+        {--force : Overwrite installed skills that were edited locally}
         {--dry-run : Only show what would be done}';
 
     /**
      * @var string
      */
-    protected $description = 'Install the autonomous development cycle (Claude Code agents, skills, scripts) into the project';
+    protected $description = 'Install the agent cycle into the project: YouTrack connection and MCP server, project settings, skills';
 
     private const string PROJECT_PATTERN = '/^[A-Za-z][A-Za-z0-9_]*$/';
 
-    private const string PROJECT_EXISTS = 'exists';
+    private bool $interactive = false;
 
-    private const string PROJECT_CREATED = 'created';
+    private bool $dryRun = false;
 
-    /** A dry run that would create the project. */
-    private const string PROJECT_PLANNED = 'planned';
-
-    private const string PROJECT_MISSING = 'missing';
-
-    public function handle(Client $client): int
+    public function handle(Settings $settings): int
     {
-        $basePath = $this->laravel->basePath();
-        $stubsPath = dirname(__DIR__, 3).'/stubs';
-        $manifest = Manifest::load($basePath);
-        $dryRun = (bool) $this->option('dry-run');
-        $interactive = $this->input->isInteractive();
+        $basePath = $settings->basePath();
+        $manifest = $settings->manifest();
         $env = new EnvFile($basePath.'/.env');
+        $this->interactive = $this->input->isInteractive();
+        $this->dryRun = (bool) $this->option('dry-run');
 
-        $project = $this->stringOption('project') ?? $manifest->project ?? $this->configString('agentio.youtrack.project') ?? $env->get('AGENTIO_PROJECT') ?? 'TP';
-        $baseBranch = $this->stringOption('base-branch') ?? $manifest->baseBranch ?? $this->configString('agentio.base_branch') ?? 'main';
-        $policy = $this->mergePolicy($basePath);
+        $this->components->info(($this->dryRun ? 'Dry run, nothing is changed. Plan of the agentio installation' : 'Installing agentio').' into '.$basePath.'.');
 
-        if (! $interactive && preg_match(self::PROJECT_PATTERN, $project) !== 1) {
-            $this->components->error("Invalid YouTrack project short name: {$project}");
+        $checks = (new Preconditions($basePath, Settings::string('agentio.claude_binary') ?? 'claude'))->checks();
+        $this->renderChecks($checks);
+
+        $scope = (string) $this->option('mcp-scope');
+
+        if (! in_array($scope, ClaudeMcp::SCOPES, true)) {
+            $this->components->error('Invalid --mcp-scope: use '.implode(' or ', ClaudeMcp::SCOPES).'.');
 
             return self::FAILURE;
         }
 
-        if ($policy === null) {
-            $this->components->error('Invalid merge policy: use local-branch, pull-request or auto-merge.');
-
-            return self::FAILURE;
-        }
-
-        $url = $this->stringOption('youtrack-url') ?? $this->configString('agentio.youtrack.url') ?? $env->get('YOUTRACK_URL');
-        $token = $this->stringOption('token') ?? $this->configString('agentio.youtrack.token') ?? $env->get('YOUTRACK_TOKEN');
-        $url = $url === null ? null : rtrim($url, '/');
-
-        $connection = $interactive ? $this->askForConnection($url, $token) : $this->checkConnection($url, $token);
+        // 1. The YouTrack connection, checked through the MCP server.
+        $url = $this->stringOption('youtrack-url') ?? Settings::string('agentio.youtrack.url') ?? $env->get('YOUTRACK_URL');
+        $token = $this->stringOption('token') ?? Settings::string('agentio.youtrack.token') ?? $env->get('YOUTRACK_TOKEN');
+        $connection = $this->interactive ? $this->askForConnection($url === null ? null : rtrim($url, '/'), $token) : $this->checkConnection($url, $token);
 
         if ($connection === false) {
             return self::FAILURE;
         }
 
+        // 2. The youtrack MCP server of Claude Code.
         if ($connection !== null) {
-            [$url, $token] = [$connection['url'], $connection['token']];
-            $client = $this->client($url, $token);
-        } elseif ($interactive) {
-            [$url, $token] = [null, null];
+            $this->registerMcpServer($basePath, $connection['url'], $connection['token'], $connection['tokenChanged'], $scope);
         }
 
-        if ($interactive && $this->stringOption('project') === null) {
-            $project = text(
-                label: 'YouTrack project short name',
-                placeholder: 'TP',
-                default: preg_match(self::PROJECT_PATTERN, $project) === 1 ? $project : '',
-                required: true,
-                validate: fn (string $value): ?string => preg_match(self::PROJECT_PATTERN, trim($value)) === 1 ? null : 'Use letters, digits and _, starting with a letter (e.g. TP).',
-                hint: 'The prefix of issue ids (TP-1); a missing project can be created.',
-            );
-            $project = trim($project);
-        }
+        // 3. The project settings.
+        $project = $this->askProject($this->stringOption('project') ?? $manifest->project ?? Settings::string('agentio.youtrack.project') ?? 'TP');
 
-        $projectStatus = $connection === null ? null : $this->ensureProject(new YouTrackAccess($client), $project, $connection['user'], $interactive, $dryRun);
-
-        if ($projectStatus === false) {
+        if ($project === null) {
             return self::FAILURE;
         }
 
-        $setUpYouTrack = (bool) $this->option('youtrack');
+        $projectExists = $connection === null ? null : $this->ensureProject($connection, $project);
 
-        if (! $setUpYouTrack && $interactive && $connection !== null && $projectStatus !== self::PROJECT_MISSING) {
-            $setUpYouTrack = confirm(
-                label: "Configure the YouTrack project {$project} now?",
-                default: true,
-                hint: 'Fields State / Type / Stage, tags, saved searches and the knowledge base; existing ones are kept.',
-            );
+        if ($projectExists === false) {
+            return self::FAILURE;
         }
 
-        $this->components->info(sprintf(
-            '%s agentio: YouTrack project %s, base branch %s, merge policy %s.',
-            $dryRun ? 'Dry run, nothing is changed. Plan for' : 'Installing',
-            $project,
-            $baseBranch,
-            $policy->value,
-        ));
+        $baseBranch = $this->askBaseBranch($this->stringOption('base-branch') ?? $manifest->baseBranch ?? Settings::string('agentio.base_branch') ?? $this->currentBranch($basePath) ?? 'main');
+        $policy = $this->askMergePolicy($this->stringOption('merge-policy') ?? $manifest->mergePolicy ?? Settings::string('agentio.merge_policy'));
 
-        $checks = (new Preconditions(
-            $basePath,
-            $this->configString('agentio.claude_binary') ?? 'claude',
-            $url,
-            $token,
-        ))->checks();
-        $this->renderChecks($checks);
+        if ($policy === null) {
+            return self::FAILURE;
+        }
 
-        $placeholders = new Placeholders($project, $baseBranch, $policy, $manifest->kb);
+        $worktrees = $this->askWorktrees($basePath, $this->stringOption('worktrees') ?? $settings->worktreesPath());
 
-        if ($setUpYouTrack && $projectStatus === self::PROJECT_PLANNED) {
-            $this->components->warn("The YouTrack project {$project} does not exist yet, so its setup cannot be planned: run without --dry-run.");
-        } elseif ($setUpYouTrack) {
-            $kb = $this->setUpYouTrack($client, new KnowledgeBase($stubsPath), $project, $placeholders, $dryRun);
+        if ($worktrees === null) {
+            return self::FAILURE;
+        }
 
-            if ($kb === null) {
+        // 4. .env (the connection and the machine settings) and .agentio.json (the project settings).
+        $environment = [
+            'YOUTRACK_URL' => $connection['url'] ?? null,
+            'YOUTRACK_TOKEN' => $connection['token'] ?? null,
+            'AGENTIO_WORKTREES_PATH' => $worktrees,
+        ];
+
+        foreach (['AGENTIO_PROJECT' => $project, 'AGENTIO_BASE_BRANCH' => $baseBranch, 'AGENTIO_MERGE_POLICY' => $policy->value] as $key => $value) {
+            if ($env->get($key) !== null) {
+                $environment[$key] = $value;
+            }
+        }
+
+        $installer = new Installer($basePath, dirname(__DIR__, 3).'/stubs', new Placeholders($project, $baseBranch, $policy), (bool) $this->option('force'), $this->dryRun, $manifest->files);
+        $envChange = $installer->writeEnvironment($environment);
+        $this->useSettings($connection, $project, $baseBranch, $policy, $worktrees);
+
+        if (! $this->dryRun) {
+            $manifest->with($project, $baseBranch, mergePolicy: $policy->value)->save($basePath);
+
+            if (! is_dir($worktrees)) {
+                mkdir($worktrees, 0755, true);
+            }
+        }
+
+        // 5. The YouTrack project setup (records the knowledge base ids in .agentio.json).
+        if ($connection !== null && $projectExists === true && $this->shouldSetUpYouTrack($project)) {
+            $this->newLine();
+
+            if ($this->call('agentio:setup-youtrack', ['--project' => $project, '--dry-run' => $this->dryRun]) !== self::SUCCESS) {
                 return self::FAILURE;
             }
-
-            $placeholders = $placeholders->withKb([...$manifest->kb, ...$kb]);
         }
 
-        $installer = new Installer($basePath, $stubsPath, $placeholders, (bool) $this->option('force'), $dryRun, $manifest->files);
-        $changes = [
-            ...$installer->install(dirname(__DIR__, 3).'/config/agentio.php', $this->laravel->configPath('agentio.php')),
-            ...$installer->writeEnvironment(['YOUTRACK_URL' => $url, 'YOUTRACK_TOKEN' => $token, 'AGENTIO_PROJECT' => $project]),
-        ];
-        $this->renderChanges($changes, $dryRun);
+        // 6. The skills.
+        $kb = Manifest::load($basePath)->kb;
+        $installer = new Installer($basePath, dirname(__DIR__, 3).'/stubs', new Placeholders($project, $baseBranch, $policy, $kb), (bool) $this->option('force'), $this->dryRun, Manifest::load($basePath)->files);
+        $changes = $installer->install();
+        $this->renderChanges(array_values(array_filter([...$changes, $envChange])));
 
-        if (! $dryRun) {
-            $manifest->with($project, $baseBranch, $placeholders->kb, $installer->hashes())->save($basePath);
+        if (! $this->dryRun) {
+            Manifest::load($basePath)->with($project, $baseBranch, $kb, $installer->hashes(), $policy->value)->save($basePath);
         }
 
-        $this->renderNextSteps($placeholders, $checks, $url !== null && $token !== null);
+        $this->renderNextSteps($checks, $baseBranch, $kb, $connection !== null);
 
         return self::SUCCESS;
     }
 
     /**
-     * Ask for the YouTrack URL and token until YouTrack accepts them (--youtrack-url and --token are tried
-     * first). Returns the checked connection, false when the user gave up, null when YouTrack is skipped
+     * Ask for the YouTrack URL and token until the MCP server accepts them (--youtrack-url and --token are
+     * tried first). Returns the checked connection, false when the user gave up, null when YouTrack is skipped
      * (an empty URL).
      *
-     * @return array{url: string, token: string, user: array{id: string, login: string, fullName: string}}|false|null
+     * @return array{url: string, token: string, tokenChanged: bool, user: array{login: string, name: string, email: string}}|false|null
      */
     private function askForConnection(?string $url, ?string $token): array|false|null
     {
@@ -197,28 +199,29 @@ final class InstallCommand extends Command
                 validate: fn (string $value): ?string => trim($value) === '' || preg_match('#^https?://[^\s/]+#', trim($value)) === 1
                     ? null
                     : 'Enter the address of the YouTrack instance, e.g. https://example.youtrack.cloud.',
-                hint: 'Leave empty to install without YouTrack (set it up later by running this command again).',
+                hint: 'Leave empty to install without YouTrack (connect it later by running this command again).',
             ), " \t/");
 
             if ($url === '') {
-                $this->components->warn('YouTrack is skipped: the connection is neither checked nor recorded.');
+                $this->components->warn('YouTrack is skipped: the connection is neither checked nor recorded, no MCP server is added.');
 
                 return null;
             }
 
-            $keep = $token !== null && (! $askToken || confirm(label: 'A YouTrack token is already set. Keep it?', default: true));
+            $previous = $token;
+            $keep = $token !== null && (! $askToken || confirm(label: 'A YouTrack token is already set (environment or .env). Keep it?', default: true));
 
             if (! $keep) {
                 $token = trim(password(
                     label: 'YouTrack permanent token',
                     placeholder: 'perm-…',
                     required: true,
-                    hint: 'YouTrack → Profile → Account Security → Tokens; it is written to .env and .claude/settings.local.json only.',
+                    hint: 'YouTrack → Profile → Account Security → Tokens. It goes to .env (git-ignored) and to the youtrack MCP server of Claude Code.',
                 ));
             }
 
             /** @var string $token */
-            $connection = $this->connect($url, $token);
+            $connection = $this->connect($url, $token, $previous !== null && $previous !== $token);
 
             if ($connection !== null) {
                 return $connection;
@@ -233,63 +236,132 @@ final class InstallCommand extends Command
     }
 
     /**
-     * Without prompts: check the URL and token from the options or the environment, when both are set.
+     * Without prompts: check the URL and token of the options or the environment, when both are set.
      * Returns the checked connection, false when YouTrack rejected it, null when it is not configured.
      *
-     * @return array{url: string, token: string, user: array{id: string, login: string, fullName: string}}|false|null
+     * @return array{url: string, token: string, tokenChanged: bool, user: array{login: string, name: string, email: string}}|false|null
      */
     private function checkConnection(?string $url, ?string $token): array|false|null
     {
         if ($url === null || $token === null) {
+            $this->components->warn('YOUTRACK_URL / YOUTRACK_TOKEN are not set: YouTrack is skipped (pass --youtrack-url and set YOUTRACK_TOKEN).');
+
             return null;
         }
 
-        return $this->connect($url, $token) ?? false;
+        $configured = Settings::string('agentio.youtrack.token');
+
+        return $this->connect(rtrim($url, '/'), $token, $configured !== null && $configured !== $token) ?? false;
     }
 
     /**
-     * @return array{url: string, token: string, user: array{id: string, login: string, fullName: string}}|null
+     * @return array{url: string, token: string, tokenChanged: bool, user: array{login: string, name: string, email: string}}|null
      */
-    private function connect(string $url, string $token): ?array
+    private function connect(string $url, string $token, bool $tokenChanged): ?array
     {
         try {
-            $user = (new YouTrackAccess($this->client($url, $token)))->currentUser();
+            $user = $this->tools($url, $token)->currentUser();
         } catch (YouTrackException $exception) {
-            $this->components->error('Cannot access YouTrack at '.$url.': '.$exception->getMessage());
+            $this->components->error('Cannot reach the YouTrack MCP server at '.$url.'/mcp: '.$exception->getMessage());
 
             return null;
         }
 
-        $this->components->info(sprintf('YouTrack %s: signed in as %s (%s).', $url, $user['fullName'] !== '' ? $user['fullName'] : $user['login'], $user['login']));
+        $this->components->info(sprintf('YouTrack %s (MCP): signed in as %s (%s).', $url, $user['name'] !== '' ? $user['name'] : $user['login'], $user['login']));
 
-        return ['url' => $url, 'token' => $token, 'user' => $user];
+        return ['url' => $url, 'token' => $token, 'tokenChanged' => $tokenChanged, 'user' => $user];
     }
 
     /**
-     * Make sure the YouTrack project exists, creating it when asked to (interactively, or with --create-project).
-     *
-     * @param  array{id: string, login: string, fullName: string}  $user  The project leader of a new project
-     * @return self::PROJECT_*|false The project status, false when YouTrack failed
+     * Add the youtrack MCP server to Claude Code when it has none for the project (or re-add it in the chosen
+     * scope after the token changed).
      */
-    private function ensureProject(YouTrackAccess $access, string $project, array $user, bool $interactive, bool $dryRun): string|false
+    private function registerMcpServer(string $basePath, string $url, string $token, bool $tokenChanged, string $scope): void
+    {
+        $claude = Settings::string('agentio.claude_binary') ?? 'claude';
+
+        if (Preconditions::executable($claude) === null) {
+            $this->components->warn("Claude Code CLI not found ({$claude}): add the MCP server later with php artisan agentio:install.");
+
+            return;
+        }
+
+        $mcp = new ClaudeMcp($claude, $basePath);
+        $exists = $mcp->has();
+
+        if ($exists && ! $tokenChanged) {
+            $this->components->info('Claude Code already has the youtrack MCP server for this project: kept.');
+
+            return;
+        }
+
+        if ($this->dryRun) {
+            $this->components->info(($exists ? 'Would replace' : 'Would add')." the youtrack MCP server ({$url}/mcp, scope {$scope}) in Claude Code.");
+
+            return;
+        }
+
+        try {
+            if ($exists) {
+                $mcp->remove($scope);
+            }
+
+            $mcp->add($url, $token, $scope);
+        } catch (RuntimeException $exception) {
+            $this->components->warn($exception->getMessage().' — add it by hand: claude mcp add --transport http youtrack '.$url.'/mcp --header "Authorization: Bearer <token>"');
+
+            return;
+        }
+
+        $this->components->info(($exists ? 'Replaced' : 'Added')." the youtrack MCP server in Claude Code ({$url}/mcp, scope {$scope}; the token is stored by Claude Code, not in the project).");
+    }
+
+    private function askProject(string $default): ?string
+    {
+        if (! $this->interactive || $this->stringOption('project') !== null) {
+            if (preg_match(self::PROJECT_PATTERN, $default) !== 1) {
+                $this->components->error("Invalid YouTrack project short name: {$default}");
+
+                return null;
+            }
+
+            return $default;
+        }
+
+        return trim(text(
+            label: 'YouTrack project short name',
+            placeholder: 'TP',
+            default: preg_match(self::PROJECT_PATTERN, $default) === 1 ? $default : '',
+            required: true,
+            validate: fn (string $value): ?string => preg_match(self::PROJECT_PATTERN, trim($value)) === 1 ? null : 'Use letters, digits and _, starting with a letter (e.g. TP).',
+            hint: 'The prefix of issue ids (TP-1); a missing project can be created.',
+        ));
+    }
+
+    /**
+     * Make sure the YouTrack project exists (found through the MCP server), creating it when asked to; the REST
+     * API is used for the creation only, the MCP server has no tool for it.
+     *
+     * @param  array{url: string, token: string, tokenChanged: bool, user: array{login: string, name: string, email: string}}  $connection
+     * @return bool|null True when it exists (or was created), null when it is missing, false when YouTrack failed
+     */
+    private function ensureProject(array $connection, string $project): ?bool
     {
         try {
-            $found = $access->project($project);
+            if ($this->tools($connection['url'], $connection['token'])->project($project) !== null) {
+                return true;
+            }
         } catch (YouTrackException $exception) {
             $this->components->error('Cannot read the YouTrack projects: '.$exception->getMessage());
 
             return false;
         }
 
-        if ($found !== null) {
-            return self::PROJECT_EXISTS;
-        }
-
-        if ($interactive && ! $this->option('create-project')) {
+        if ($this->interactive && ! $this->option('create-project')) {
             if (! confirm(label: "The YouTrack project {$project} does not exist (or the token cannot see it). Create it?", default: true)) {
-                $this->components->warn("Create the YouTrack project {$project} before starting the cycle.");
+                $this->components->warn("Create the YouTrack project {$project} before starting the cycle, then run php artisan agentio:setup-youtrack.");
 
-                return self::PROJECT_MISSING;
+                return null;
             }
 
             $name = $this->stringOption('project-name') ?? trim(text(label: 'Name of the new YouTrack project', default: $project, required: true));
@@ -298,78 +370,175 @@ final class InstallCommand extends Command
         } else {
             $this->components->warn("The YouTrack project {$project} does not exist or the token cannot see it: create it in YouTrack, or pass --create-project (and --project-name).");
 
-            return self::PROJECT_MISSING;
+            return null;
         }
 
-        if ($dryRun) {
-            $this->components->info("Would create the YouTrack project {$project} «{$name}» led by {$user['login']}.");
+        if ($this->dryRun) {
+            $this->components->info("Would create the YouTrack project {$project} «{$name}» led by {$connection['user']['login']}.");
 
-            return self::PROJECT_PLANNED;
+            return null;
         }
+
+        $access = new YouTrackAccess(new Client($connection['url'], $connection['token'], (int) config('agentio.youtrack.timeout', 30), (int) config('agentio.youtrack.retries', 2)));
 
         try {
-            $access->createProject($project, $name, $user['id']);
+            $access->createProject($project, $name, $access->currentUser()['id']);
         } catch (YouTrackException $exception) {
             $this->components->error("Cannot create the YouTrack project {$project}: ".$exception->getMessage().' (the token needs the permission to create projects).');
 
             return false;
         }
 
-        $this->components->info("Created the YouTrack project {$project} «{$name}» led by {$user['login']}.");
+        $this->components->info("Created the YouTrack project {$project} «{$name}» led by {$connection['user']['login']}.");
 
-        return self::PROJECT_CREATED;
+        return true;
     }
 
-    private function client(string $url, string $token): Client
+    private function askBaseBranch(string $default): string
     {
-        return new Client(
-            url: $url,
-            token: $token,
-            timeout: (int) config('agentio.youtrack.timeout', 30),
-            retries: (int) config('agentio.youtrack.retries', 2),
+        if (! $this->interactive || $this->stringOption('base-branch') !== null) {
+            return $default;
+        }
+
+        return trim(text(
+            label: 'Base branch',
+            default: $default,
+            required: true,
+            hint: 'Epic branches start from it and humans merge them into it; agents never push to it.',
+        ));
+    }
+
+    private function askMergePolicy(?string $default): ?MergePolicy
+    {
+        if (! $this->interactive || $this->stringOption('merge-policy') !== null) {
+            $policy = $default === null ? MergePolicy::LocalBranch : MergePolicy::tryFrom($default);
+
+            if ($policy === null) {
+                $this->components->error('Invalid merge policy: use local-branch, pull-request or auto-merge.');
+            }
+
+            return $policy;
+        }
+
+        return MergePolicy::from((string) select(
+            label: 'What happens to an epic branch when the agents are done?',
+            options: [
+                MergePolicy::LocalBranch->value => 'local-branch — the branch stays local, a human merges it',
+                MergePolicy::PullRequest->value => 'pull-request — the branch is pushed and a PR opened (gh), a human merges it',
+                MergePolicy::AutoMerge->value => 'auto-merge — merged automatically after a green full test run',
+            ],
+            default: MergePolicy::tryFrom((string) $default)->value ?? MergePolicy::LocalBranch->value,
+        ));
+    }
+
+    /**
+     * The directory of the epic worktrees (absolute, outside the project): asked, or taken from --worktrees or
+     * AGENTIO_WORKTREES_PATH. There is no silent default: the user chooses it.
+     */
+    private function askWorktrees(string $basePath, ?string $current): ?string
+    {
+        $absolute = fn (string $path): string => $this->absolutePath($basePath, $path);
+        $invalid = fn (string $path): ?string => match (true) {
+            trim($path) === '' => 'Enter a directory.',
+            $absolute($path) === rtrim($basePath, '/') || str_starts_with($absolute($path).'/', rtrim($basePath, '/').'/') => 'Choose a directory outside the project: worktrees inside it would show up in git status.',
+            default => null,
+        };
+
+        if (! $this->interactive || $this->stringOption('worktrees') !== null) {
+            if ($current === null) {
+                $this->components->error('Choose where the epic worktrees live: pass --worktrees=<directory outside the project> (or set AGENTIO_WORKTREES_PATH).');
+
+                return null;
+            }
+
+            $error = $invalid($current);
+
+            if ($error !== null) {
+                $this->components->error('--worktrees: '.$error);
+
+                return null;
+            }
+
+            return $absolute($current);
+        }
+
+        return $absolute(trim(text(
+            label: 'Directory of the epic worktrees',
+            default: $current ?? dirname(rtrim($basePath, '/')).'/'.basename(rtrim($basePath, '/')).'-worktrees',
+            required: true,
+            validate: $invalid,
+            hint: 'Every epic gets its own git worktree <directory>/<EPIC-ID>; outside the project. Written to .env (AGENTIO_WORKTREES_PATH).',
+        )));
+    }
+
+    private function shouldSetUpYouTrack(string $project): bool
+    {
+        if ($this->option('setup-youtrack')) {
+            return true;
+        }
+
+        return $this->interactive && confirm(
+            label: "Configure the YouTrack project {$project} now?",
+            default: true,
+            hint: 'Stage and Type values, tags, saved searches and the knowledge base (agentio:setup-youtrack, safe to rerun).',
         );
     }
 
     /**
-     * @return array<string, string>|null Knowledge base ids, or null when the setup failed
+     * Make the rest of the run (agentio:setup-youtrack) use the chosen settings.
+     *
+     * @param  array{url: string, token: string, tokenChanged: bool, user: array{login: string, name: string, email: string}}|null  $connection
      */
-    private function setUpYouTrack(Client $client, KnowledgeBase $knowledgeBase, string $project, Placeholders $placeholders, bool $dryRun): ?array
+    private function useSettings(?array $connection, string $project, string $baseBranch, MergePolicy $policy, string $worktrees): void
     {
-        if (! $client->isConfigured()) {
-            $this->components->error('--youtrack needs YOUTRACK_URL and YOUTRACK_TOKEN (config agentio.youtrack.url / agentio.youtrack.token).');
+        config([
+            'agentio.youtrack.project' => $project,
+            'agentio.base_branch' => $baseBranch,
+            'agentio.merge_policy' => $policy->value,
+            'agentio.worktrees_path' => $worktrees,
+        ]);
 
-            return null;
+        if ($connection !== null) {
+            config(['agentio.youtrack.url' => $connection['url'], 'agentio.youtrack.token' => $connection['token']]);
+            $this->laravel->forgetInstance(Client::class);
+            $this->laravel->forgetInstance(McpClient::class);
         }
-
-        $setup = new YouTrackSetup($client, $knowledgeBase, $dryRun);
-
-        try {
-            $kb = $setup->run($project, $placeholders);
-        } catch (YouTrackException $exception) {
-            $this->renderSetup($setup->actions(), $dryRun);
-            $this->components->error('YouTrack setup failed: '.$exception->getMessage());
-
-            return null;
-        }
-
-        $this->renderSetup($setup->actions(), $dryRun);
-
-        return $kb;
     }
 
-    /**
-     * @param  list<SetupAction>  $actions
-     */
-    private function renderSetup(array $actions, bool $dryRun): void
+    private function tools(string $url, string $token): Tools
     {
-        $this->newLine();
-        $this->line('<options=bold>YouTrack project setup</>'.($dryRun ? ' (plan)' : ''));
-        $this->table(['Status', 'Subject', 'Name', 'Detail'], array_map(fn (SetupAction $action): array => [
-            $dryRun && $action->status !== SetupStatus::Exists && $action->status !== SetupStatus::Warning ? 'will '.$action->status->value : $action->status->value,
-            $action->subject,
-            $action->name,
-            $action->detail,
-        ], $actions));
+        return new Tools(new McpClient($url, $token, (int) config('agentio.youtrack.timeout', 30), (int) config('agentio.youtrack.retries', 2)));
+    }
+
+    private function currentBranch(string $basePath): ?string
+    {
+        $process = new Process(['git', 'branch', '--show-current'], $basePath);
+        $process->run();
+        $branch = trim($process->getOutput());
+
+        return $process->isSuccessful() && $branch !== '' ? $branch : null;
+    }
+
+    private function absolutePath(string $basePath, string $path): string
+    {
+        $path = trim($path);
+        $path = (string) preg_replace('#^~(?=/|$)#', (string) getenv('HOME'), $path);
+        $absolute = str_starts_with($path, '/') ? $path : rtrim($basePath, '/').'/'.$path;
+        $parts = [];
+
+        foreach (explode('/', $absolute) as $part) {
+            if ($part === '' || $part === '.') {
+                continue;
+            }
+
+            if ($part === '..') {
+                array_pop($parts);
+            } else {
+                $parts[] = $part;
+            }
+        }
+
+        return '/'.implode('/', $parts);
     }
 
     /**
@@ -394,18 +563,15 @@ final class InstallCommand extends Command
     /**
      * @param  list<FileChange>  $changes
      */
-    private function renderChanges(array $changes, bool $dryRun): void
+    private function renderChanges(array $changes): void
     {
         $this->newLine();
-        $this->line('<options=bold>Files</>'.($dryRun ? ' (plan)' : ''));
+        $this->line('<options=bold>Files</>'.($this->dryRun ? ' (plan)' : ''));
         $this->table(['Status', 'File', 'Note'], array_map(fn (FileChange $change): array => [
-            $dryRun && in_array($change->status, [FileStatus::Created, FileStatus::Updated, FileStatus::Removed], true) ? 'will be '.$change->status->value : $change->status->value,
+            $this->dryRun && in_array($change->status, [FileStatus::Created, FileStatus::Updated, FileStatus::Removed], true) ? 'will be '.$change->status->value : $change->status->value,
             $change->path,
             $change->note,
         ], $changes));
-
-        $counts = array_count_values(array_map(fn (FileChange $change): string => $change->status->value, $changes));
-        $this->line(implode(', ', array_map(fn (string $status, int $count): string => $count.' '.$status, array_keys($counts), $counts)));
 
         foreach ($changes as $change) {
             if ($change->status === FileStatus::Skipped) {
@@ -416,8 +582,9 @@ final class InstallCommand extends Command
 
     /**
      * @param  list<Check>  $checks
+     * @param  array<string, string>  $kb
      */
-    private function renderNextSteps(Placeholders $placeholders, array $checks, bool $connected): void
+    private function renderNextSteps(array $checks, string $baseBranch, array $kb, bool $connected): void
     {
         $steps = [];
 
@@ -427,32 +594,21 @@ final class InstallCommand extends Command
             }
         }
 
-        $configuredBranch = $this->configString('agentio.base_branch');
-
-        if ($configuredBranch !== null && $configuredBranch !== $placeholders->baseBranch) {
-            $steps[] = "Set AGENTIO_BASE_BRANCH={$placeholders->baseBranch} in .env or remove it (the config says {$configuredBranch}).";
+        if (! $connected) {
+            $steps[] = 'Connect YouTrack: run php artisan agentio:install again and enter the URL and the token.';
+        } elseif (array_diff(array_keys(KnowledgeBase::ARTICLES), array_keys($kb)) !== []) {
+            $steps[] = 'Configure the YouTrack project: php artisan agentio:setup-youtrack --dry-run, then without --dry-run.';
         }
 
-        $missingKb = array_diff(array_keys(KnowledgeBase::ARTICLES), array_keys($placeholders->kb));
-
-        if ($missingKb !== []) {
-            $steps[] = 'Configure YouTrack and record the knowledge base ids: php artisan agentio:install --youtrack --dry-run, then without --dry-run ('
-                .count($missingKb).' article id(s) unknown).';
-        }
-
-        $steps[] = $connected
-            ? 'Start `claude` in the project and trust the folder: the youtrack MCP server of .mcp.json takes YOUTRACK_URL and YOUTRACK_TOKEN from .claude/settings.local.json'
-                .' (`claude -p` and `claude mcp get|list` do not read it: export the variables for them).'
-            : 'Connect YouTrack: run php artisan agentio:install again and enter the URL and the token (they go to .env and .claude/settings.local.json for the MCP server).';
-        $steps[] = 'Create a Kanban board in YouTrack with columns by the Stage field (optional).';
-        $steps[] = "Commit the installed files to {$placeholders->baseBranch} (.claude/settings.local.json and .env stay local): epic worktrees take .claude/ and scripts/ from it.";
-        $steps[] = 'See what the loop would start: php artisan agentio:run --dry-run';
+        $steps[] = "Commit .claude/skills/agentio-* and .agentio.json to {$baseBranch}: the epic worktrees take the skills from it (.env stays local).";
+        $steps[] = 'In YouTrack, build the board columns on the Stage field, if you want a board.';
+        $steps[] = 'See what the loop would start: php artisan agentio:run --dry-run, then start it: php artisan agentio:run';
 
         if ((bool) config('agentio.ui.enabled', true)) {
-            $steps[] = 'Open the dashboard: '.url($this->configString('agentio.ui.path') ?? 'agentio');
+            $steps[] = 'Open the dashboard: '.url(Settings::string('agentio.ui.path') ?? 'agentio');
         }
 
-        $steps[] = 'Read docs/AUTONOMOUS_WORKFLOW.md (the full manual).';
+        $steps[] = 'The manual: the «Руководство по автоматизации» article in YouTrack (vendor/obrazmisli/agentio/resources/docs/AUTONOMOUS_WORKFLOW.md).';
 
         $this->newLine();
         $this->line('<options=bold>Next steps</>');
@@ -462,34 +618,10 @@ final class InstallCommand extends Command
         }
     }
 
-    private function mergePolicy(string $basePath): ?MergePolicy
-    {
-        $option = $this->stringOption('merge-policy');
-
-        if ($option !== null) {
-            return MergePolicy::tryFrom($option);
-        }
-
-        $configured = $this->configString('agentio.merge_policy');
-
-        if ($configured !== null && MergePolicy::tryFrom($configured) === null) {
-            return null;
-        }
-
-        return MergePolicy::resolve($configured, $basePath.'/CLAUDE.md');
-    }
-
     private function stringOption(string $name): ?string
     {
         $value = $this->option($name);
 
         return is_string($value) && trim($value) !== '' ? trim($value) : null;
-    }
-
-    private function configString(string $key): ?string
-    {
-        $value = config($key);
-
-        return is_string($value) && $value !== '' ? $value : null;
     }
 }

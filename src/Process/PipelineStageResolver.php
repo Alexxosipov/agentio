@@ -10,7 +10,7 @@ use Obrazmisli\Agentio\YouTrack\IssueType;
 use Obrazmisli\Agentio\YouTrack\State;
 
 /**
- * Derives the pipeline stage of an idea or an epic from its Type / State, its agent comments and its issue tree.
+ * Derives the pipeline stage of an idea or an epic from its Type / Stage, its agent comments and its issue tree.
  *
  * Epic:
  * - Done => Done; Review => Acceptance (a human accepts and merges the epic branch);

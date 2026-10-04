@@ -48,24 +48,24 @@ function fakeYouTrackProjectIssues(array $issues, array $comments = []): void
 
 it('shows the local loop and its live sessions', function () {
     file_put_contents($this->logs.'/loop.pid', (string) getmypid());
-    file_put_contents($this->logs.'/loop.log', "[2026-10-03 10:00:00] agent loop started: mode=loop\n[2026-10-03 10:00:05] XY-2: started /work-epic (pid 1)\n");
+    file_put_contents($this->logs.'/loop.log', "[2026-10-03 10:00:00] agent loop started: mode=loop\n[2026-10-03 10:00:05] XY-2: started /agentio-work-epic (pid 1)\n");
     file_put_contents($this->logs.'/XY-2.pid', (string) getmypid());
-    file_put_contents($this->logs.'/XY-2.log', "===== 2026-10-03 10:00:05 /work-epic XY-2 in /tmp/w =====\n"
-        .json_encode(['type' => 'assistant', 'message' => ['content' => [['type' => 'tool_use', 'id' => 't1', 'name' => 'Bash', 'input' => ['command' => 'php scripts/yt.php context XY-5']]]]])."\n");
+    file_put_contents($this->logs.'/XY-2.log', "===== 2026-10-03 10:00:05 /agentio-work-epic XY-2 in /tmp/w =====\n"
+        .json_encode(['type' => 'assistant', 'message' => ['content' => [['type' => 'tool_use', 'id' => 't1', 'name' => 'Bash', 'input' => ['command' => 'php artisan agentio:yt tree XY-2']]]]])."\n");
     file_put_contents($this->logs.'/XY-9.pid', '999999999');
 
     $this->artisan('agentio:status', ['--local' => true])
         ->expectsOutputToContain('running (pid '.getmypid().')')
-        ->expectsOutputToContain('XY-2: started /work-epic (pid 1)')
-        ->expectsOutputToContain('/work-epic XY-2 (pid '.getmypid())
-        ->expectsOutputToContain('tool_use: php scripts/yt.php context XY-5')
+        ->expectsOutputToContain('XY-2: started /agentio-work-epic (pid 1)')
+        ->expectsOutputToContain('/agentio-work-epic XY-2 (pid '.getmypid())
+        ->expectsOutputToContain('tool_use: php artisan agentio:yt tree XY-2')
         ->doesntExpectOutputToContain('XY-9')
         ->doesntExpectOutputToContain('YouTrack project')
         ->assertSuccessful();
 });
 
 it('prints the summary as JSON', function () {
-    touch(base_path('.agent-stop'));
+    touch($this->logs.'/stop');
     file_put_contents($this->logs.'/plan-XY-1.pid', (string) getmypid());
 
     expect(Artisan::call('agentio:status', ['--json' => true, '--local' => true]))->toBe(0);
@@ -80,13 +80,13 @@ it('prints the summary as JSON', function () {
 
 it('summarises the YouTrack project', function () {
     fakeYouTrackProjectIssues([
-        apiIssue('XY-1', ['Type' => 'Idea', 'State' => 'Backlog'], tags: ['idea']),
-        apiIssue('XY-2', ['Type' => 'Epic', 'State' => 'Ready'], ['parent for' => ['XY-3']]),
-        apiIssue('XY-3', ['Type' => 'Story', 'State' => 'Ready'], ['subtask of' => ['XY-2'], 'parent for' => ['XY-4']]),
-        apiIssue('XY-4', ['Type' => 'Task', 'State' => 'Ready'], ['subtask of' => ['XY-3']]),
-        apiIssue('XY-5', ['Type' => 'Epic', 'State' => 'In Progress'], tags: ['agent-claimed']),
-        apiIssue('XY-6', ['Type' => 'Task', 'State' => 'Blocked'], summary: '[TASK] Waits for a decision'),
-        apiIssue('XY-7', ['Type' => 'Epic', 'State' => 'Review']),
+        apiIssue('XY-1', ['Type' => 'Idea', 'Stage' => 'Backlog'], tags: ['idea']),
+        apiIssue('XY-2', ['Type' => 'Epic', 'Stage' => 'Ready'], ['parent for' => ['XY-3']]),
+        apiIssue('XY-3', ['Type' => 'Story', 'Stage' => 'Ready'], ['subtask of' => ['XY-2'], 'parent for' => ['XY-4']]),
+        apiIssue('XY-4', ['Type' => 'Task', 'Stage' => 'Ready'], ['subtask of' => ['XY-3']]),
+        apiIssue('XY-5', ['Type' => 'Epic', 'Stage' => 'In Progress'], tags: ['agent-claimed']),
+        apiIssue('XY-6', ['Type' => 'Task', 'Stage' => 'Blocked'], summary: '[TASK] Waits for a decision'),
+        apiIssue('XY-7', ['Type' => 'Epic', 'Stage' => 'Review']),
     ], [
         'XY-6' => [
             ['id' => 'c1', 'text' => "[AGENT:START]\nowner: `host:/w#XY-6`", 'created' => 1791010361184],

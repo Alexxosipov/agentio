@@ -7,8 +7,8 @@ namespace Obrazmisli\Agentio\Dashboard;
 use Carbon\CarbonImmutable;
 use Obrazmisli\Agentio\Runtime\LoopState;
 use Obrazmisli\Agentio\Runtime\LoopStatus;
-use Obrazmisli\Agentio\Runtime\MergePolicy;
 use Obrazmisli\Agentio\Runtime\Session;
+use Obrazmisli\Agentio\Settings;
 use ValueError;
 
 /**
@@ -16,7 +16,7 @@ use ValueError;
  */
 final readonly class StatusPresenter
 {
-    public function __construct(private LoopState $loop, private YouTrackSource $source) {}
+    public function __construct(private LoopState $loop, private YouTrackSource $source, private Settings $settings) {}
 
     /**
      * @return array<string, mixed>
@@ -52,17 +52,14 @@ final readonly class StatusPresenter
     }
 
     /**
-     * The configured merge policy, or the one declared in CLAUDE.md (like scripts/agent-loop.sh).
+     * The merge policy of the loop: AGENTIO_MERGE_POLICY, then the one recorded in .agentio.json.
      */
     private function mergePolicy(): string
     {
-        $configured = config('agentio.merge_policy');
-        $configured = is_string($configured) ? $configured : null;
-
         try {
-            return MergePolicy::resolve($configured, base_path('CLAUDE.md'))->value;
+            return $this->settings->mergePolicy()->value;
         } catch (ValueError) {
-            return (string) $configured;
+            return (string) (Settings::string('agentio.merge_policy') ?? $this->settings->manifest()->mergePolicy);
         }
     }
 }

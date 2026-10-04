@@ -46,22 +46,22 @@ it('finds an issue with its description', function () {
 
 it('lists ideas waiting for planning', function () {
     Http::fake(['yt.example.com/api/issues?*' => Http::response([
-        apiIssue('TP-1', ['Type' => 'Idea', 'State' => 'Backlog']),
-        apiIssue('TP-2', ['Type' => 'Task', 'State' => 'Backlog'], tags: ['idea']),
-        apiIssue('TP-3', ['Type' => 'Idea', 'State' => 'Backlog'], tags: ['agent-claimed']),
-        apiIssue('TP-4', ['Type' => 'Task', 'State' => 'Backlog']),
-        apiIssue('TP-5', ['Type' => 'Idea', 'State' => 'Analysis', 'Stage' => 'Backlog']),
+        apiIssue('TP-1', ['Type' => 'Idea', 'Stage' => 'Backlog']),
+        apiIssue('TP-2', ['Type' => 'Task', 'Stage' => 'Backlog'], tags: ['idea']),
+        apiIssue('TP-3', ['Type' => 'Idea', 'Stage' => 'Backlog'], tags: ['agent-claimed']),
+        apiIssue('TP-4', ['Type' => 'Task', 'Stage' => 'Backlog']),
+        apiIssue('TP-5', ['Type' => 'Idea', 'Stage' => 'Analysis', 'State' => 'Backlog']),
     ])]);
 
     expect(array_map(fn (Issue $issue): string => $issue->id, repository()->ideas()))->toBe(['TP-1', 'TP-2']);
 
-    Http::assertSent(fn (Request $request): bool => $request['query'] === 'project: TP State: Backlog');
+    Http::assertSent(fn (Request $request): bool => $request['query'] === 'project: TP Stage: Backlog');
 });
 
 it('lists claimed epics', function () {
     Http::fake(['yt.example.com/api/issues?*' => Http::response([
-        apiIssue('TP-2', ['Type' => 'Epic', 'State' => 'In Progress'], tags: ['agent-claimed']),
-        apiIssue('TP-9', ['Type' => 'Task', 'State' => 'In Progress'], tags: ['agent-claimed']),
+        apiIssue('TP-2', ['Type' => 'Epic', 'Stage' => 'In Progress'], tags: ['agent-claimed']),
+        apiIssue('TP-9', ['Type' => 'Task', 'Stage' => 'In Progress'], tags: ['agent-claimed']),
     ])]);
 
     expect(array_map(fn (Issue $issue): string => $issue->id, repository()->claimedEpics()))->toBe(['TP-2']);
@@ -72,11 +72,11 @@ it('lists claimed epics', function () {
 it('builds the readiness graph and loads issues outside the project on demand', function () {
     Http::fake([
         'yt.example.com/api/issues?*' => Http::response([
-            apiIssue('TP-2', ['Type' => 'Epic', 'State' => 'Ready'], ['parent for' => ['TP-3'], 'depends on' => ['EXT-1']]),
-            apiIssue('TP-3', ['Type' => 'Story', 'State' => 'Ready'], ['subtask of' => ['TP-2'], 'parent for' => ['TP-4']]),
-            apiIssue('TP-4', ['Type' => 'Task', 'State' => 'Ready'], ['subtask of' => ['TP-3'], 'depends on' => ['GONE-1']]),
+            apiIssue('TP-2', ['Type' => 'Epic', 'Stage' => 'Ready'], ['parent for' => ['TP-3'], 'depends on' => ['EXT-1']]),
+            apiIssue('TP-3', ['Type' => 'Story', 'Stage' => 'Ready'], ['subtask of' => ['TP-2'], 'parent for' => ['TP-4']]),
+            apiIssue('TP-4', ['Type' => 'Task', 'Stage' => 'Ready'], ['subtask of' => ['TP-3'], 'depends on' => ['GONE-1']]),
         ]),
-        'yt.example.com/api/issues/EXT-1?*' => Http::response(apiIssue('EXT-1', ['Type' => 'Task', 'State' => 'Done'])),
+        'yt.example.com/api/issues/EXT-1?*' => Http::response(apiIssue('EXT-1', ['Type' => 'Task', 'Stage' => 'Done'])),
         'yt.example.com/api/issues/GONE-1?*' => Http::response(['error_description' => 'not found'], 404),
     ]);
 
@@ -93,7 +93,7 @@ it('builds the readiness graph and loads issues outside the project on demand', 
 it('does not hide YouTrack failures while loading the graph', function () {
     Http::fake([
         'yt.example.com/api/issues?*' => Http::response([
-            apiIssue('TP-4', ['Type' => 'Task', 'State' => 'Ready'], ['depends on' => ['EXT-1']]),
+            apiIssue('TP-4', ['Type' => 'Task', 'Stage' => 'Ready'], ['depends on' => ['EXT-1']]),
         ]),
         'yt.example.com/api/issues/EXT-1?*' => Http::response('boom', 500),
     ]);

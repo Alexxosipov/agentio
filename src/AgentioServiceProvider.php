@@ -9,17 +9,24 @@ use Illuminate\Contracts\Foundation\Application;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\ServiceProvider;
+use Obrazmisli\Agentio\Console\Commands\CommitCommand;
+use Obrazmisli\Agentio\Console\Commands\GuardCommand;
 use Obrazmisli\Agentio\Console\Commands\InstallCommand;
+use Obrazmisli\Agentio\Console\Commands\LogCommand;
 use Obrazmisli\Agentio\Console\Commands\RunCommand;
+use Obrazmisli\Agentio\Console\Commands\SetupYouTrackCommand;
 use Obrazmisli\Agentio\Console\Commands\StatusCommand;
+use Obrazmisli\Agentio\Console\Commands\TestCommand;
+use Obrazmisli\Agentio\Console\Commands\WorktreeCommand;
+use Obrazmisli\Agentio\Console\Commands\YouTrackCommand;
 use Obrazmisli\Agentio\Dashboard\YouTrackSource;
 use Obrazmisli\Agentio\Http\Middleware\Authorize;
-use Obrazmisli\Agentio\Install\Manifest;
-use Obrazmisli\Agentio\Process\StageMap;
 use Obrazmisli\Agentio\Runtime\LoopState;
 use Obrazmisli\Agentio\Runtime\SystemTimezone;
 use Obrazmisli\Agentio\YouTrack\Client;
 use Obrazmisli\Agentio\YouTrack\IssueRepository;
+use Obrazmisli\Agentio\YouTrack\Mcp\McpClient;
+use Obrazmisli\Agentio\YouTrack\Mcp\Tools;
 
 final class AgentioServiceProvider extends ServiceProvider
 {
@@ -30,6 +37,8 @@ final class AgentioServiceProvider extends ServiceProvider
     {
         $this->mergeConfigFrom(__DIR__.'/../config/agentio.php', 'agentio');
 
+        $this->app->bind(Settings::class, fn (Application $app): Settings => new Settings($app->basePath()));
+
         $this->app->singleton(Client::class, fn (Application $app): Client => new Client(
             url: $this->configString('agentio.youtrack.url'),
             token: $this->configString('agentio.youtrack.token'),
@@ -37,22 +46,27 @@ final class AgentioServiceProvider extends ServiceProvider
             retries: (int) config('agentio.youtrack.retries', 2),
         ));
 
+        $this->app->singleton(McpClient::class, fn (Application $app): McpClient => new McpClient(
+            url: $this->configString('agentio.youtrack.url'),
+            token: $this->configString('agentio.youtrack.token'),
+            timeout: (int) config('agentio.youtrack.timeout', 30),
+            retries: (int) config('agentio.youtrack.retries', 2),
+        ));
+
+        $this->app->bind(Tools::class, fn (Application $app): Tools => new Tools($app->make(McpClient::class)));
+
         $this->app->singleton(IssueRepository::class, fn (Application $app): IssueRepository => new IssueRepository(
             $app->make(Client::class),
-            $this->configString('agentio.youtrack.project') ?? Manifest::load($app->basePath())->project ?? 'TP',
+            $app->make(Settings::class)->project(),
         ));
 
-        $this->app->singleton(LoopState::class, fn (Application $app): LoopState => new LoopState(
-            $this->configString('agentio.logs_path') ?? storage_path('logs/agents'),
-            base_path('.agent-stop'),
-            $this->configString('agentio.timezone') ?? SystemTimezone::detect(),
-        ));
+        $this->app->singleton(LoopState::class, function (Application $app): LoopState {
+            $logs = $this->configString('agentio.logs_path') ?? storage_path('logs/agents');
+
+            return new LoopState($logs, rtrim($logs, '/').'/'.LoopState::STOP_FILE, $this->configString('agentio.timezone') ?? SystemTimezone::detect());
+        });
 
         $this->app->scoped(YouTrackSource::class);
-
-        $this->app->singleton(StageMap::class, fn (Application $app): StageMap => new StageMap(
-            array_filter((array) config('agentio.stage_map', []), is_string(...)),
-        ));
     }
 
     /**
@@ -71,8 +85,15 @@ final class AgentioServiceProvider extends ServiceProvider
 
         $this->commands([
             InstallCommand::class,
+            SetupYouTrackCommand::class,
             RunCommand::class,
             StatusCommand::class,
+            YouTrackCommand::class,
+            WorktreeCommand::class,
+            CommitCommand::class,
+            TestCommand::class,
+            LogCommand::class,
+            GuardCommand::class,
         ]);
 
         $this->publishes([

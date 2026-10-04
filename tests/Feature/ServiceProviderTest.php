@@ -2,12 +2,14 @@
 
 declare(strict_types=1);
 
+use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\ServiceProvider;
 use Obrazmisli\Agentio\AgentioServiceProvider;
-use Obrazmisli\Agentio\Process\StageMap;
 use Obrazmisli\Agentio\Runtime\LoopState;
 use Obrazmisli\Agentio\YouTrack\Client;
 use Obrazmisli\Agentio\YouTrack\IssueRepository;
+use Obrazmisli\Agentio\YouTrack\Mcp\McpClient;
+use Obrazmisli\Agentio\YouTrack\Mcp\Tools;
 
 it('merges the package config with the documented defaults', function () {
     expect(config('agentio.youtrack.project'))->toBeNull()
@@ -16,10 +18,12 @@ it('merges the package config with the documented defaults', function () {
         ->and(config('agentio.max_parallel'))->toBe(2)
         ->and(config('agentio.max_parallel_tasks'))->toBe(2)
         ->and(config('agentio.interval'))->toBe(300)
-        ->and(config('agentio.worktrees_path'))->toBe(base_path('../worktrees'))
+        ->and(config('agentio.worktrees_path'))->toBeNull()
+        ->and(config('agentio.worktree_setup'))->toBeNull()
         ->and(config('agentio.claude_binary'))->toBe('claude')
+        ->and(config('agentio.claude_model'))->toBeNull()
         ->and(config('agentio.logs_path'))->toBe(storage_path('logs/agents'))
-        ->and(config('agentio.stage_map.In Progress'))->toBe('Develop')
+        ->and(config('agentio.stage_map'))->toBeNull()
         ->and(config('agentio.ui.enabled'))->toBeTrue()
         ->and(config('agentio.ui.path'))->toBe('agentio')
         ->and(config('agentio.ui.middleware'))->toBe(['web'])
@@ -37,6 +41,8 @@ it('builds the YouTrack client and repository from the config', function () {
 
     expect(app(Client::class)->isConfigured())->toBeTrue()
         ->and(app(Client::class)->baseUrl())->toBe('https://example.youtrack.cloud')
+        ->and(app(McpClient::class)->endpoint())->toBe('https://example.youtrack.cloud/mcp')
+        ->and(app(Tools::class)->client())->toBe(app(McpClient::class))
         ->and($repository->project())->toBe('DV')
         ->and($repository->client())->toBe(app(Client::class));
 });
@@ -58,22 +64,24 @@ it('takes the project from .agentio.json, then TP, when the config has none', fu
 });
 
 it('resolves an unconfigured client without failing', function () {
-    expect(app(Client::class)->isConfigured())->toBeFalse();
+    expect(app(Client::class)->isConfigured())->toBeFalse()
+        ->and(app(McpClient::class)->isConfigured())->toBeFalse();
 });
 
-it('builds the loop state from the logs path and the project root', function () {
-    config(['agentio.logs_path' => '/var/agents']);
+it('builds the loop state from the logs path, with the stop flag next to the logs', function () {
+    config(['agentio.logs_path' => '/var/agents/']);
 
     $state = app(LoopState::class);
 
-    expect($state->logsPath())->toBe('/var/agents')
-        ->and($state->stopFile())->toBe(base_path('.agent-stop'));
+    expect($state->logsPath())->toBe('/var/agents/')
+        ->and($state->stopFile())->toBe('/var/agents/stop');
 });
 
-it('builds the stage map from the config', function () {
-    config(['agentio.stage_map' => ['Review' => 'Test']]);
+it('registers the agentio commands', function () {
+    $commands = array_keys(Artisan::all());
 
-    expect(app(StageMap::class)->all())->toBe(['Review' => 'Test']);
+    expect($commands)->toContain('agentio:install', 'agentio:setup-youtrack', 'agentio:run', 'agentio:status', 'agentio:yt', 'agentio:worktree', 'agentio:commit', 'agentio:test', 'agentio:log', 'agentio:guard')
+        ->and(Artisan::all()['agentio:guard']->isHidden())->toBeTrue();
 });
 
 it('publishes the config file under the agentio-config and agentio tags', function () {

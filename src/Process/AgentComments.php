@@ -65,7 +65,7 @@ final readonly class AgentComments implements Countable, IteratorAggregate
 
     /**
      * The [AGENT:START] comment of the active claim: the earliest START with an owner
-     * posted after the last DONE / BLOCKED / RELEASE (the same rule as scripts/yt.php).
+     * posted after the last DONE / BLOCKED / RELEASE (the rule of agentio:yt claim).
      */
     public function activeClaim(): ?AgentComment
     {
