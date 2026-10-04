@@ -61,7 +61,7 @@ composer require obrazmisli/agentio:@dev --dev
 | `dev` (`AGENTIO_BASE_BRANCH`) | The develop server; epic branches start from it | Humans and `agentio:accept`: merge accepted epics into it |
 | `<EPIC-ID>`, e.g. `TP-12` | One epic: its tasks are committed here (`TP-14: …`), in the worktree `<worktrees>/TP-12` | The agents |
 
-Agents never push to, switch to or merge into `dev` and `main` (the session permissions and the `agentio:guard` hook refuse it); they may push and delete only branches named after issues. Epics started by an earlier agentio version keep their `epic/<ID>-<slug>` branch until they are accepted.
+Agents never push to, switch to or merge into `dev` and `main` (the session permissions and the `agentio-guard` hook refuse it); they may push and delete only branches named after issues. Epics started by an earlier agentio version keep their `epic/<ID>-<slug>` branch until they are accepted.
 
 ## What agentio adds to the project
 
@@ -77,7 +77,8 @@ Nothing else: no scripts, hooks, subagents, `.claude/settings.json` or `.mcp.jso
 | Package path | Used by |
 |---|---|
 | `scripts/agent-loop.sh`, `epic-worktree.sh`, `agent-commit.sh`, `run-tests.sh` | `agentio:run`, `agentio:worktree`, `agentio:commit`, `agentio:test` (the scripts refuse to run on their own) |
-| `resources/claude/settings.json` | Permission rules and the guard hook of the agents' headless sessions (passed with `--settings`) |
+| `resources/claude/settings.json`, `planning.json` | Permission rules of the agents' epic and planning sessions (passed with `--settings`, with the guard hook) |
+| `bin/agentio-guard` | The PreToolUse hook of the agents' Bash commands |
 | `resources/claude/mcp/*.json` | MCP servers of the headless sessions (`youtrack`, `laravel-boost` when the project uses Boost) |
 | `resources/docs/AUTONOMOUS_WORKFLOW.md` | The manual (copied into the YouTrack knowledge base by `agentio:setup-youtrack`) |
 
@@ -315,10 +316,10 @@ The full manual for the people running the cycle is `resources/docs/AUTONOMOUS_W
 
 ## Security
 
-- The agents work with YouTrack only through the MCP server and never see the token: it lives in `.env` (git-ignored; `agentio:install` checks that) and in Claude Code's own MCP configuration (`~/.claude.json`), is passed to the loop in its environment and to the MCP config of the headless sessions by reference (`${YOUTRACK_TOKEN}`), and is never printed or written into committed files, logs or comments. The worktree `.env` (made from `.env.example`) has no token.
-- Headless agents run with `--permission-mode dontAsk`: only the commands allowed by the session settings of the package run; `git push` to the base branch, force pushes, history rewrites, `composer require` and similar are denied, `Read(./.env)` is denied, and so are edits of `.agentio.json`, the agentio skills and `vendor/`.
-- `php artisan agentio:guard` is the PreToolUse hook of every Bash command of the agents, a second line of defence: protected branches, destructive commands outside the project, access to secrets and to the token (`.env`, `YOUTRACK_TOKEN`, `config:show agentio`, `printenv`), and the commands only humans and the loop run (`agentio:install`, `agentio:setup-youtrack`, `agentio:worktree`, `agentio:run` without `--dry-run`, `tinker`).
-- Agents commit only the files of their task (`agentio:commit`) and never merge into the base branch; humans accept epics (unless you choose `auto-merge`).
+- The agents work with YouTrack only through the MCP server and are not given the token: it lives in `.env` (git-ignored; `agentio:install` checks that) and in Claude Code's own MCP configuration (`~/.claude.json`), is passed to the loop in its environment and to the MCP config of the headless sessions by reference (`${YOUTRACK_TOKEN}`), and is never printed or written into committed files, logs or comments. The worktree `.env` (made from `.env.example`) has no token. The agents run as your OS user, though, with the token in their environment: the rules below refuse the usual ways to read it, but for a hard boundary run the loop in a sandbox or under a separate user, and use a token that can reach only this project.
+- Headless agents run with `--permission-mode dontAsk`: only the commands allowed by the session settings run. Epic sessions get the rules of the package plus the project's own; `git push` to the development and the production branch, force pushes, history rewrites, `composer require` and similar are denied, `Read(./.env)` is denied, and so are edits of `.agentio.json`, the agentio skills, `vendor/`, `php -i` and the `tinker` and `get-config` tools of Laravel Boost. Planning sessions run in your main checkout and are read-only (`resources/claude/planning.json`): they read the code and write YouTrack, nothing else.
+- `bin/agentio-guard` is the PreToolUse hook of every Bash command of the agents, a second line of defence. It runs from the package of the main checkout without booting the application of the worktree (code the agents edit), takes the protected branches and the extra directories from the loop (never from files of the worktree), and refuses the command when it fails. It splits the command line like a shell (quotes, `$(…)`, pipes, `cd`) and refuses: pushes to protected branches and force pushes, branch moves other than the branches of issues, merges into protected branches, history rewrites, git aliases and `git -c`/`config` writes, `git add -A`/`commit -a`/`--amend`, writes (`rm`, `mv`, `cp`, `sed -i`, `tee`, `>`) outside the project or to the agentio settings, skills and `vendor/`, `find -exec`, access to secrets and to the token (`.env`, `YOUTRACK_TOKEN`, `/proc/*/environ`, `php -i`, `config:show agentio`, `printenv`), and the commands only humans and the loop run (`agentio:install`, `agentio:setup-youtrack`, `agentio:worktree`, `agentio:accept`, `agentio:run` other than `--dry-run`, `tinker`), also behind artisan options such as `-n`.
+- Agents commit only the files of their task (`agentio:commit`) and never merge into the development branch; humans accept epics (unless you choose `auto-merge`) and release to production.
 - Keep the dashboard behind the `viewAgentio` gate; it shows issue data and agent logs.
 
 ## Testing

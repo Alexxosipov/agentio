@@ -12,7 +12,8 @@
 #
 # Env (set by agentio:run): AGENTIO_ROOT (the project), YOUTRACK_URL, YOUTRACK_TOKEN, AGENTIO_PROJECT, BASE_BRANCH,
 #   WORKTREES_DIR, MERGE_POLICY, MAX_PARALLEL, MAX_PARALLEL_TASKS, AGENT_LOOP_INTERVAL, CLAUDE_BIN, CLAUDE_MODEL,
-#   AGENT_LOG_DIR, AGENTIO_STOP_FILE, AGENTIO_SESSION_SETTINGS (settings of headless sessions, JSON), AGENTIO_MCP_CONFIG
+#   AGENT_LOG_DIR, AGENTIO_STOP_FILE, AGENTIO_SESSION_SETTINGS and AGENTIO_PLANNING_SETTINGS (settings of the epic
+#   and of the planning sessions, JSON), AGENTIO_MCP_CONFIG
 #   (MCP configs of headless sessions, space separated), MAX_RESTARTS=3 (crashed epic sessions resumed before Blocked).
 # Files in AGENT_LOG_DIR: loop.log, loop.pid (this loop), <EPIC>.pid/.log (epic sessions), plan-<IDEA>.pid/.log.
 set -uo pipefail
@@ -97,13 +98,13 @@ running_epics() {
 running_count() { running_epics | grep -c . ; }
 
 claude_headless() {
-    local dir="$1" logfile="$2" prompt="$3"
+    local dir="$1" logfile="$2" prompt="$3" settings="$4"
     (
         cd "$dir" || exit 1
         exec setsid "$CLAUDE_BIN" -p "$prompt" \
             --permission-mode dontAsk \
             --strict-mcp-config --mcp-config "${MCP_CONFIGS[@]}" \
-            --settings "$AGENTIO_SESSION_SETTINGS" \
+            --settings "$settings" \
             --output-format stream-json --verbose \
             ${CLAUDE_MODEL:+--model "$CLAUDE_MODEL"} \
             </dev/null >>"$logfile" 2>&1
@@ -134,7 +135,7 @@ launch_epic() {
         return 1
     fi
     echo "===== $(date '+%F %T') /agentio-work-epic $epic in $dir =====" >>"$LOG_DIR/$epic.log"
-    pid="$(claude_headless "$dir" "$LOG_DIR/$epic.log" "/agentio-work-epic $epic")"
+    pid="$(claude_headless "$dir" "$LOG_DIR/$epic.log" "/agentio-work-epic $epic" "$AGENTIO_SESSION_SETTINGS")"
     echo "$pid" >"$LOG_DIR/$epic.pid"
     log "$epic: started /agentio-work-epic (pid $pid, worktree $dir, log $LOG_DIR/$epic.log)"
 }
@@ -229,7 +230,7 @@ plan_ideas() {
         logfile="$LOG_DIR/plan-$idea.log"
         echo "===== $(date '+%F %T') /agentio-plan $idea =====" >>"$logfile"
         log "$idea: planning (log $logfile)"
-        pid="$(claude_headless "$ROOT" "$logfile" "/agentio-plan $idea")"
+        pid="$(claude_headless "$ROOT" "$logfile" "/agentio-plan $idea" "$AGENTIO_PLANNING_SETTINGS")"
         echo "$pid" >"$LOG_DIR/plan-$idea.pid"
         while alive "$pid"; do sleep 5; done
         rm -f "$LOG_DIR/plan-$idea.pid"
@@ -273,8 +274,8 @@ case "$MODE" in
     kill) kill_sessions; exit 0 ;;
 esac
 
-if (( ${#MCP_CONFIGS[@]} == 0 )) || [[ -z "${AGENTIO_SESSION_SETTINGS:-}" ]]; then
-    echo "AGENTIO_MCP_CONFIG or AGENTIO_SESSION_SETTINGS is not set: start the loop with php artisan agentio:run" >&2
+if (( ${#MCP_CONFIGS[@]} == 0 )) || [[ -z "${AGENTIO_SESSION_SETTINGS:-}" || -z "${AGENTIO_PLANNING_SETTINGS:-}" ]]; then
+    echo "AGENTIO_MCP_CONFIG or the session settings are not set: start the loop with php artisan agentio:run" >&2
     exit 1
 fi
 

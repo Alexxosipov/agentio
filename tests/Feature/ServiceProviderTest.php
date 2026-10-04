@@ -80,8 +80,8 @@ it('builds the loop state from the logs path, with the stop flag next to the log
 it('registers the agentio commands', function () {
     $commands = array_keys(Artisan::all());
 
-    expect($commands)->toContain('agentio:install', 'agentio:setup-youtrack', 'agentio:run', 'agentio:status', 'agentio:yt', 'agentio:worktree', 'agentio:commit', 'agentio:test', 'agentio:log', 'agentio:guard')
-        ->and(Artisan::all()['agentio:guard']->isHidden())->toBeTrue();
+    expect($commands)->toContain('agentio:install', 'agentio:setup-youtrack', 'agentio:run', 'agentio:status', 'agentio:yt', 'agentio:worktree', 'agentio:commit', 'agentio:test', 'agentio:log', 'agentio:accept')
+        ->not->toContain('agentio:guard');
 });
 
 it('publishes the config file under the agentio-config and agentio tags', function () {

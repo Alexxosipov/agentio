@@ -88,6 +88,16 @@ it('requests a stop without starting the loop', function () {
         ->and($project.'/artisan-calls.log')->not->toBeFile();
 });
 
+it('refuses --dry-run together with --stop or --kill', function (string $option) {
+    $project = projectForLoop();
+
+    $this->artisan('agentio:run', ['--dry-run' => true, $option => true])
+        ->expectsOutputToContain('--dry-run changes nothing')
+        ->assertExitCode(2);
+
+    expect($project.'/storage/logs/agents/stop')->not->toBeFile();
+})->with(['--stop', '--kill']);
+
 it('warns about a leftover stop flag and removes it with --fresh', function () {
     $project = projectForLoop();
     mkdir($project.'/storage/logs/agents', 0777, true);

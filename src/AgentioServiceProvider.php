@@ -11,7 +11,6 @@ use Illuminate\Support\Facades\Route;
 use Illuminate\Support\ServiceProvider;
 use Obrazmisli\Agentio\Console\Commands\AcceptCommand;
 use Obrazmisli\Agentio\Console\Commands\CommitCommand;
-use Obrazmisli\Agentio\Console\Commands\GuardCommand;
 use Obrazmisli\Agentio\Console\Commands\InstallCommand;
 use Obrazmisli\Agentio\Console\Commands\LogCommand;
 use Obrazmisli\Agentio\Console\Commands\RunCommand;
@@ -95,7 +94,6 @@ final class AgentioServiceProvider extends ServiceProvider
             CommitCommand::class,
             TestCommand::class,
             LogCommand::class,
-            GuardCommand::class,
         ]);
 
         $this->publishes([

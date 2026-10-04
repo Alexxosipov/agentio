@@ -7,6 +7,7 @@ use Obrazmisli\Agentio\Console\Commands\RunCommand;
 use Obrazmisli\Agentio\Install\Preconditions;
 use Obrazmisli\Agentio\Runtime\LoopState;
 use Obrazmisli\Agentio\Runtime\MergePolicy;
+use Obrazmisli\Agentio\Runtime\SessionSettings;
 use Obrazmisli\Agentio\Settings;
 use Symfony\Component\Process\Process;
 
@@ -63,7 +64,7 @@ it('keeps loop.pid while running and plan-<ID>.pid while planning', function () 
         ->and(file_get_contents($project.'/artisan-calls.log'))->toContain('agentio:yt claimed-epics --json', 'agentio:yt ready-epics --json', 'agentio:yt ideas --json');
 });
 
-it('gives headless sessions the session settings of the package, the project rules and the MCP configs', function () {
+it('gives planning sessions read-only settings and the MCP configs', function () {
     $project = projectForLoop(['XY-1']);
     file_put_contents($project.'/.claude/settings.json', json_encode(['permissions' => ['allow' => ['Bash(make lint)'], 'deny' => ['Read(./secrets/**)']]]));
 
@@ -75,11 +76,25 @@ it('gives headless sessions the session settings of the package, the project rul
 
     expect($process->getExitCode())->toBe(0, $process->getErrorOutput())
         ->and($arguments)->toContain('--permission-mode dontAsk --strict-mcp-config --mcp-config '.$package.'/resources/claude/mcp/youtrack.json --settings')
-        ->and($settings['permissions']['allow'])->toContain('Bash(php artisan agentio:yt *)', 'Bash(php artisan agentio:commit *)', 'Bash(php artisan agentio:test *)', 'mcp__youtrack__*', 'Skill', 'Edit(./**)', 'Bash(make lint)', 'Bash(git push -u origin XY-*)')
+        ->and($settings['permissions']['allow'])->toContain('Bash(php artisan agentio:yt *)', 'mcp__youtrack__*', 'Skill', 'Read')
+        // Planning runs in the developer's main checkout: it changes no file and runs no project command.
+        ->and($settings['permissions']['allow'])->not->toContain('Edit(./**)', 'Bash(php artisan *)', 'Bash(git commit *)', 'Bash(make lint)')
+        ->and($settings['permissions']['deny'])->toContain('Edit', 'Write', 'Bash(git commit *)', 'Read(./.env)', 'Read(./secrets/**)', 'Bash(git push origin develop*)')
+        ->and($settings['hooks']['PreToolUse'][0]['hooks'][0]['command'])->toBe("php '{$package}/bin/agentio-guard' '--protected=develop,main,master'");
+});
+
+it('gives epic sessions the session settings of the package and the project rules', function () {
+    $project = projectForLoop();
+    file_put_contents($project.'/.claude/settings.json', json_encode(['permissions' => ['allow' => ['Bash(make lint)'], 'deny' => ['Read(./secrets/**)'], 'additionalDirectories' => ['/srv/shared/', '/']]]));
+    $package = dirname(__DIR__, 3);
+
+    $settings = (new SessionSettings(app(Settings::class)))->epic();
+
+    expect($settings['permissions']['allow'])->toContain('Bash(php artisan agentio:yt *)', 'Bash(php artisan agentio:commit *)', 'Bash(php artisan agentio:test *)', 'mcp__youtrack__*', 'Skill', 'Edit(./**)', 'Bash(make lint)', 'Bash(git push -u origin XY-*)')
         // "/**" is relative to the main checkout in a git worktree: it would not let the agents edit the epic worktree.
-        ->and($settings['permissions']['allow'])->not->toContain('Edit(/**)')
-        ->and($settings['permissions']['deny'])->toContain('Bash(git push --force*)', 'Bash(git push origin develop*)', 'Bash(git checkout develop*)', 'Bash(git push origin main*)', 'Bash(php artisan agentio:accept*)', 'Read(./.env)', 'Read(**/.env)', 'Edit(.claude/skills/agentio-*/**)', 'Read(./secrets/**)')
-        ->and($settings['hooks']['PreToolUse'][0]['hooks'][0]['command'])->toBe('php "$CLAUDE_PROJECT_DIR"/artisan agentio:guard');
+        ->and($settings['permissions']['allow'])->not->toContain('Edit(/**)', 'Bash(php -i)')
+        ->and($settings['permissions']['deny'])->toContain('Bash(git push --force*)', 'Bash(git push origin develop*)', 'Bash(git checkout develop*)', 'Bash(git push origin main*)', 'Bash(php artisan agentio:accept*)', 'Read(./.env)', 'Read(**/.env)', 'Edit(.claude/skills/agentio-*/**)', 'Read(./secrets/**)', 'mcp__laravel-boost__tinker', 'mcp__laravel-boost__get-config')
+        ->and($settings['hooks']['PreToolUse'][0]['hooks'][0]['command'])->toBe("php '{$package}/bin/agentio-guard' '--protected=develop,main,master' '--root=/srv/shared'");
 });
 
 it('refuses to start a second loop in the same checkout', function () {

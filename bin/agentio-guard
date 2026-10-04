@@ -1,0 +1,23 @@
+#!/usr/bin/env php
+<?php
+
+// The PreToolUse hook of the Bash tool in the agents' headless sessions (see GuardHook). Standalone on purpose:
+// it never boots the application of the worktree the agent works in, and any error refuses the command.
+
+declare(strict_types=1);
+
+foreach ([__DIR__.'/../vendor/autoload.php', __DIR__.'/../../../autoload.php'] as $autoload) {
+    if (is_file($autoload)) {
+        require $autoload;
+
+        break;
+    }
+}
+
+if (! class_exists(Obrazmisli\Agentio\Security\GuardHook::class)) {
+    fwrite(STDERR, "agentio guard: the autoloader of obrazmisli/agentio was not found, the command is refused\n");
+
+    exit(2);
+}
+
+exit(Obrazmisli\Agentio\Security\GuardHook::main(array_slice($argv, 1), STDIN, STDOUT, STDERR));

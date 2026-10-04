@@ -126,7 +126,8 @@ EPIC берётся, когда он в `Ready`, его зависимости-�
 | Путь | Назначение |
 |---|---|
 | `vendor/obrazmisli/agentio/scripts` | `agent-loop.sh` (цикл), `epic-worktree.sh` (worktree эпика), `agent-commit.sh` (коммит перечисленных файлов под блокировкой), `run-tests.sh` (тесты с выводом в файл). Запускаются только через команды `php artisan agentio:*`: без окружения, которое задаёт команда, скрипты отказываются работать |
-| `resources/claude/settings.json` | Настройки headless-сессий: белый и чёрный списки, хук `agentio:guard` |
+| `resources/claude/settings.json`, `planning.json` | Настройки headless-сессий эпиков и планирования: белый и чёрный списки |
+| `bin/agentio-guard` | Хук PreToolUse для Bash в headless-сессиях |
 | `resources/claude/mcp/youtrack.json`, `laravel-boost.json` | MCP-серверы headless-сессий (Laravel Boost — если он есть в проекте) |
 | `resources/docs/AUTONOMOUS_WORKFLOW.md` | Это руководство |
 
@@ -144,7 +145,6 @@ EPIC берётся, когда он в `Ready`, его зависимости-�
 | `php artisan agentio:test [аргументы]`, `--full` | Тесты с выводом в файл и уборкой процессов браузерных тестов |
 | `php artisan agentio:commit <TASK> "<сообщение>" <файлы…>` | Коммит только перечисленных файлов под блокировкой (для параллельных субагентов) |
 | `php artisan agentio:log <ID\|plan-ID\|путь> [--lines=N] [--follow]` | Лог сессии агента в человекочитаемом виде |
-| `php artisan agentio:guard` | Скрытая: хук PreToolUse для Bash в headless-сессиях |
 | `/agentio` | Веб-страница наблюдения за процессом |
 
 **В YouTrack:** проект `{{project}}` с полями Stage и Type, метками `idea` и `agent-claimed`, сохранёнными поисками «{{project}}: …» и базой знаний (1.7). **В Claude Code** (вне репозитория): MCP-сервер `youtrack` с токеном в `~/.claude.json` (2.4).
@@ -624,7 +624,7 @@ git merge --no-ff {{base_branch}} -m "Release $(date +%F)"
 git tag v<версия> && git push origin {{production_branch}} --tags
 ```
 
-Агенты не пушат, не переключаются и не сливают в обе ветки (настройки сессий и хук `agentio:guard`). Срочное исправление production оформите обычной задачей: после приёмки в `{{base_branch}}` выпустите его тем же способом.
+Агенты не пушат, не переключаются и не сливают в обе ветки (настройки сессий и хук `agentio-guard`). Срочное исправление production оформите обычной задачей: после приёмки в `{{base_branch}}` выпустите его тем же способом.
 
 ---
 
@@ -652,7 +652,7 @@ git tag v<версия> && git push origin {{production_branch}} --tags
 | Тесты «висят» после прохождения | Сиротский процесс `playwright run-server` от браузерных тестов держит stdout, и `<тесты> \| tail` ждёт вечно. Запускайте тесты **только** через `php artisan agentio:test`: он пишет вывод в файл и убивает такие процессы своего каталога. Вручную: `pkill -f '^node .*playwright run-server'`. |
 | Строгий гейт покрытия падает на строках с `assert()` | Системный php.ini с `zend.assertions=-1`. Используйте `php artisan agentio:test --full` (включает assertions сам) или выставьте `zend.assertions = 1`. |
 | В логе агента `⚠️` с отказом в разрешении на команду с `$(...)`, обратными кавычками или `$VAR` | Headless-агенты работают в `--permission-mode dontAsk`: команды с подстановками не совпадают с белым списком и отклоняются без вопроса. Поэтому `claim` сам берёт ветку и worktree из git, а скиллы требуют писать значения буквально. Если агенту нужна новая безопасная команда, добавьте правило в `.claude/settings.json` проекта → `permissions.allow` и закоммитьте в `{{base_branch}}`: цикл объединяет эти правила с настройками пакета. |
-| Отказ `agentio guard: …` | Хук `agentio:guard` отклонил команду агента. Так задумано (раздел 8): агент должен выбрать безопасный путь или написать `[AGENT:BLOCKED]`. |
+| Отказ `agentio guard: …` | Хук `agentio-guard` отклонил команду агента. Так задумано (раздел 8): агент должен выбрать безопасный путь или написать `[AGENT:BLOCKED]`. |
 | `claim` вернул `LOST: {{project}}-… is claimed by …` (код 3) | Задачу держит другой владелец, и агент её не трогает. Это нормально при гонке двух агентов или машин. Если владелец «мёртв» (старый путь, другая машина), снимите захват: `php artisan agentio:yt release {{project}}-2 --state=Ready --comment="[AGENT:RELEASE] перезапуск на другой машине"`. |
 | Эпик в `In Progress`, но никто не работает | Сессия оборвалась. Следующий проход возобновит её, если worktree на этой машине и owner совпадает (`php artisan agentio:yt claimed-epics`). Иначе — `release`, как в строке выше. |
 | Две сессии одного эпика / повторный запуск | Цикл не запускает эпик, у которого жив процесс из `<EPIC>.pid`. Не запускайте два цикла одновременно и не стартуйте `/agentio-work-epic` вручную для эпика, с которым работает цикл. Проверка: `pgrep -fa agent-loop.sh`, `php artisan agentio:yt claimed-epics`. Повторный `/agentio-plan` по идее и повторный `/agentio-work-epic` безопасны: они продолжают с места остановки. |
@@ -670,25 +670,23 @@ git tag v<версия> && git push origin {{production_branch}} --tags
 
 ## 8. Безопасность
 
-- **Режим разрешений.** Headless-агенты запускаются с `--permission-mode dontAsk`. Им разрешено только то, что перечислено в `permissions.allow` настроек пакета (`resources/claude/settings.json`: чтение и правка файлов проекта, `mcp__youtrack__*`, `Skill`, `php artisan agentio:yt|test|commit|log`, git без разрушительных операций, тесты и линтеры) и в `.claude/settings.json` проекта; остальное отклоняется без вопроса. Цикл передаёт эти правила через `--settings`: в каталоге, которому не подтверждено доверие (а новый worktree эпика всегда такой), Claude Code игнорирует `allow` из `.claude/settings.json` проекта. Список `deny`:
-  - `git push --force`, push в `{{base_branch}}`/`{{production_branch}}`/`main`/`master`/`HEAD`;
-  - `reset --hard`, `clean`, `rebase`, `checkout {{base_branch}}`, `worktree remove`;
-  - `composer require/remove/update`, `bun add/remove/update`, `npm install <пакет>/uninstall/update`, `sudo`;
-  - чтение `.env` (в нём токен YouTrack; MCP-сервер и `agentio:yt` подключаются сами), `.env.production`/`.env.staging`, `~/.claude.json` (там MCP-сервер с токеном), `~/.ssh`, `~/.config/gh`.
-- **Самозащита.** Агентам запрещено править `.claude/settings.json`, `.agentio.json`, скиллы `.claude/skills/agentio-*` и `vendor/` — то есть свои настройки, скрипты и хук.
-- **Хук `php artisan agentio:guard`** (PreToolUse для Bash, подключён в настройках пакета) — второй рубеж. Он запрещает:
-  - push в защищённые ветки (`{{base_branch}}`, `{{production_branch}}`, `main`, `master`), force/mirror push, push и удаление веток, кроме веток задач (`{{project}}-N`);
-  - `reset --hard`, `clean`, `stash`, переписывание истории, `checkout`/`restore` всего дерева, `worktree remove/prune`;
-  - `rm`/`mv`/`chmod`/`find -delete` вне каталога проекта (и разрешённых `additionalDirectories`) и внутри `.git`;
-  - `git -C` вне проекта;
-  - чтение секретов, в том числе `.env`, `php artisan config:show agentio` и ключей `agentio.youtrack…` (настройки приложения агенты смотрят в `.env.example`, `config/*` и `config:show <ключ>`);
-  - любое упоминание `YOUTRACK_TOKEN`, вывод `ANTHROPIC_*`, `printenv`, `env`;
-  - `php artisan agentio:install`, `agentio:setup-youtrack`, `agentio:worktree`, `agentio:accept`, `tinker` и `agentio:run` без `--dry-run` — их запускают люди и цикл;
+- **Режим разрешений.** Headless-агенты запускаются с `--permission-mode dontAsk`: выполняется только то, что разрешено настройками сессии, остальное отклоняется без вопроса. Цикл передаёт настройки через `--settings`: в каталоге, которому не подтверждено доверие (а новый worktree эпика всегда такой), Claude Code игнорирует `allow` из `.claude/settings.json` проекта.
+  - **Сессии эпиков** — `resources/claude/settings.json` пакета плюс правила `.claude/settings.json` проекта: чтение и правка файлов worktree, `mcp__youtrack__*`, `Skill`, `php artisan agentio:yt|test|commit|log`, git без разрушительных операций, push веток задач (`{{project}}-*`), тесты и линтеры.
+  - **Сессии планирования** (`/agentio-plan`) идут в главном каталоге проекта и поэтому только читают (`resources/claude/planning.json`): код, `agentio:yt` и MCP YouTrack. Править файлы, коммитить и запускать команды проекта им нельзя.
+  - Список `deny` для всех: `git push --force`, push в `{{base_branch}}`/`{{production_branch}}`/`main`/`master`/`HEAD`; `reset --hard`, `clean`, `rebase`, `checkout {{base_branch}}`, `worktree remove`; `composer require/remove/update`, `bun add/remove/update`, `npm install <пакет>/uninstall/update`, `sudo`, `php -i`; команды людей (`agentio:install`, `agentio:setup-youtrack`, `agentio:worktree`, `agentio:accept`, `tinker`); инструменты `tinker` и `get-config` Laravel Boost; чтение `.env`, `.env.production`/`.env.staging`, `~/.claude.json`, `~/.ssh`, `~/.config/gh`.
+- **Самозащита.** Агентам запрещено менять `.claude/settings.json`, `.agentio.json`, скиллы `.claude/skills/agentio-*` и `vendor/` — и инструментом правки, и через shell (`cp`, `sed -i`, `>`).
+- **Хук `bin/agentio-guard`** (PreToolUse для Bash) — второй рубеж. Он запускается из пакета главного каталога, не загружая приложение worktree (его код правят агенты), защищённые ветки и дополнительные каталоги получает от цикла, а не из файлов worktree, и при любой своей ошибке запрещает команду. Командную строку он разбирает как shell (кавычки, `$(…)`, конвейеры, `cd`) и запрещает:
+  - push в защищённые ветки (`{{base_branch}}`, `{{production_branch}}`, `main`, `master`), force/mirror push (в том числе `-fu`), push и удаление веток, кроме веток задач (`{{project}}-N`), слияние в защищённую ветку;
+  - `reset --hard`, `stash`, переписывание истории, `checkout`/`restore` всего дерева, создание веток и тегов, `worktree remove/prune`, `git add -A`/`.`, `commit -a`/`--amend`;
+  - git-алиасы и неизвестные подкоманды git, `git -c` и запись в `git config`, изменение remote;
+  - `rm`/`mv`/`cp`/`sed -i`/`tee`/перенаправление `>` вне каталога проекта (и разрешённых `additionalDirectories` главного каталога), внутри `.git` и в собственные файлы агентов; `find -exec`;
+  - чтение секретов: `.env`, `php artisan config:show agentio`, ключи `agentio.youtrack…`, `YOUTRACK_TOKEN`, `ANTHROPIC_*`, `printenv`, `env`, `/proc/*/environ`, `php -i`;
+  - `php artisan agentio:install`, `agentio:setup-youtrack`, `agentio:worktree`, `agentio:accept`, `tinker` и `agentio:run` иначе чем `--dry-run` — их запускают люди и цикл (в том числе с опциями artisan перед командой, например `-n`);
   - `sudo` и разрушительные системные команды.
 - **Зависимости.** Новые пакеты агентам запрещены: они спрашивают через `[AGENT:BLOCKED]`.
-- **Коммиты.** Агенты коммитят только свои файлы через `php artisan agentio:commit`, а `git add -A`/`.` и `commit -a` запрещены правилами процесса.
+- **Коммиты.** Агенты коммитят только свои файлы через `php artisan agentio:commit`.
 - **Изоляция окружения.** Каждый worktree получает свой `.env` из `.env.example` (локальное окружение, свой `APP_KEY`, своя SQLite-БД, без токена). Главный `.env` агенты не используют и не читают; `agentio:run` убирает его переменные (`APP_*`, `DB_*` и т. п.) из окружения сессий.
-- **Токены.** `YOUTRACK_TOKEN` живёт только в `.env` (он не коммитится; установщик проверяет, что `.env` игнорируется git) и в конфигурации MCP Claude Code (`~/.claude.json`). Сессиям цикла он передаётся через окружение и подстановку `${YOUTRACK_TOKEN}` в MCP-конфиге пакета; в репозиторий, логи и комментарии он не попадает. Скомпрометированный токен отзовите в Profile → Account Security → Tokens и запустите `php artisan agentio:install` с новым.
+- **Токены.** `YOUTRACK_TOKEN` живёт только в `.env` (он не коммитится; установщик проверяет, что `.env` игнорируется git) и в конфигурации MCP Claude Code (`~/.claude.json`). Сессиям цикла он передаётся через окружение и подстановку `${YOUTRACK_TOKEN}` в MCP-конфиге пакета; в репозиторий, логи и комментарии он не попадает. Агенты работают под вашим пользователем ОС, и токен есть в их окружении: правила выше закрывают обычные способы его прочитать, но жёсткую границу даёт только песочница или отдельный пользователь. Выдавайте циклу токен с доступом только к этому проекту. Скомпрометированный токен отзовите в Profile → Account Security → Tokens и запустите `php artisan agentio:install` с новым.
 
 ---
 

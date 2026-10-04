@@ -54,6 +54,12 @@ final class RunCommand extends Command
 
     public function handle(LoopState $loop, Settings $settings): int
     {
+        if ($this->option('dry-run') && ($this->option('stop') || $this->option('kill'))) {
+            $this->components->error('--dry-run changes nothing: it cannot be combined with --stop or --kill.');
+
+            return self::INVALID;
+        }
+
         if ($this->option('stop')) {
             $loop->requestStop();
             $this->components->info('Stop requested ('.$loop->stopFile().'): the loop exits after its current step; running sessions finish on their own.');
@@ -126,6 +132,7 @@ final class RunCommand extends Command
             'AGENT_LOG_DIR' => $loop->logsPath(),
             'AGENTIO_STOP_FILE' => $loop->stopFile(),
             'AGENTIO_SESSION_SETTINGS' => (new SessionSettings($settings))->toJson(),
+            'AGENTIO_PLANNING_SETTINGS' => (new SessionSettings($settings))->toJson(planning: true),
             'AGENTIO_MCP_CONFIG' => implode(' ', $mcp),
         ]);
     }
