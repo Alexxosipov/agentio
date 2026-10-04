@@ -3,11 +3,9 @@
 </div>
 
 <p align="center">
-    <a href="https://packagist.org/packages/obrazmisli/agentio"><img src="https://img.shields.io/packagist/v/obrazmisli/agentio.svg?style=flat-square" alt="Packagist"></a>
-    <a href="https://packagist.org/packages/obrazmisli/agentio"><img src="https://img.shields.io/packagist/php-v/obrazmisli/agentio.svg?style=flat-square" alt="PHP from Packagist"></a>
-    <a href="https://packagist.org/packages/obrazmisli/agentio"><img src="https://badge.laravel.cloud/badge/obrazmisli/agentio?style=flat" alt="Laravel versions"></a>
-    <a href="https://github.com/obrazmisli/agentio/actions"><img alt="GitHub Workflow Status (main)" src="https://img.shields.io/github/actions/workflow/status/obrazmisli/agentio/tests.yml?branch=main&label=Tests&style=flat-square"></a>
-    <a href="https://packagist.org/packages/obrazmisli/agentio"><img src="https://img.shields.io/packagist/dt/obrazmisli/agentio.svg?style=flat-square" alt="Total Downloads"></a>
+    <a href="https://github.com/Alexxosipov/agentio/releases"><img src="https://img.shields.io/github/v/release/Alexxosipov/agentio?style=flat-square&label=release" alt="Latest release"></a>
+    <a href="https://github.com/Alexxosipov/agentio/actions/workflows/tests.yml"><img src="https://img.shields.io/github/actions/workflow/status/Alexxosipov/agentio/tests.yml?branch=main&label=tests&style=flat-square" alt="Tests"></a>
+    <a href="LICENSE.md"><img src="https://img.shields.io/github/license/Alexxosipov/agentio?style=flat-square" alt="License"></a>
 </p>
 
 Autonomous agentic development cycle for Laravel: YouTrack as the source of truth, Claude Code as PM, analyst, architect, developer and reviewer.
@@ -27,7 +25,7 @@ The agents work with YouTrack only through its **MCP server**. The package adds 
 
 ## Quick start
 
-1. Install the package as a dev dependency: `composer require obrazmisli/agentio --dev`.
+1. Install the package from GitHub as a dev dependency (see [Installation](#installation): add the repository to `composer.json`, then `composer require obrazmisli/agentio:^0.1 --dev`).
 2. Install the cycle into the project (a git repository whose `.env` is git-ignored): `php artisan agentio:install`. It asks for the YouTrack URL and a permanent token (hidden input), checks them through the YouTrack MCP server, adds the `youtrack` MCP server to Claude Code if it has none, asks for the project short name (`ABC`; a missing project can be created), the production and the development branch (`main` and `dev`; the missing one is created locally), the merge policy and **the directory of the epic worktrees**, offers to configure the YouTrack project and installs the skills.
 3. Commit `.claude/skills/agentio-*` and `.agentio.json` to `dev`: epic worktrees are created from it. `.env` (with the token) stays local. Push `dev` and `main` if the project has a remote, and point the develop server at `dev` and production at `main`.
 4. File an idea in YouTrack (Type `Idea` or the `idea` tag, Stage `Backlog`), check what the loop would do with `php artisan agentio:run --dry-run`, then start it: `php artisan agentio:run`.
@@ -35,11 +33,41 @@ The agents work with YouTrack only through its **MCP server**. The package adds 
 
 ## Installation
 
+The package is not on Packagist: Composer installs it from the [GitHub repository](https://github.com/Alexxosipov/agentio), and every release is a git tag (`v0.1.0`, `v0.2.0`, …). Add the repository to the host project's `composer.json`:
+
+```json
+"repositories": [
+    { "type": "vcs", "url": "https://github.com/Alexxosipov/agentio" }
+]
+```
+
+or with one command:
+
 ```bash
-composer require obrazmisli/agentio --dev
+composer config repositories.agentio vcs https://github.com/Alexxosipov/agentio
+```
+
+Then require it:
+
+```bash
+composer require obrazmisli/agentio:^0.1 --dev
 ```
 
 Install it as a **dev dependency**: the cycle runs on a developer machine (Claude Code, git worktrees, the loop) and nothing of it is needed in production; it also keeps the dashboard, which shows YouTrack data and agent logs, out of production builds. Require it without `--dev` only if you want the dashboard on a shared or staging server. If you call `Agentio::auth()` from a service provider, guard it with `class_exists(Agentio::class)` so that `composer install --no-dev` keeps working.
+
+Composer reads the tags through the GitHub API. Without a token it is limited to 60 requests an hour, and on a busy machine or CI it may ask for one: create a token without scopes at https://github.com/settings/tokens and run `composer config --global github-oauth.github.com <token>`.
+
+### Updating
+
+```bash
+composer update obrazmisli/agentio
+php artisan agentio:install           # refreshes the installed skills; your edits are kept
+php artisan agentio:setup-youtrack    # refreshes the automation guide in the knowledge base
+```
+
+Commit the updated `.claude/skills/agentio-*` and `.agentio.json`. While the version is `0.x`, `^0.1` takes only the `0.1.*` releases: a `0.2.0` may change behaviour (see the [changelog](CHANGELOG.md)), so move to it with `composer require obrazmisli/agentio:^0.2 --dev`. To try the latest unreleased code, require `dev-main`.
+
+A project that has a copy of the package (a `path` repository such as `packages/agentio`) switches by replacing that repository with the `vcs` one above, running `composer require obrazmisli/agentio:^0.1 --dev` and deleting the copy.
 
 For local development of the package, use a path repository in the host project's `composer.json`:
 
@@ -337,7 +365,7 @@ To work on the dashboard, run it in the workbench application with `composer ser
 
 ## Changelog
 
-Please see [CHANGELOG](CHANGELOG.md) for more information on what has changed recently.
+Please see [CHANGELOG](CHANGELOG.md) for more information on what has changed recently, and the [releases](https://github.com/Alexxosipov/agentio/releases) on GitHub. How a release is made is described in the [contributing guide](.github/CONTRIBUTING.md#releasing).
 
 ## Contributing
 
@@ -349,7 +377,7 @@ Please review [our security policy](.github/SECURITY.md) on how to report securi
 
 ## Credits
 
-- [Alexxosipov](https://github.com/obrazmisli)
+- [Alexxosipov](https://github.com/Alexxosipov)
 - [All Contributors](../../contributors)
 
 ## License

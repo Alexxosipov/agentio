@@ -1,6 +1,10 @@
 # Release Notes
 
-## [Unreleased](https://github.com/obrazmisli/agentio/compare/v0.1.0...1.x)
+## [Unreleased](https://github.com/Alexxosipov/agentio/compare/v0.1.0...main)
+
+## [v0.1.0](https://github.com/Alexxosipov/agentio/releases/tag/v0.1.0) - 2026-10-05
+
+The first release on GitHub: Composer installs the package from the repository (a `vcs` repository in `composer.json`, see the README), so a project no longer needs a copy of it. The notes below compare it with the copies of the package installed by hand before.
 
 ### Changed
 
@@ -16,6 +20,7 @@
 
 ### Added
 
+- Releases: every `v*` tag pushed to GitHub runs the test suite and publishes a GitHub release with the notes of its version from this changelog (`.github/workflows/release.yml`).
 - The epic orchestrator merges the development branch into the epic branch before the full test run (a conflict is aborted and left for the human, with the files listed), so an epic is tested together with the epics accepted after it started.
 - `AGENTIO_PRODUCTION_BRANCH` (`production_branch`, recorded in `.agentio.json`).
 - Planning sessions run with read-only settings (`resources/claude/planning.json`): they work in the developer's main checkout and change no file.
@@ -51,10 +56,4 @@
 ### Removed
 
 - Dead code: the unused queries of `IssueRepository`, `ReadinessGraph::waitingForDependencies()`, `AgentComment::isAgentComment()`, `Issue::isResolved()`, `LoopState::epicLogPath()` / `planLogPath()` and `Client::detachProjectCustomField()`.
-
 - `sync-stage`: Stage is the status field itself, nothing is derived from another field.
-
-
-## [v0.1.0](https://github.com/obrazmisli/agentio/compare/...v0.1.0) - 202x-xx-xx
-
-Initial pre-release.

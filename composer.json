@@ -5,9 +5,12 @@
     "keywords": [
         "laravel",
         "obrazmisli",
-        "agentio"
+        "agentio",
+        "youtrack",
+        "claude-code",
+        "ai-agents"
     ],
-    "homepage": "https://github.com/obrazmisli/agentio",
+    "homepage": "https://github.com/Alexxosipov/agentio",
     "license": "MIT",
     "authors": [
         {
@@ -16,6 +19,10 @@
             "role": "Developer"
         }
     ],
+    "support": {
+        "issues": "https://github.com/Alexxosipov/agentio/issues",
+        "source": "https://github.com/Alexxosipov/agentio"
+    },
     "require": {
         "php": "^8.3",
         "illuminate/auth": "^12.0||^13.0",
