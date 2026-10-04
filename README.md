@@ -16,6 +16,7 @@ The agents work with YouTrack only through its **MCP server**. The package adds 
 
 ## Requirements
 
+- Linux or macOS (the loop runs bash scripts under `setsid`; Windows is not supported).
 - PHP 8.3+ with `mbstring` (`posix` and `pcntl` recommended), Laravel 12 or 13.
 - git, Composer, `setsid` (util-linux; on macOS `brew install util-linux`), bun or npm when the project has a frontend build.
 - [Claude Code](https://docs.claude.com/claude-code), logged in.

@@ -18,10 +18,11 @@ jobs:
   tests:
     runs-on: ${{ matrix.os }}
 
+    # The loop needs bash, setsid and posix: the package runs on Linux and macOS, not on Windows.
     strategy:
-      fail-fast: true
+      fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        os: [ubuntu-latest]
         php: [8.3, 8.4, 8.5]
         laravel: [12.*, 13.*]
         stability: [prefer-lowest, prefer-stable]
@@ -59,13 +60,7 @@ jobs:
         run: composer lint:check
 
       - name: Type Coverage
-        if: runner.os != 'Windows'
         run: composer test:types
 
       - name: Test Suite
-        if: runner.os != 'Windows'
         run: composer test:unit
-
-      - name: Test Suite (Windows)
-        if: runner.os == 'Windows'
-        run: vendor/bin/pest

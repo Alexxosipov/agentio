@@ -16,7 +16,7 @@ Keep package code, dependencies, and workflows compatible with the supported Lar
 
 1. Read `composer.json` first to determine PHP, Laravel, and Testbench constraints.
 2. Check changed code against Laravel 12/13 APIs and PHP 8.3+ syntax before adopting newer framework or language features.
-3. Review `.github/workflows/tests.yml` for dependency stability lanes, prefer-lowest coverage, prefer-stable coverage, and Windows concerns.
+3. Review `.github/workflows/tests.yml` for dependency stability lanes, prefer-lowest coverage and prefer-stable coverage. The package runs on Linux and macOS only (bash, setsid, posix), so CI has no Windows lane.
 4. When changing dependencies, confirm constraints still allow the intended Laravel and Testbench versions.
 5. Validate with the smallest local command available, then rely on CI for full OS and dependency matrix coverage.
 
@@ -37,5 +37,5 @@ Keep package code, dependencies, and workflows compatible with the supported Lar
 
 - Assuming the latest local dependency version represents the whole support matrix.
 - Adding PHP syntax or Laravel APIs that exceed `composer.json` constraints.
-- Ignoring Windows path separators, executable assumptions, or shell-only syntax in tests and workflows.
+- Assuming the executable bit on package files: Composer may unpack a release without it, so run scripts through `bash` or `php`.
 - Removing dependency stability lanes because they are slower than a single happy path.
