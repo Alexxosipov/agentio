@@ -4,11 +4,13 @@ declare(strict_types=1);
 
 namespace Obrazmisli\Agentio\Review;
 
+use Obrazmisli\Agentio\Git\Branches;
+use Obrazmisli\Agentio\Git\Git;
 use Obrazmisli\Agentio\Settings;
 
 /**
- * The branch `epic/<ID>-<slug>` of an epic as git sees it from the main checkout: its commits and changed files
- * relative to the base branch, whether it is merged or would conflict, and the epic's worktree.
+ * The branch of an epic (named after its id, see Branches) as git sees it from the main checkout: its commits and
+ * changed files relative to the development branch, whether it is merged or would conflict, and the epic's worktree.
  */
 final readonly class EpicBranch
 {
@@ -33,7 +35,7 @@ final readonly class EpicBranch
     public static function find(Settings $settings, string $epicId): ?self
     {
         $git = new Git($settings->basePath());
-        $name = $git->lines('for-each-ref', '--format=%(refname:short)', 'refs/heads/epic/'.$epicId.'-*')[0] ?? null;
+        $name = Branches::find($git, $epicId);
 
         if ($name === null) {
             return null;

@@ -32,18 +32,24 @@ return [
     | Autonomous Loop
     |--------------------------------------------------------------------------
     |
-    | Settings of the agent loop (php artisan agentio:run). When "base_branch" or
-    | "merge_policy" (local-branch, pull-request or auto-merge) is null, the one
-    | agentio:install recorded in .agentio.json is used (then "main" and
-    | "local-branch"). "worktrees_path" is where the git worktrees of the epics
-    | are created; agentio:install asks for it and writes it to .env (it has no
-    | default: the loop refuses to start without it). "worktree_setup" is an
-    | optional shell command run last in every new epic worktree with the epic
-    | id as $1 (seeders, extra services, ...).
+    | Settings of the agent loop (php artisan agentio:run). "base_branch" is the
+    | development branch: what the develop server runs; every epic is worked on
+    | in a branch named after its issue id (TP-12), started from it and merged
+    | back into it. "production_branch" is what production runs; humans merge
+    | releases of the development branch into it. When one of them or
+    | "merge_policy" (local-branch, pull-request or auto-merge) is null, the
+    | value agentio:install recorded in .agentio.json is used (then "dev",
+    | "main" and "local-branch"). "worktrees_path" is where the git worktrees
+    | of the epics are created; agentio:install asks for it and writes it to
+    | .env (it has no default: the loop refuses to start without it).
+    | "worktree_setup" is an optional shell command run last in every new epic
+    | worktree with the epic id as $1 (seeders, extra services, ...).
     |
     */
 
     'base_branch' => env('AGENTIO_BASE_BRANCH'),
+
+    'production_branch' => env('AGENTIO_PRODUCTION_BRANCH'),
 
     'merge_policy' => env('AGENTIO_MERGE_POLICY'),
 

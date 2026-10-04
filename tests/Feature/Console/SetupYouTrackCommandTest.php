@@ -69,7 +69,7 @@ function existingKnowledgeBase(FakeYouTrackMcp $mcp): void
         $kb[$key] = 'XY-A-'.($index + 1);
     }
 
-    $mcp->articles['XY-A-10']['content'] = KnowledgeBase::ofPackage()->content('guide', new Placeholders('XY', 'main', MergePolicy::LocalBranch, $kb));
+    $mcp->articles['XY-A-10']['content'] = KnowledgeBase::ofPackage()->content('guide', new Placeholders('XY', 'dev', MergePolicy::LocalBranch, $kb));
 }
 
 it('sets up an empty project: Stage and Type values, tags, saved searches and the knowledge base', function () {

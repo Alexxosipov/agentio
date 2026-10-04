@@ -1,7 +1,7 @@
 ---
 name: agentio-review-story
 description: Проверяет STORY из YouTrack (проект {{project}}) целиком — изменения в ветке эпика против критериев приёмки Given/When/Then, статей фич и ADR, полный прогон тестов и линтеров. Замечания оформляет новыми TASK в той же STORY, код не меняет. Используется субагентом, которого запускает оркестратор agentio-work-epic после того, как все TASK истории в Done; в промпте — STORY, BRANCH, WORKTREE и BASE.
-argument-hint: STORY=<ID> BRANCH=<ветка эпика> WORKTREE=<путь> BASE=<базовая ветка>
+argument-hint: STORY=<ID> BRANCH=<ветка эпика> WORKTREE=<путь> BASE=<ветка разработки>
 allowed-tools: Skill Bash(php artisan agentio:yt *) Bash(php artisan agentio:test *) Bash(git log *) Bash(git show *) Bash(git diff *) mcp__youtrack__*
 ---
 
@@ -11,7 +11,7 @@ allowed-tools: Skill Bash(php artisan agentio:yt *) Bash(php artisan agentio:tes
 
 ## Вход
 
-`STORY=<ID>`, `BRANCH=<ветка эпика>`, `WORKTREE=<путь>`, `BASE=<базовая ветка, обычно {{base_branch}}>`.
+`STORY=<ID>`, `BRANCH=<ветка эпика>`, `WORKTREE=<путь>`, `BASE=<ветка разработки, обычно {{base_branch}}>`.
 
 ## Процедура
 

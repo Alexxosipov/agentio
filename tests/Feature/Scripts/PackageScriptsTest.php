@@ -75,10 +75,10 @@ it('gives headless sessions the session settings of the package, the project rul
 
     expect($process->getExitCode())->toBe(0, $process->getErrorOutput())
         ->and($arguments)->toContain('--permission-mode dontAsk --strict-mcp-config --mcp-config '.$package.'/resources/claude/mcp/youtrack.json --settings')
-        ->and($settings['permissions']['allow'])->toContain('Bash(php artisan agentio:yt *)', 'Bash(php artisan agentio:commit *)', 'Bash(php artisan agentio:test *)', 'mcp__youtrack__*', 'Skill', 'Edit(./**)', 'Bash(make lint)')
+        ->and($settings['permissions']['allow'])->toContain('Bash(php artisan agentio:yt *)', 'Bash(php artisan agentio:commit *)', 'Bash(php artisan agentio:test *)', 'mcp__youtrack__*', 'Skill', 'Edit(./**)', 'Bash(make lint)', 'Bash(git push -u origin XY-*)')
         // "/**" is relative to the main checkout in a git worktree: it would not let the agents edit the epic worktree.
         ->and($settings['permissions']['allow'])->not->toContain('Edit(/**)')
-        ->and($settings['permissions']['deny'])->toContain('Bash(git push --force*)', 'Bash(git push origin develop*)', 'Bash(git checkout develop*)', 'Read(./.env)', 'Read(**/.env)', 'Edit(.claude/skills/agentio-*/**)', 'Read(./secrets/**)')
+        ->and($settings['permissions']['deny'])->toContain('Bash(git push --force*)', 'Bash(git push origin develop*)', 'Bash(git checkout develop*)', 'Bash(git push origin main*)', 'Bash(php artisan agentio:accept*)', 'Read(./.env)', 'Read(**/.env)', 'Edit(.claude/skills/agentio-*/**)', 'Read(./secrets/**)')
         ->and($settings['hooks']['PreToolUse'][0]['hooks'][0]['command'])->toBe('php "$CLAUDE_PROJECT_DIR"/artisan agentio:guard');
 });
 
@@ -170,7 +170,7 @@ it('prepares an epic worktree without a frontend toolchain through agentio:workt
     expect($status)->toBe(0, $output)
         ->and($output)->toContain($worktree."\n")
         ->and($output)->toContain('no bun.lock or package-lock.json: frontend steps skipped', 'environment ready')
-        ->and((new Process(['git', 'branch', '--show-current'], $worktree))->mustRun()->getOutput())->toBe("epic/XY-12-profile-page\n")
+        ->and((new Process(['git', 'branch', '--show-current'], $worktree))->mustRun()->getOutput())->toBe("XY-12\n")
         ->and(file_get_contents($worktree.'/.env'))->toContain('APP_URL=http://localhost:8112', 'DB_CONNECTION=sqlite', 'DB_DATABASE='.$worktree.'/database/database.sqlite', 'SESSION_COOKIE=xy_12_session', 'APP_KEY=base64:generated')
         ->and($worktree.'/vendor/autoload.php')->toBeFile();
 

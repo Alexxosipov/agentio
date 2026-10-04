@@ -34,7 +34,6 @@ final readonly class Preconditions
             new Check('Claude Code CLI ('.$this->claudeBinary.')', $this->has($this->claudeBinary), true, 'install Claude Code (https://docs.claude.com/claude-code) and log in, or set AGENTIO_CLAUDE_BIN'),
             new Check('PHP extension mbstring', extension_loaded('mbstring'), true, 'agentio needs mbstring'),
             new Check('PHP extension posix', extension_loaded('posix'), false, 'used to check whether agent sessions are alive'),
-            new Check('PHP extension intl', extension_loaded('intl'), false, 'better branch slugs for non-Latin summaries (iconv is used otherwise)'),
             new Check('setsid', $this->has('setsid'), true, 'agent sessions are started with setsid (util-linux; on macOS: brew install util-linux)'),
             new Check('flock', $this->has('flock'), false, 'agentio:commit falls back to a mkdir lock without it'),
             new Check('bun or npm', $this->has('bun') || $this->has('npm'), false, 'needed only when the project has a frontend build'),

@@ -15,11 +15,11 @@ allowed-tools: Skill Agent Bash(php artisan agentio:yt *) Bash(php artisan agent
 ## 0. Предусловия
 
 ```bash
-git branch --show-current     # должно быть epic/$ARGUMENTS-<slug>
+git branch --show-current     # должно быть $ARGUMENTS (ветка эпика, начатого прежней версией agentio: epic/$ARGUMENTS-<slug>)
 git rev-parse --show-toplevel # путь worktree
 ```
 
-Если ветка не `epic/$ARGUMENTS-*`, ничего не меняй. Выведи `Эпик выполняется в своём worktree: его создаёт и запускает цикл агентов (php artisan agentio:run --epic=$ARGUMENTS)` и остановись.
+Если ветка не `$ARGUMENTS` и не `epic/$ARGUMENTS-*`, ничего не меняй. Выведи `Эпик выполняется в своём worktree: его создаёт и запускает цикл агентов (php artisan agentio:run --epic=$ARGUMENTS)` и остановись.
 
 ## 1. Контекст и захват
 
@@ -81,13 +81,13 @@ git rev-parse --show-toplevel # путь worktree
 
 ```
 WORK-EPIC $ARGUMENTS: REVIEW | BLOCKED | IN_PROGRESS
-Ветка: epic/... · Коммиты: N · Полный прогон: passed/failed
+Ветка: $ARGUMENTS · Коммиты: N · Полный прогон: passed/failed
 STORY: {{project}}-.. Review, {{project}}-.. Blocked (<причина>)
 ```
 
 ## Запрещено
 
 - Писать код самому, вместо субагента.
-- `git push` в `{{base_branch}}`/`BASE_BRANCH`, `--force`, `reset --hard`, удаление чужих веток.
+- `git push` в `{{base_branch}}`/`BASE_BRANCH` и `{{production_branch}}`, `--force`, `reset --hard`, удаление чужих веток.
 - Брать задачи вне этого эпика.
 - Менять статус задачи без соответствующего комментария `[AGENT:*]` (кроме STORY → In Progress в начале волны).

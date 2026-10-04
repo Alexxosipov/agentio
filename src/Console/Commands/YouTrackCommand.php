@@ -5,9 +5,9 @@ declare(strict_types=1);
 namespace Obrazmisli\Agentio\Console\Commands;
 
 use Illuminate\Console\Command;
+use Obrazmisli\Agentio\Git\Branches;
 use Obrazmisli\Agentio\Process\AgentCommentKind;
 use Obrazmisli\Agentio\Process\AgentComments;
-use Obrazmisli\Agentio\Process\BranchSlug;
 use Obrazmisli\Agentio\Process\ReadinessGraph;
 use Obrazmisli\Agentio\Process\TreeNode;
 use Obrazmisli\Agentio\Settings;
@@ -36,7 +36,7 @@ final class YouTrackCommand extends Command
      * @var string
      */
     protected $signature = 'agentio:yt
-        {action=help : ideas, ready-epics, claimed-epics, tree, ready-tasks, blocked, validate, claim, release, state, kb-tree, slug}
+        {action=help : ideas, ready-epics, claimed-epics, tree, ready-tasks, blocked, validate, claim, release, state, kb-tree}
         {id? : The issue (or, for kb-tree, the article) id}
         {--json : Print JSON}
         {--as= : claim: owner suffix of a subagent, e.g. its TASK id}
@@ -89,7 +89,6 @@ final class YouTrackCommand extends Command
                 'release' => $this->release($this->id()),
                 'state' => $this->state($this->id()),
                 'kb-tree' => $this->kbTree($this->stringArgument('id')),
-                'slug' => $this->slug($this->id()),
                 default => $this->failWith("Unknown action {$action}: run php artisan agentio:yt help."),
             };
         } catch (YouTrackException $exception) {
@@ -135,13 +134,13 @@ final class YouTrackCommand extends Command
 
             if ($id !== '' && $this->graph()->isEpicReady($id)) {
                 $summary = $this->graph()->get($id)->summary;
-                $epics[] = ['id' => $id, 'summary' => $summary, 'slug' => BranchSlug::of($summary), 'readyTasks' => $this->graph()->readyTasks($id)];
+                $epics[] = ['id' => $id, 'summary' => $summary, 'branch' => Branches::forIssue($id), 'readyTasks' => $this->graph()->readyTasks($id)];
             }
         }
 
         return $this->output($epics, function (array $epics): void {
             foreach ($epics as $epic) {
-                $this->line($epic['id'].' '.$epic['slug'].' ready-tasks='.implode(',', $epic['readyTasks']).' '.$epic['summary']);
+                $this->line($epic['id'].' ready-tasks='.implode(',', $epic['readyTasks']).' '.$epic['summary']);
             }
         });
     }
@@ -159,7 +158,6 @@ final class YouTrackCommand extends Command
                 'id' => $issue->id,
                 'state' => $issue->state(),
                 'summary' => $issue->summary,
-                'slug' => BranchSlug::of($issue->summary),
                 'owner' => $this->agentComments($issue->id)->claimOwner(),
             ];
         }
@@ -471,13 +469,6 @@ final class YouTrackCommand extends Command
         return ['id' => $id, 'summary' => $articles[$id]['summary'], 'children' => $children];
     }
 
-    private function slug(string $id): int
-    {
-        $this->line(BranchSlug::of(Issue::fromMcp($this->tools->issue($id))->summary));
-
-        return self::SUCCESS;
-    }
-
     private function graph(): ReadinessGraph
     {
         return $this->graph ??= new ReadinessGraph([], fn (string $id): ?Issue => $this->tools->issueWithLinks($id));
@@ -603,7 +594,6 @@ final class YouTrackCommand extends Command
               state <ID>               The Stage of the issue
               kb-tree [<ARTICLE>] [--depth=N]
                                        Knowledge base tree with article ids (--depth=1: direct children only)
-              slug <ID>                Branch slug of the issue summary
             HELP);
     }
 }

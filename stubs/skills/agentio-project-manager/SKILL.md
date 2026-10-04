@@ -57,7 +57,7 @@ description: Роль менеджера проекта {{project}} — прев
 - **Пересчёт блокировок:** `php artisan agentio:yt blocked`. Ready-задачи, ждущие незакрытых зависимостей, — норма. Задачи, ждущие зависимость в `Blocked`, — эскалируй в `[AGENT:BLOCKED]` у первопричины.
 - **Разбор `[AGENT:BLOCKED]`:** если человек ответил комментарием после блокировки — внеси ответ в описание или статью, при необходимости перестрой задачи, напиши `[AGENT:DECISION]` и верни прежний статус (`update_issue(<ID>, customFields={"Stage": "Ready"})`). Если ответа нет — ничего не делай.
 - **Изменение требований:** сначала статья фичи (через agentio-system-analyst), потом задачи. Уже сделанные TASK не переписывай — создавай новые.
-- **Закрытие** (`update_issue(<ID>, customFields={"Stage": "Done"})` с комментарием `[AGENT:DONE]`): STORY → `Done`, когда все её TASK в `Done`, STORY прошла review и эпик слит в `{{base_branch}}`. EPIC → `Done`, когда все STORY в `Done` и критерии успеха выполнены. Слияние подтверждай: `git branch --merged {{base_branch}} | grep epic/<ID>`.
+- **Закрытие** (`update_issue(<ID>, customFields={"Stage": "Done"})` с комментарием `[AGENT:DONE]`): STORY → `Done`, когда все её TASK в `Done`, STORY прошла review и эпик слит в `{{base_branch}}`. EPIC → `Done`, когда все STORY в `Done` и критерии успеха выполнены. Слияние подтверждай: `git branch --merged {{base_branch}} --list <ID>` (ветка эпика начатого прежней версией agentio — `epic/<ID>-*`). Эпик принимает человек (панель `/agentio` или `php artisan agentio:accept <ID>`), выпуск `{{base_branch}}` в `{{production_branch}}` — тоже человек.
 
 ## Чек-лист самопроверки
 

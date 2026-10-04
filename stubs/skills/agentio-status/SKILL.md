@@ -15,7 +15,7 @@ allowed-tools: Bash(php artisan agentio:status*) Bash(php artisan agentio:yt *) 
    php artisan agentio:yt claimed-epics
    git worktree list
    ```
-2. Для каждого эпика в `Review`: ветка (`git branch --list 'epic/<ID>-*'`), число коммитов (`git log --oneline {{base_branch}}..<ветка>`) и из `[AGENT:DONE]` эпика (`get_issue_comments`) — результат полного прогона и ссылка на PR, если есть.
+2. Для каждого эпика в `Review`: ветка (`git branch --list <ID>`; эпик прежней версии agentio — `git branch --list 'epic/<ID>-*'`), число коммитов (`git log --oneline {{base_branch}}..<ветка>`) и из `[AGENT:DONE]` эпика (`get_issue_comments`) — результат полного прогона и ссылка на PR, если есть.
 3. Для каждого эпика в работе — последние события сессии: `php artisan agentio:log <ID> --lines=5`.
 
 ## Формат ответа
@@ -32,8 +32,8 @@ Epic: Ready=1 In Progress=1 Review=0 … | Story: … | Task: …
 
 ## Ждёт человека
 1. Ответить на вопросы: {{project}}-20 (ссылка), …
-2. Принять эпики: {{project}}-10 — ветка epic/{{project}}-10-…, N коммитов, тесты passed.
-   git merge --no-ff epic/{{project}}-10-… && php artisan agentio:yt release {{project}}-10 --state=Done
+2. Принять эпики: {{project}}-10 — ветка {{project}}-10, N коммитов, тесты passed.
+   php artisan agentio:accept {{project}}-10    (или кнопка «Принять» на /agentio; слияние в {{base_branch}})
 
 ## Цикл агентов
 Флаг остановки: нет · активные сессии: {{project}}-10 (pid …)

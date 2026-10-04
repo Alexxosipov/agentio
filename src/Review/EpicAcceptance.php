@@ -5,7 +5,8 @@ declare(strict_types=1);
 namespace Obrazmisli\Agentio\Review;
 
 use Closure;
-use Illuminate\Support\Facades\Cache;
+use Obrazmisli\Agentio\Git\Git;
+use Obrazmisli\Agentio\Git\RepositoryLock;
 use Obrazmisli\Agentio\Process\ReadinessGraph;
 use Obrazmisli\Agentio\Runtime\LoopState;
 use Obrazmisli\Agentio\Settings;
@@ -15,19 +16,20 @@ use Obrazmisli\Agentio\YouTrack\IssueType;
 use Obrazmisli\Agentio\YouTrack\Mcp\Tools;
 use Obrazmisli\Agentio\YouTrack\State;
 use Obrazmisli\Agentio\YouTrack\YouTrackException;
+use Throwable;
 
 /**
  * The human's decision on an epic in Review, taken from the dashboard: accept it (merge the epic branch into
  * the base branch of the main checkout, remove the worktree, close the stories and the epic) or send it back
  * (a TASK with the remark in a story, the story and the epic back to Ready, so the loop resumes the epic in the
  * same worktree). Issues are read through the REST API and changed through the MCP server, like the agents do.
- * One action runs at a time.
+ * One action runs at a time per repository, whether it comes from the dashboard or from the agent loop
+ * (php artisan agentio:accept).
  */
 final readonly class EpicAcceptance
 {
-    public const string LOCK = 'agentio:acceptance';
-
-    public const int LOCK_SECONDS = 600;
+    /** The name of the repository lock (RepositoryLock) actions run under. */
+    public const string LOCK = 'acceptance';
 
     /** Characters of the remark used in the summary of the TASK. */
     public const int HEADLINE = 80;
@@ -63,6 +65,9 @@ final readonly class EpicAcceptance
         }
 
         if (! $branch->isMerged()) {
+            $ahead = $branch->divergence()['ahead'];
+            $checks[] = self::check('commits', 'В ветке эпика есть коммиты', $ahead > 0, $ahead > 0 ? null : 'ветка не отличается от '.$branch->base);
+
             $current = $branch->git->currentBranch();
             $checks[] = self::check('checkout', 'Главный каталог на ветке '.$branch->base, $current === $branch->base, $current === $branch->base ? null : 'сейчас: '.($current ?? 'detached HEAD'));
 
@@ -91,7 +96,12 @@ final readonly class EpicAcceptance
             $graph = $this->graph();
             $epic = $this->epic($graph, $epicId);
             $branch = EpicBranch::find($this->settings, $epicId)
-                ?? throw new ReviewException("В главном каталоге нет ветки epic/{$epicId}-*.");
+                ?? throw new ReviewException("В главном каталоге нет ветки {$epicId}.");
+
+            // A branch without commits of its own looks merged to git: tell it from a merged pull request.
+            if ($branch->isMerged() && ! $this->baseHasWorkOf($graph, $epic, $branch)) {
+                throw new ReviewException("В {$branch->base} нет коммитов задач эпика, а ветка {$branch->name} не отличается от неё: принимать нечего.", 409);
+            }
 
             $failed = array_filter($this->checks($epic, $branch), fn (array $check): bool => $check['ok'] === false);
 
@@ -189,17 +199,11 @@ final readonly class EpicAcceptance
      */
     private function locked(Closure $action): mixed
     {
-        $lock = Cache::lock(self::LOCK, self::LOCK_SECONDS);
+        $result = (new RepositoryLock(new Git($this->settings->basePath()), self::LOCK))->attempt($action);
 
-        if (! $lock->get()) {
-            throw new ReviewException('Другое действие приёмки ещё выполняется: повторите позже.');
-        }
-
-        try {
-            return $action();
-        } finally {
-            $lock->release();
-        }
+        return $result === null
+            ? throw new ReviewException('Другое действие приёмки ещё выполняется: повторите позже.')
+            : $result[0];
     }
 
     /**
@@ -242,21 +246,47 @@ final readonly class EpicAcceptance
      */
     private function merge(EpicBranch $branch): string
     {
-        $process = $branch->git->run('merge', '--no-ff', '--no-edit', $branch->name);
+        // The full ref: a tag named like the branch (TP-12) would win over a short name.
+        try {
+            $process = $branch->git->runWithTimeout(null, 'merge', '--no-ff', '-m', "Merge branch '{$branch->name}' into {$branch->base}", 'refs/heads/'.$branch->name);
+        } catch (Throwable $exception) {
+            $this->abortMerge($branch);
+
+            throw new ReviewException('git merge прерван: '.$exception->getMessage().' Главный каталог возвращён в прежнее состояние.', 500);
+        }
 
         if ($process->isSuccessful()) {
             return (string) $branch->git->output('rev-parse', '--short', 'HEAD');
         }
 
         $conflicts = $branch->git->lines('diff', '--name-only', '--diff-filter=U');
-
-        if ($branch->git->run('rev-parse', '--quiet', '--verify', 'MERGE_HEAD')->isSuccessful()) {
-            $branch->git->run('merge', '--abort');
-        }
+        $this->abortMerge($branch);
 
         throw new ReviewException($conflicts === []
             ? 'git merge не удался: '.Git::error($process)
             : 'Слияние остановлено из-за конфликтов, главный каталог возвращён в прежнее состояние. Слейте ветку вручную.', 409, $conflicts);
+    }
+
+    /**
+     * Whether the development branch has a commit of a task of the epic ("<TASK>: …", as agentio:commit writes them).
+     */
+    private function baseHasWorkOf(ReadinessGraph $graph, Issue $epic, EpicBranch $branch): bool
+    {
+        // Issue ids have no regular expression characters: [A-Z0-9_] and a dash.
+        $ids = $graph->descendants($epic->id);
+
+        if ($ids === []) {
+            return false;
+        }
+
+        return $branch->git->lines('log', '-1', '--format=%h', '-E', '--grep=^('.implode('|', $ids).')([^0-9]|$)', 'refs/heads/'.$branch->base) !== [];
+    }
+
+    private function abortMerge(EpicBranch $branch): void
+    {
+        if ($branch->git->run('rev-parse', '--quiet', '--verify', 'MERGE_HEAD')->isSuccessful()) {
+            $branch->git->run('merge', '--abort');
+        }
     }
 
     /**
@@ -268,7 +298,7 @@ final readonly class EpicAcceptance
             return false;
         }
 
-        $process = $branch->git->run('worktree', 'remove', '--force', $branch->worktree);
+        $process = $branch->git->runWithTimeout(null, 'worktree', 'remove', '--force', $branch->worktree);
 
         if (! $process->isSuccessful()) {
             $warnings[] = 'Worktree не удалён: '.Git::error($process);

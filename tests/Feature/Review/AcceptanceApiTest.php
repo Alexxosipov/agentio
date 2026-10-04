@@ -26,10 +26,10 @@ function git(string $directory, string ...$arguments): string
 }
 
 /**
- * A host project that is a git repository: main with README.md, and the branch epic/XY-2-avatar with one commit
- * adding app/Avatar.php and changing README.md.
+ * A host project that is a git repository: main with README.md, and the epic branch (XY-2, or a branch of an
+ * earlier agentio version) with one commit adding app/Avatar.php and changing README.md.
  */
-function reviewRepository(): string
+function reviewRepository(string $branch = 'XY-2'): string
 {
     $project = hostProject();
     git($project, 'init', '-q', '-b', 'main');
@@ -43,7 +43,7 @@ function reviewRepository(): string
     git($project, 'add', '.');
     git($project, 'commit', '-q', '-m', 'Initial');
 
-    git($project, 'checkout', '-q', '-b', 'epic/XY-2-avatar');
+    git($project, 'checkout', '-q', '-b', $branch);
     mkdir($project.'/app');
     file_put_contents($project.'/app/Avatar.php', "<?php\n\nfinal class Avatar {}\n");
     file_put_contents($project.'/README.md', "# App\n\nAvatars.\n");
@@ -124,9 +124,9 @@ function acceptanceEnvironment(string $project, array $states = []): FakeYouTrac
 /**
  * The epic worktree of XY-2, as agentio:worktree creates it.
  */
-function epicWorktree(string $project): string
+function epicWorktree(string $project, string $branch = 'XY-2'): string
 {
-    git($project, 'worktree', 'add', '-q', $project.'/worktrees/XY-2', 'epic/XY-2-avatar');
+    git($project, 'worktree', 'add', '-q', $project.'/worktrees/XY-2', $branch);
     file_put_contents($project.'/worktrees/XY-2/.env', "APP_URL=http://localhost:8102\n");
 
     return $project.'/worktrees/XY-2';
@@ -140,7 +140,7 @@ it('shows what the epic branch changes and whether it can be merged', function (
     $response = $this->getJson('/agentio/api/epics/XY-2/review')->assertOk();
 
     expect($response->json('branch'))->toMatchArray([
-        'name' => 'epic/XY-2-avatar',
+        'name' => 'XY-2',
         'merged' => false,
         'ahead' => 1,
         'behind' => 0,
@@ -205,13 +205,13 @@ it('merges the epic, removes its worktree and closes the stories and the epic', 
         ->assertJsonPath('closed', ['XY-3', 'XY-4', 'XY-2'])
         ->assertJsonPath('warnings', []);
 
-    expect(git($project, 'log', '-1', '--format=%s %P'))->toStartWith("Merge branch 'epic/XY-2-avatar'")
+    expect(git($project, 'log', '-1', '--format=%s %P'))->toStartWith("Merge branch 'XY-2' into main")
         ->and(git($project, 'rev-parse', '--short', 'HEAD'))->toBe($response->json('commit'))
         ->and(file_exists($project.'/app/Avatar.php'))->toBeTrue()
         ->and(is_dir($worktree))->toBeFalse()
-        ->and(git($project, 'branch', '--list', 'epic/*'))->toBe('epic/XY-2-avatar')
+        ->and(git($project, 'branch', '--list', 'XY-*'))->toBe('XY-2')
         ->and(array_map(fn (array $issue): ?string => $issue['fields']['Stage'], $mcp->issues))->toBe(['XY-2' => 'Done', 'XY-3' => 'Done', 'XY-4' => 'Done'])
-        ->and($mcp->comments['XY-2'][0]['text'])->toBe('Эпик принят в панели agentio: ветка `epic/XY-2-avatar` слита в `main` (`'.$response->json('commit').'`).');
+        ->and($mcp->comments['XY-2'][0]['text'])->toBe('Эпик принят в панели agentio: ветка `XY-2` слита в `main` (`'.$response->json('commit').'`).');
 
     // The dashboard forgot its cached YouTrack answers: the next read goes to YouTrack again.
     $before = count(Http::recorded(fn (Request $request): bool => str_ends_with((string) parse_url($request->url(), PHP_URL_PATH), '/api/issues')));
@@ -231,14 +231,14 @@ it('deletes the branch and keeps the epic open when a story has not passed revie
         ->assertJsonPath('closed', ['XY-3'])
         ->assertJsonPath('warnings', ['Эпик оставлен в Review: не все истории прошли ревью — XY-4 (Blocked).']);
 
-    expect(git($project, 'branch', '--list', 'epic/*'))->toBe('')
+    expect(git($project, 'branch', '--list', 'XY-*'))->toBe('')
         ->and($mcp->issues['XY-2']['fields']['Stage'])->toBe('Review');
 });
 
 it('only closes the issues when the base branch already has the epic', function () {
     $project = reviewRepository();
     $mcp = acceptanceEnvironment($project);
-    git($project, 'merge', '-q', '--no-ff', '--no-edit', 'epic/XY-2-avatar');
+    git($project, 'merge', '-q', '--no-ff', '--no-edit', 'XY-2');
     $head = git($project, 'rev-parse', 'HEAD');
 
     $this->getJson('/agentio/api/epics/XY-2/review')
@@ -326,7 +326,7 @@ it('sends the epic back with a task in the story', function () {
         ->and($mcp->issues['XY-3']['fields']['Stage'])->toBe('Review')
         ->and($mcp->comments['XY-4'][0]['text'])->toStartWith('Замечание при приёмке эпика XY-2 (панель agentio), задача XY-20:')
         ->and($mcp->comments['XY-2'][0]['text'])->toBe('Эпик возвращён на доработку в панели agentio: замечание к XY-4, задача XY-20.')
-        ->and(git($project, 'branch', '--list', 'epic/*'))->toBe('epic/XY-2-avatar');
+        ->and(git($project, 'branch', '--list', 'XY-*'))->toBe('XY-2');
 });
 
 it('reads the id of the created task from a text answer', function () {
@@ -389,4 +389,51 @@ it('answers 503 when YouTrack is not configured', function () {
     app()->forgetInstance(McpClient::class);
 
     $this->postJson('/agentio/api/epics/XY-2/accept')->assertStatus(503);
+});
+
+it('accepts an epic started on a branch of an earlier agentio version', function () {
+    $project = reviewRepository('epic/XY-2-avatar');
+    acceptanceEnvironment($project);
+    epicWorktree($project, 'epic/XY-2-avatar');
+
+    $this->getJson('/agentio/api/epics/XY-2/review')->assertJsonPath('branch.name', 'epic/XY-2-avatar');
+
+    $this->postJson('/agentio/api/epics/XY-2/accept')->assertOk()->assertJsonPath('merged', true);
+
+    expect(git($project, 'log', '-1', '--format=%s'))->toBe("Merge branch 'epic/XY-2-avatar' into main");
+});
+
+it('merges the branch even when a tag has the same name', function () {
+    $project = reviewRepository();
+    acceptanceEnvironment($project);
+    git($project, 'tag', 'XY-2', 'main');
+
+    $this->postJson('/agentio/api/epics/XY-2/accept')->assertOk()->assertJsonPath('merged', true);
+
+    expect(file_exists($project.'/app/Avatar.php'))->toBeTrue();
+});
+
+it('refuses an epic branch without commits of its own', function () {
+    $project = reviewRepository();
+    acceptanceEnvironment($project);
+    git($project, 'branch', '-f', 'XY-2', 'main');
+
+    $this->postJson('/agentio/api/epics/XY-2/accept')
+        ->assertStatus(409)
+        ->assertJsonPath('message', 'В main нет коммитов задач эпика, а ветка XY-2 не отличается от неё: принимать нечего.');
+});
+
+it('accepts an epic from the command line the way the dashboard does', function () {
+    $project = reviewRepository();
+    $mcp = acceptanceEnvironment($project);
+
+    $this->artisan('agentio:accept', ['epic' => 'XY-2'])
+        ->expectsOutputToContain('XY-2: merged XY-2 into main')
+        ->assertSuccessful();
+
+    expect($mcp->issues['XY-2']['fields']['Stage'])->toBe('Done');
+
+    $this->artisan('agentio:accept', ['epic' => 'XY-7'])
+        ->expectsOutputToContain('XY-7: Задача XY-7 не найдена.')
+        ->assertFailed();
 });

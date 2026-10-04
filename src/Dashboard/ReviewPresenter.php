@@ -12,6 +12,7 @@ use Obrazmisli\Agentio\Settings;
 use Obrazmisli\Agentio\YouTrack\Issue;
 use Obrazmisli\Agentio\YouTrack\IssueType;
 use Obrazmisli\Agentio\YouTrack\YouTrackException;
+use ValueError;
 
 /**
  * The acceptance view of an epic: what its branch changes (commits, files), whether it can be merged into the
@@ -38,7 +39,7 @@ final readonly class ReviewPresenter
         return [
             'epicId' => $id,
             'base' => $this->settings->baseBranch(),
-            'mergePolicy' => $this->settings->mergePolicy()->value,
+            'mergePolicy' => $this->mergePolicy(),
             'actions' => (bool) config('agentio.ui.actions', true),
             'branch' => $branch === null ? null : $this->branch($branch, $merged),
             'checks' => $checks,
@@ -47,6 +48,18 @@ final readonly class ReviewPresenter
             'stories' => $epic === null ? [] : $this->source->attempt(fn (): array => $this->stories($epic), []),
             'youtrack' => $this->source->health(),
         ];
+    }
+
+    /**
+     * The merge policy, or null when AGENTIO_MERGE_POLICY or .agentio.json holds an unknown one.
+     */
+    private function mergePolicy(): ?string
+    {
+        try {
+            return $this->settings->mergePolicy()->value;
+        } catch (ValueError) {
+            return null;
+        }
     }
 
     /**

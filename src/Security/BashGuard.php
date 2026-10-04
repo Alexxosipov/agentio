@@ -4,19 +4,20 @@ declare(strict_types=1);
 
 namespace Obrazmisli\Agentio\Security;
 
+use Obrazmisli\Agentio\Git\Branches;
 use Symfony\Component\Process\Process;
 
 /**
  * The second line of defence behind the permission rules of the headless agent sessions: decides whether a
  * Bash command of an agent is refused. Refused are pushes to protected branches, force pushes, deleting or
- * moving branches other than epic/*, history rewrites, destructive commands outside the project, access to
+ * moving branches other than the branches of issues (TP-12, see Branches), history rewrites, destructive commands outside the project, access to
  * secrets and to the YouTrack token, and the agentio commands that only humans and the loop run.
  */
 final readonly class BashGuard
 {
     /**
      * @param  string  $project  The project directory (an epic worktree for epic sessions)
-     * @param  list<string>  $protected  Branches agents never push to or switch to, the base branch first
+     * @param  list<string>  $protected  Branches agents never push to or switch to, the development branch first
      * @param  list<string>  $roots  Directories agents may change files in (the project and additional directories)
      */
     public function __construct(
@@ -130,8 +131,8 @@ final readonly class BashGuard
                 return "pushing to protected branch '{$target}' is not allowed; humans merge into {$this->protected[0]}.";
             }
 
-            if (! str_starts_with($target, 'epic/')) {
-                return "only epic/* branches may be pushed or deleted (got '{$target}').";
+            if (! Branches::isWorkBranch($target)) {
+                return "only the branches of issues (e.g. TP-12) may be pushed or deleted (got '{$target}').";
             }
         }
 
@@ -144,8 +145,8 @@ final readonly class BashGuard
     private function branchChange(array $rest): ?string
     {
         foreach (array_filter($rest, fn (string $arg): bool => ! str_starts_with($arg, '-')) as $name) {
-            if (! str_starts_with($name, 'epic/')) {
-                return "deleting, renaming or force-moving branch '{$name}' is not allowed; only epic/* branches.";
+            if (! Branches::isWorkBranch($name)) {
+                return "deleting, renaming or force-moving branch '{$name}' is not allowed; only the branches of issues (e.g. TP-12).";
             }
         }
 
@@ -166,7 +167,7 @@ final readonly class BashGuard
         $command = $args[1] ?? '';
 
         return match (true) {
-            in_array($command, ['agentio:install', 'agentio:setup-youtrack', 'agentio:worktree', 'tinker'], true) => "php artisan {$command} is run by humans, not by agents.",
+            in_array($command, ['agentio:install', 'agentio:setup-youtrack', 'agentio:worktree', 'agentio:accept', 'tinker'], true) => "php artisan {$command} is run by humans, not by agents.",
             $command === 'agentio:run' && ! in_array('--dry-run', $args, true) => 'php artisan agentio:run is run by humans; agents may only use --dry-run.',
             default => null,
         };

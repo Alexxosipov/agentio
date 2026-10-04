@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace Obrazmisli\Agentio\Review;
+namespace Obrazmisli\Agentio\Git;
 
 use Symfony\Component\Process\Process;
 
@@ -26,12 +26,21 @@ final readonly class Git
      */
     public function run(string ...$arguments): Process
     {
+        return $this->runWithTimeout(self::TIMEOUT, ...$arguments);
+    }
+
+    /**
+     * Run a git command that may take long (a merge runs the project's hooks); null waits forever.
+     */
+    public function runWithTimeout(?float $timeout, string ...$arguments): Process
+    {
         $process = new Process(
             ['git', '-c', 'core.quotePath=false', ...$arguments],
             $this->directory,
-            ['GIT_TERMINAL_PROMPT' => '0', 'GIT_MERGE_AUTOEDIT' => 'no'],
+            // No optional locks: the dashboard polls git status in checkouts where agents and humans commit.
+            ['GIT_TERMINAL_PROMPT' => '0', 'GIT_MERGE_AUTOEDIT' => 'no', 'GIT_OPTIONAL_LOCKS' => '0'],
             null,
-            self::TIMEOUT,
+            $timeout,
         );
         $process->run();
 
@@ -68,6 +77,22 @@ final readonly class Git
         $branch = $this->output('branch', '--show-current');
 
         return $branch === null || $branch === '' ? null : $branch;
+    }
+
+    /**
+     * Whether a local branch of that name exists.
+     */
+    public function branchExists(string $name): bool
+    {
+        return $this->run('show-ref', '--verify', '--quiet', 'refs/heads/'.$name)->isSuccessful();
+    }
+
+    /**
+     * Whether the repository has at least one commit (a branch can be created from HEAD).
+     */
+    public function hasCommits(): bool
+    {
+        return $this->run('rev-parse', '--verify', '--quiet', 'HEAD')->isSuccessful();
     }
 
     /**

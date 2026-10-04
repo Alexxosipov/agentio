@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace Obrazmisli\Agentio\Console\Commands;
 
 use Illuminate\Console\Command;
+use Obrazmisli\Agentio\Git\Git;
+use Obrazmisli\Agentio\Install\BranchSetup;
 use Obrazmisli\Agentio\Install\Check;
 use Obrazmisli\Agentio\Install\ClaudeMcp;
 use Obrazmisli\Agentio\Install\EnvFile;
@@ -15,6 +17,8 @@ use Obrazmisli\Agentio\Install\KnowledgeBase;
 use Obrazmisli\Agentio\Install\Manifest;
 use Obrazmisli\Agentio\Install\Placeholders;
 use Obrazmisli\Agentio\Install\Preconditions;
+use Obrazmisli\Agentio\Install\SetupAction;
+use Obrazmisli\Agentio\Install\SetupStatus;
 use Obrazmisli\Agentio\Install\YouTrackAccess;
 use Obrazmisli\Agentio\Runtime\MergePolicy;
 use Obrazmisli\Agentio\Settings;
@@ -24,7 +28,6 @@ use Obrazmisli\Agentio\YouTrack\Mcp\Tools;
 use Obrazmisli\Agentio\YouTrack\YouTrackException;
 use RuntimeException;
 use Symfony\Component\Console\Attribute\AsCommand;
-use Symfony\Component\Process\Process;
 
 use function Laravel\Prompts\confirm;
 use function Laravel\Prompts\password;
@@ -33,8 +36,9 @@ use function Laravel\Prompts\text;
 
 /**
  * Installs the agent cycle into the project: asks for the YouTrack connection and checks it through the MCP
- * server, adds the youtrack MCP server to Claude Code when it has none, asks for the YouTrack project, the base
- * branch, the merge policy and the directory of the epic worktrees, optionally configures the YouTrack project
+ * server, adds the youtrack MCP server to Claude Code when it has none, asks for the YouTrack project, the
+ * development and the production branch (creating the missing ones locally), the merge policy and the directory
+ * of the epic worktrees, optionally configures the YouTrack project
  * (agentio:setup-youtrack) and installs the skills into .claude/skills — the only files it adds to the project
  * besides .agentio.json; the scripts and the manual stay in the package.
  */
@@ -50,7 +54,8 @@ final class InstallCommand extends Command
         {--project= : YouTrack project short name (default: .agentio.json, then AGENTIO_PROJECT)}
         {--create-project : Create the YouTrack project when it does not exist (asked when interactive)}
         {--project-name= : Name of the YouTrack project to create (default: its short name)}
-        {--base-branch= : Branch the epic branches start from (default: .agentio.json, then the current branch)}
+        {--base-branch= : Development branch (develop server): epic branches start from it and are merged into it (default: .agentio.json, then dev)}
+        {--production-branch= : Production branch: releases of the development branch are merged into it (default: .agentio.json, then main)}
         {--merge-policy= : local-branch, pull-request or auto-merge (default: .agentio.json, then local-branch)}
         {--worktrees= : Directory of the epic worktrees, outside the project (default: AGENTIO_WORKTREES_PATH; asked when interactive)}
         {--mcp-scope=local : Scope of the youtrack MCP server added to Claude Code: local (this project, private) or user}
@@ -117,7 +122,14 @@ final class InstallCommand extends Command
             return self::FAILURE;
         }
 
-        $baseBranch = $this->askBaseBranch($this->stringOption('base-branch') ?? $manifest->baseBranch ?? Settings::string('agentio.base_branch') ?? $this->currentBranch($basePath) ?? 'main');
+        $git = new Git($basePath);
+        $productionBranch = $this->askBranch('production-branch', 'Production branch', 'What production runs; humans merge releases of the development branch into it.', $this->stringOption('production-branch') ?? $manifest->productionBranch ?? Settings::string('agentio.production_branch') ?? $this->defaultProductionBranch($git));
+        $baseBranch = $this->askBranch('base-branch', 'Development branch', 'What the develop server runs; every epic gets a branch named after its id (TP-12), started from it and merged back into it. Agents never push to it.', $this->stringOption('base-branch') ?? $manifest->baseBranch ?? Settings::string('agentio.base_branch') ?? Settings::DEVELOPMENT_BRANCH);
+
+        if ($baseBranch === null || $productionBranch === null) {
+            return self::FAILURE;
+        }
+
         $policy = $this->askMergePolicy($this->stringOption('merge-policy') ?? $manifest->mergePolicy ?? Settings::string('agentio.merge_policy'));
 
         if ($policy === null) {
@@ -137,18 +149,19 @@ final class InstallCommand extends Command
             'AGENTIO_WORKTREES_PATH' => $worktrees,
         ];
 
-        foreach (['AGENTIO_PROJECT' => $project, 'AGENTIO_BASE_BRANCH' => $baseBranch, 'AGENTIO_MERGE_POLICY' => $policy->value] as $key => $value) {
+        foreach (['AGENTIO_PROJECT' => $project, 'AGENTIO_BASE_BRANCH' => $baseBranch, 'AGENTIO_PRODUCTION_BRANCH' => $productionBranch, 'AGENTIO_MERGE_POLICY' => $policy->value] as $key => $value) {
             if ($env->get($key) !== null) {
                 $environment[$key] = $value;
             }
         }
 
-        $installer = new Installer($basePath, dirname(__DIR__, 3).'/stubs', new Placeholders($project, $baseBranch, $policy), (bool) $this->option('force'), $this->dryRun, $manifest->files);
+        $installer = new Installer($basePath, dirname(__DIR__, 3).'/stubs', new Placeholders($project, $baseBranch, $policy, productionBranch: $productionBranch), (bool) $this->option('force'), $this->dryRun, $manifest->files);
         $envChange = $installer->writeEnvironment($environment);
-        $this->useSettings($connection, $project, $baseBranch, $policy, $worktrees);
+        $this->useSettings($connection, $project, $baseBranch, $productionBranch, $policy, $worktrees);
+        $this->renderBranches((new BranchSetup($git))->ensure($baseBranch, $productionBranch, $this->dryRun));
 
         if (! $this->dryRun) {
-            $manifest->with($project, $baseBranch, mergePolicy: $policy->value)->save($basePath);
+            $manifest->with($project, $baseBranch, mergePolicy: $policy->value, productionBranch: $productionBranch)->save($basePath);
 
             if (! is_dir($worktrees)) {
                 mkdir($worktrees, 0755, true);
@@ -166,12 +179,12 @@ final class InstallCommand extends Command
 
         // 6. The skills.
         $kb = Manifest::load($basePath)->kb;
-        $installer = new Installer($basePath, dirname(__DIR__, 3).'/stubs', new Placeholders($project, $baseBranch, $policy, $kb), (bool) $this->option('force'), $this->dryRun, Manifest::load($basePath)->files);
+        $installer = new Installer($basePath, dirname(__DIR__, 3).'/stubs', new Placeholders($project, $baseBranch, $policy, $kb, $productionBranch), (bool) $this->option('force'), $this->dryRun, Manifest::load($basePath)->files);
         $changes = $installer->install();
         $this->renderChanges(array_values(array_filter([...$changes, $envChange])));
 
         if (! $this->dryRun) {
-            Manifest::load($basePath)->with($project, $baseBranch, $kb, $installer->hashes(), $policy->value)->save($basePath);
+            Manifest::load($basePath)->with($project, $baseBranch, $kb, $installer->hashes(), $policy->value, $productionBranch)->save($basePath);
         }
 
         $this->renderNextSteps($checks, $baseBranch, $kb, $connection !== null);
@@ -394,18 +407,47 @@ final class InstallCommand extends Command
         return true;
     }
 
-    private function askBaseBranch(string $default): string
+    /**
+     * The development or the production branch: asked, or taken from its option; null when it is not a valid
+     * branch name.
+     */
+    private function askBranch(string $option, string $label, string $hint, string $default): ?string
     {
-        if (! $this->interactive || $this->stringOption('base-branch') !== null) {
-            return $default;
+        $invalid = fn (string $name): ?string => self::validBranchName(trim($name)) ? null : 'Not a valid branch name.';
+
+        if ($this->interactive && $this->stringOption($option) === null) {
+            return trim(text(label: $label, default: $default, required: true, validate: $invalid, hint: $hint));
         }
 
-        return trim(text(
-            label: 'Base branch',
-            default: $default,
-            required: true,
-            hint: 'Epic branches start from it and humans merge them into it; agents never push to it.',
-        ));
+        if ($invalid($default) !== null) {
+            $this->components->error("--{$option}: {$default} is not a valid branch name.");
+
+            return null;
+        }
+
+        return $default;
+    }
+
+    /**
+     * The production branch of a repository installed for the first time: main, else master, else the current branch.
+     */
+    private function defaultProductionBranch(Git $git): string
+    {
+        foreach ([Settings::PRODUCTION_BRANCH, 'master'] as $branch) {
+            if ($git->branchExists($branch)) {
+                return $branch;
+            }
+        }
+
+        return $git->currentBranch() ?? Settings::PRODUCTION_BRANCH;
+    }
+
+    private static function validBranchName(string $name): bool
+    {
+        return preg_match('#^[A-Za-z0-9][A-Za-z0-9._/-]*$#', $name) === 1
+            && ! str_contains($name, '..')
+            && ! str_ends_with($name, '/')
+            && ! str_ends_with($name, '.lock');
     }
 
     private function askMergePolicy(?string $default): ?MergePolicy
@@ -489,11 +531,12 @@ final class InstallCommand extends Command
      *
      * @param  array{url: string, token: string, tokenChanged: bool, user: array{login: string, name: string, email: string}}|null  $connection
      */
-    private function useSettings(?array $connection, string $project, string $baseBranch, MergePolicy $policy, string $worktrees): void
+    private function useSettings(?array $connection, string $project, string $baseBranch, string $productionBranch, MergePolicy $policy, string $worktrees): void
     {
         config([
             'agentio.youtrack.project' => $project,
             'agentio.base_branch' => $baseBranch,
+            'agentio.production_branch' => $productionBranch,
             'agentio.merge_policy' => $policy->value,
             'agentio.worktrees_path' => $worktrees,
         ]);
@@ -508,15 +551,6 @@ final class InstallCommand extends Command
     private function tools(string $url, string $token): Tools
     {
         return new Tools(new McpClient($url, $token, (int) config('agentio.youtrack.timeout', 30), (int) config('agentio.youtrack.retries', 2)));
-    }
-
-    private function currentBranch(string $basePath): ?string
-    {
-        $process = new Process(['git', 'branch', '--show-current'], $basePath);
-        $process->run();
-        $branch = trim($process->getOutput());
-
-        return $process->isSuccessful() && $branch !== '' ? $branch : null;
     }
 
     private function absolutePath(string $basePath, string $path): string
@@ -561,6 +595,24 @@ final class InstallCommand extends Command
     }
 
     /**
+     * @param  list<SetupAction>  $actions
+     */
+    private function renderBranches(array $actions): void
+    {
+        $this->newLine();
+        $this->line('<options=bold>Branches</>'.($this->dryRun ? ' (plan)' : ''));
+
+        foreach ($actions as $action) {
+            $this->components->twoColumnDetail($action->name.' <fg=gray>'.$action->detail.'</>', match ($action->status) {
+                SetupStatus::Exists => '<fg=green>exists</>',
+                SetupStatus::Create => $this->dryRun ? '<fg=yellow>will be created</>' : '<fg=green>created</>',
+                SetupStatus::Update => '<fg=yellow>updated</>',
+                SetupStatus::Warning => '<fg=yellow>warning</>',
+            });
+        }
+    }
+
+    /**
      * @param  list<FileChange>  $changes
      */
     private function renderChanges(array $changes): void
@@ -600,7 +652,7 @@ final class InstallCommand extends Command
             $steps[] = 'Configure the YouTrack project: php artisan agentio:setup-youtrack --dry-run, then without --dry-run.';
         }
 
-        $steps[] = "Commit .claude/skills/agentio-* and .agentio.json to {$baseBranch}: the epic worktrees take the skills from it (.env stays local).";
+        $steps[] = "Commit .claude/skills/agentio-* and .agentio.json to {$baseBranch}: the epic worktrees take the skills from it (.env stays local). Point the develop server at {$baseBranch} and production at the production branch.";
         $steps[] = 'In YouTrack, build the board columns on the Stage field, if you want a board.';
         $steps[] = 'See what the loop would start: php artisan agentio:run --dry-run, then start it: php artisan agentio:run';
 

@@ -70,7 +70,7 @@ it('lists ready epics with their first wave of tasks', function () {
     [$status, $json] = yt(['action' => 'ready-epics', '--json' => true]);
 
     expect($status)->toBe(0)
-        ->and(json_decode($json, true))->toBe([['id' => 'XY-2', 'summary' => '[EPIC] Summary of XY-2', 'slug' => 'summary-of-xy-2', 'readyTasks' => ['XY-6']]]);
+        ->and(json_decode($json, true))->toBe([['id' => 'XY-2', 'summary' => '[EPIC] Summary of XY-2', 'branch' => 'XY-2', 'readyTasks' => ['XY-6']]]);
 });
 
 it('prints the epic tree depth first with readiness and unmet dependencies', function () {
@@ -199,15 +199,14 @@ it('lists claimed epics with their owners and blocked issues with their reasons'
     [, $claimed] = yt(['action' => 'claimed-epics', '--json' => true]);
     [, $blocked] = yt(['action' => 'blocked']);
 
-    expect(json_decode($claimed, true))->toBe([['id' => 'XY-40', 'state' => 'In Progress', 'summary' => '[EPIC] Summary of XY-40', 'slug' => 'summary-of-xy-40', 'owner' => 'host:/w/XY-40']])
+    expect(json_decode($claimed, true))->toBe([['id' => 'XY-40', 'state' => 'In Progress', 'summary' => '[EPIC] Summary of XY-40', 'owner' => 'host:/w/XY-40']])
         ->and($blocked)->toContain("XY-41 [TASK] Summary of XY-41\n    [AGENT:BLOCKED]\n    **Что мешает:** нет ключа API.", 'XY-7 [TASK] Summary of XY-7 <- XY-6 (Ready)');
 });
 
-it('prints the state and the branch slug of an issue', function () {
+it('prints the state of an issue', function () {
     epicProject()->issue('XY-50', 'Epic', 'Review', summary: '[EPIC] Личные заметки');
 
-    expect(yt(['action' => 'state', 'id' => 'XY-50']))->toBe([0, "Review\n"])
-        ->and(yt(['action' => 'slug', 'id' => 'XY-50'])[1])->toBe(function_exists('transliterator_transliterate') ? "licnye-zametki\n" : yt(['action' => 'slug', 'id' => 'XY-50'])[1]);
+    expect(yt(['action' => 'state', 'id' => 'XY-50']))->toBe([0, "Review\n"]);
 });
 
 it('prints the knowledge base tree', function () {

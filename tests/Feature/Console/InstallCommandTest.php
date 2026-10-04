@@ -349,7 +349,8 @@ it('asks for the connection, the project and the settings, and offers the setup'
         ->expectsConfirmation('A YouTrack token is already set (environment or .env). Keep it?', 'no')
         ->expectsQuestion('YouTrack permanent token', 'secret-token')
         ->expectsQuestion('YouTrack project short name', 'XY')
-        ->expectsQuestion('Base branch', 'main')
+        ->expectsQuestion('Production branch', 'main')
+        ->expectsQuestion('Development branch', 'dev')
         ->expectsChoice('What happens to an epic branch when the agents are done?', 'local-branch', [
             'local-branch' => 'local-branch — the branch stays local, a human merges it',
             'pull-request' => 'pull-request — the branch is pushed and a PR opened (gh), a human merges it',
@@ -370,7 +371,8 @@ it('installs without YouTrack when the URL is left empty', function () {
     $this->artisan('agentio:install')
         ->expectsQuestion('YouTrack URL', '')
         ->expectsQuestion('YouTrack project short name', 'XY')
-        ->expectsQuestion('Base branch', 'main')
+        ->expectsQuestion('Production branch', 'main')
+        ->expectsQuestion('Development branch', 'dev')
         ->expectsChoice('What happens to an epic branch when the agents are done?', 'auto-merge', [
             'local-branch' => 'local-branch — the branch stays local, a human merges it',
             'pull-request' => 'pull-request — the branch is pushed and a PR opened (gh), a human merges it',

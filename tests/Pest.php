@@ -97,13 +97,7 @@ function temporaryDirectory(): string
     $directory = sys_get_temp_dir().DIRECTORY_SEPARATOR.'agentio-'.Str::random(12);
     mkdir($directory, 0777, true);
 
-    test()->beforeApplicationDestroyed(function () use ($directory): void {
-        foreach (glob($directory.'/{,.}[!.]*', GLOB_BRACE) ?: [] as $file) {
-            unlink($file);
-        }
-
-        rmdir($directory);
-    });
+    test()->beforeApplicationDestroyed(fn () => (new Filesystem)->deleteDirectory($directory));
 
     return $directory;
 }
@@ -218,7 +212,7 @@ function projectForLoop(array $ideas = []): string
 }
 
 /**
- * A fake `artisan` of the host project: agentio:yt answers the ideas and empty lists, slug and state answer
+ * A fake `artisan` of the host project: agentio:yt answers the ideas and empty lists, state answers
  * fixed values; every call is appended to artisan-calls.log.
  *
  * @param  list<string>  $ideas
@@ -236,7 +230,6 @@ function writeFakeArtisan(string $project, array $ideas = []): void
         if ((\$argv[1] ?? '') === 'agentio:yt') {
             echo match (\$argv[2] ?? '') {
                 'ideas' => \$json ? {$ideasJson} : {$ideasText},
-                'slug' => "profile-page\\n",
                 'state' => "Review\\n",
                 'blocked' => "Blocked (needs a human):\\nReady but waiting for dependencies:\\n",
                 default => \$json ? '[]' : '',

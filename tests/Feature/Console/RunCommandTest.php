@@ -6,6 +6,7 @@ use Illuminate\Support\Facades\Route;
 use Obrazmisli\Agentio\Console\Commands\RunCommand;
 use Obrazmisli\Agentio\Runtime\LoopState;
 use Obrazmisli\Agentio\Runtime\MergePolicy;
+use Obrazmisli\Agentio\Runtime\SessionSettings;
 use Obrazmisli\Agentio\Settings;
 use Symfony\Component\Process\Process;
 
@@ -31,7 +32,7 @@ it('passes the settings, the session settings and the MCP configs of the package
         'MERGE_POLICY' => 'pull-request',
         'AGENT_LOG_DIR' => $project.'/storage/logs/agents',
         'AGENTIO_STOP_FILE' => $project.'/storage/logs/agents/stop',
-        'AGENTIO_SESSION_SETTINGS' => $package.'/resources/claude/settings.json',
+        'AGENTIO_SESSION_SETTINGS' => (new SessionSettings(app(Settings::class)))->toJson(),
         'AGENTIO_MCP_CONFIG' => $package.'/resources/claude/mcp/youtrack.json',
         'AGENTIO_TEST_COMMAND' => 'vendor/bin/pest --compact',
         // The variables Laravel loaded from the project .env stay out of the loop and of the agents' sessions.

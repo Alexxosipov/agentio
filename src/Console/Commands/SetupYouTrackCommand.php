@@ -75,7 +75,7 @@ final class SetupYouTrackCommand extends Command
 
         $manifest = $settings->manifest();
         $setup = new YouTrackSetup($client, $tools, KnowledgeBase::ofPackage(), $dryRun);
-        $placeholders = new Placeholders($project, $settings->baseBranch(), $policy, $manifest->kb);
+        $placeholders = new Placeholders($project, $settings->baseBranch(), $policy, $manifest->kb, $settings->productionBranch());
 
         try {
             $kb = $setup->run($project, $placeholders);

@@ -24,7 +24,7 @@ allowed-tools: Bash(php artisan agentio:yt *) Bash(php artisan agentio:run --dry
 
 ```
 Идеи к планированию:     {{project}}-1 …
-Готовые эпики:           {{project}}-10 epic/{{project}}-10-<slug> · первая волна: {{project}}-14, {{project}}-15
+Готовые эпики:           {{project}}-10 ветка {{project}}-10 · первая волна: {{project}}-14, {{project}}-15
 В работе:                {{project}}-11 owner=host:/path · сессия жива/нет · будет возобновлён да/нет
 Заблокировано (ждёт человека):
   {{project}}-20 <summary>

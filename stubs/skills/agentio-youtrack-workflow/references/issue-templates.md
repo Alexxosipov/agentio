@@ -31,7 +31,7 @@
 1. STORY {{project}}-.. → 2. STORY {{project}}-.. (параллельно с ..)
 
 ## Ветка
-`epic/<ID>-<slug>` (создаётся автоматически циклом агентов, `php artisan agentio:run`)
+`<ID эпика>` от `{{base_branch}}` (создаётся автоматически циклом агентов, `php artisan agentio:run`)
 ```
 
 ## [STORY]

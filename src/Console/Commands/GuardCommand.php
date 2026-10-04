@@ -42,7 +42,7 @@ final class GuardCommand extends Command
 
         $guard = new BashGuard(
             $project,
-            array_values(array_unique([is_string($baseBranch) && $baseBranch !== '' ? $baseBranch : $settings->baseBranch(), 'main', 'master'])),
+            array_values(array_unique([...(is_string($baseBranch) && $baseBranch !== '' ? [$baseBranch] : []), ...$settings->protectedBranches()])),
             [$project, ...$this->additionalDirectories($project)],
         );
         $reason = $guard->reason($command, $cwd);

@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Creates (or reuses) the git worktree of an epic and prepares an isolated environment in it:
+# Creates (or reuses) the git worktree of an epic on its branch (EPIC_BRANCH, named after the epic id and started
+# from the development branch BASE_BRANCH) and prepares an isolated environment in it:
 # composer dependencies, its own .env (own APP_KEY, SQLite database, cache/queue prefixes, port),
 # migrations and, when the project has a frontend build, JS dependencies and the build.
 # Prints the worktree path on the last line of stdout.
@@ -8,7 +9,7 @@
 #   php artisan agentio:worktree <EPIC-ID>            create or reuse, then prepare
 #   php artisan agentio:worktree <EPIC-ID> --remove   remove the worktree (the branch is kept)
 #
-# Env (set by agentio:worktree): AGENTIO_ROOT (the project), BASE_BRANCH, WORKTREES_DIR,
+# Env (set by agentio:worktree): AGENTIO_ROOT (the project), BASE_BRANCH, EPIC_BRANCH, WORKTREES_DIR,
 #   WORKTREE_SQLITE=1 (0 keeps the database settings of .env.example),
 #   WORKTREE_PORT_BASE=8100 (APP_URL=http://localhost:<base + epic number % 800>),
 #   AGENTIO_WORKTREE_SETUP (optional: a shell command run last inside the worktree with the epic id as $1,
@@ -48,14 +49,13 @@ if [[ "$action" == "--remove" ]]; then
     exit 0
 fi
 
-branch="$(git -C "$root" for-each-ref --format='%(refname:short)' "refs/heads/epic/$epic-*" | head -n 1)"
+branch="${EPIC_BRANCH:-$epic}"
 
-if [[ -z "$branch" ]]; then
-    slug="$(php "$root/artisan" agentio:yt slug "$epic")"
-    branch="epic/$epic-$slug"
+if ! git -C "$root" show-ref --verify --quiet "refs/heads/$branch" \
+    && ! git -C "$root" show-ref --verify --quiet "refs/heads/$base"; then
+    log "the development branch $base does not exist: run php artisan agentio:install (it creates it)"
+    exit 1
 fi
-
-mkdir -p "$worktrees"
 
 if [[ -d "$dir/.git" || -f "$dir/.git" ]]; then
     log "reusing $dir ($(git -C "$dir" branch --show-current))"

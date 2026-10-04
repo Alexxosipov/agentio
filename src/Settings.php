@@ -14,6 +14,10 @@ use ValueError;
  */
 final readonly class Settings
 {
+    public const string DEVELOPMENT_BRANCH = 'dev';
+
+    public const string PRODUCTION_BRANCH = 'main';
+
     public function __construct(private string $basePath) {}
 
     public function basePath(): string
@@ -35,11 +39,30 @@ final readonly class Settings
     }
 
     /**
-     * The branch the epic branches start from and humans merge into.
+     * The development branch (dev): what the develop server runs; the epic branches start from it and are merged
+     * back into it.
      */
     public function baseBranch(): string
     {
-        return self::string('agentio.base_branch') ?? $this->manifest()->baseBranch ?? 'main';
+        return self::string('agentio.base_branch') ?? $this->manifest()->baseBranch ?? self::DEVELOPMENT_BRANCH;
+    }
+
+    /**
+     * The production branch (main): releases of the development branch are merged into it by humans.
+     */
+    public function productionBranch(): string
+    {
+        return self::string('agentio.production_branch') ?? $this->manifest()->productionBranch ?? self::PRODUCTION_BRANCH;
+    }
+
+    /**
+     * The branches agents never push to, switch to or move: the development branch first, then the production one.
+     *
+     * @return list<string>
+     */
+    public function protectedBranches(): array
+    {
+        return array_values(array_unique([$this->baseBranch(), $this->productionBranch(), 'main', 'master']));
     }
 
     /**

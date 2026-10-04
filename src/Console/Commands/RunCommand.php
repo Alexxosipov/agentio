@@ -11,6 +11,7 @@ use Obrazmisli\Agentio\Install\Installer;
 use Obrazmisli\Agentio\Install\Preconditions;
 use Obrazmisli\Agentio\Runtime\LoopState;
 use Obrazmisli\Agentio\Runtime\MergePolicy;
+use Obrazmisli\Agentio\Runtime\SessionSettings;
 use Obrazmisli\Agentio\Settings;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Process\Process;
@@ -27,9 +28,6 @@ final class RunCommand extends Command
     use RunsPackageScripts;
 
     public const string SCRIPT = 'agent-loop.sh';
-
-    /** Settings of the headless agent sessions: permission rules and the guard hook. */
-    public const string SESSION_SETTINGS = 'resources/claude/settings.json';
 
     /**
      * @var string
@@ -105,8 +103,8 @@ final class RunCommand extends Command
     }
 
     /**
-     * The environment of the loop: the script environment plus the loop settings, the session settings of the
-     * package and the MCP configs of the headless sessions (YouTrack, and Laravel Boost when the project has it).
+     * The environment of the loop: the script environment plus the loop settings, the settings of the headless
+     * sessions (SessionSettings, as JSON) and their MCP configs (YouTrack, and Laravel Boost when the project has it).
      *
      * @return array<string, string|false>
      */
@@ -127,7 +125,7 @@ final class RunCommand extends Command
             'MERGE_POLICY' => $policy->value,
             'AGENT_LOG_DIR' => $loop->logsPath(),
             'AGENTIO_STOP_FILE' => $loop->stopFile(),
-            'AGENTIO_SESSION_SETTINGS' => dirname(__DIR__, 3).'/'.self::SESSION_SETTINGS,
+            'AGENTIO_SESSION_SETTINGS' => (new SessionSettings($settings))->toJson(),
             'AGENTIO_MCP_CONFIG' => implode(' ', $mcp),
         ]);
     }

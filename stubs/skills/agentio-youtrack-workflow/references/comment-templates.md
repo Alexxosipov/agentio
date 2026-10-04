@@ -17,7 +17,7 @@
 ```markdown
 [AGENT:START]
 owner: `host:/abs/path/to/worktree#{{project}}-42`
-branch: `epic/{{project}}-10-profile-page`
+branch: `{{project}}-10`
 worktree: `/abs/path/to/worktree`
 
 **Роль:** developer | orchestrator | project-manager | reviewer
@@ -55,7 +55,7 @@ worktree: `/abs/path/to/worktree`
 **Что нужно от человека:** выбрать вариант и ответить комментарием:
 1. Инициалы на цветном фоне (уже есть хук `use-initials`).
 2. Статичная картинка `public/images/avatar-default.png`.
-**Что уже сделано:** коммиты `abc1234` (миграция), ветка `epic/{{project}}-10-profile-page`.
+**Что уже сделано:** коммиты `abc1234` (миграция), ветка `{{project}}-10`.
 **Как продолжить:** ответить комментарием и вернуть Stage в `Ready`.
 ```
 
@@ -65,7 +65,7 @@ worktree: `/abs/path/to/worktree`
 [AGENT:DONE]
 **Сделано:**
 - Action `UpdateUserAvatar`, джоб `ProcessUserAvatar` (очередь `media`), маршрут `user-avatar.update`.
-**Коммиты:** `abc1234`, `def5678` (ветка `epic/{{project}}-10-profile-page`).
+**Коммиты:** `abc1234`, `def5678` (ветка `{{project}}-10`).
 **Как проверить:**
 - `php artisan agentio:test --filter=Avatar`
 - Вручную: /settings/profile → загрузить PNG → превью появляется после обработки очереди.

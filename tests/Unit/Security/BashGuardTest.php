@@ -52,7 +52,7 @@ it('protects branches and history', function (string $command, string $reason) {
     ['git push origin develop', "pushing to protected branch 'develop'"],
     ['git push origin HEAD:main', "pushing to protected branch 'main'"],
     ['git push --force origin epic/XY-2', 'force/mirror push (--force)'],
-    ['git push origin feature/x', "only epic/* branches may be pushed or deleted (got 'feature/x')"],
+    ['git push origin feature/x', "only the branches of issues (e.g. TP-12) may be pushed or deleted (got 'feature/x')"],
     ['git branch -D develop', "deleting, renaming or force-moving branch 'develop'"],
     ['git reset --hard HEAD~1', 'git reset --hard is not allowed'],
     ['git stash', 'git stash is not allowed'],

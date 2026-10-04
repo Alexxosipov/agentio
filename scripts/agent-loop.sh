@@ -12,7 +12,7 @@
 #
 # Env (set by agentio:run): AGENTIO_ROOT (the project), YOUTRACK_URL, YOUTRACK_TOKEN, AGENTIO_PROJECT, BASE_BRANCH,
 #   WORKTREES_DIR, MERGE_POLICY, MAX_PARALLEL, MAX_PARALLEL_TASKS, AGENT_LOOP_INTERVAL, CLAUDE_BIN, CLAUDE_MODEL,
-#   AGENT_LOG_DIR, AGENTIO_STOP_FILE, AGENTIO_SESSION_SETTINGS (settings of headless sessions), AGENTIO_MCP_CONFIG
+#   AGENT_LOG_DIR, AGENTIO_STOP_FILE, AGENTIO_SESSION_SETTINGS (settings of headless sessions, JSON), AGENTIO_MCP_CONFIG
 #   (MCP configs of headless sessions, space separated), MAX_RESTARTS=3 (crashed epic sessions resumed before Blocked).
 # Files in AGENT_LOG_DIR: loop.log, loop.pid (this loop), <EPIC>.pid/.log (epic sessions), plan-<IDEA>.pid/.log.
 set -uo pipefail
@@ -96,39 +96,14 @@ running_epics() {
 
 running_count() { running_epics | grep -c . ; }
 
-# Settings of a headless session: the package's session settings (permissions, the guard hook) plus the permission
-# rules of the project's own .claude/settings.json, if it has one. Claude Code ignores the allow rules of a
-# directory whose workspace trust was never accepted (every new epic worktree), so they are passed with --settings.
-session_settings() {
-    php -r '
-        $read = function (string $file): array {
-            $data = json_decode((string) @file_get_contents($file), true);
-            return is_array($data) ? $data : [];
-        };
-        $settings = $read($argv[1]);
-        $project = $read($argv[2]."/.claude/settings.json");
-        foreach (["allow", "deny"] as $list) {
-            $rules = array_merge((array) ($settings["permissions"][$list] ?? []), (array) ($project["permissions"][$list] ?? []));
-            if ($list === "deny") {
-                array_push($rules, "Bash(git push origin ".$argv[3]."*)", "Bash(git checkout ".$argv[3]."*)");
-            }
-            if ($rules !== []) {
-                $settings["permissions"][$list] = array_values(array_unique($rules, SORT_REGULAR));
-            }
-        }
-        echo json_encode($settings, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
-    ' "${AGENTIO_SESSION_SETTINGS:?}" "$1" "$BASE_BRANCH"
-}
-
 claude_headless() {
-    local dir="$1" logfile="$2" prompt="$3" settings
-    settings="$(session_settings "$dir")"
+    local dir="$1" logfile="$2" prompt="$3"
     (
         cd "$dir" || exit 1
         exec setsid "$CLAUDE_BIN" -p "$prompt" \
             --permission-mode dontAsk \
             --strict-mcp-config --mcp-config "${MCP_CONFIGS[@]}" \
-            --settings "$settings" \
+            --settings "$AGENTIO_SESSION_SETTINGS" \
             --output-format stream-json --verbose \
             ${CLAUDE_MODEL:+--model "$CLAUDE_MODEL"} \
             </dev/null >>"$logfile" 2>&1
@@ -138,7 +113,14 @@ claude_headless() {
 
 epic_state() { yt state "$1" 2>/dev/null; }
 
-epic_branch() { git -C "$ROOT" for-each-ref --format='%(refname:short)' "refs/heads/epic/$1-*" | head -n 1; }
+# The branch of an epic: named after its id (an epic started by an earlier agentio version: epic/<ID>-<slug>).
+epic_branch() {
+    if git -C "$ROOT" show-ref --verify --quiet "refs/heads/$1"; then
+        echo "$1"
+    else
+        git -C "$ROOT" for-each-ref --format='%(refname:short)' "refs/heads/epic/$1-*" | head -n 1
+    fi
+}
 
 launch_epic() {
     local epic="$1" dir pid
@@ -170,15 +152,11 @@ finish_epic() {
                 && command -v gh >/dev/null && gh pr view "$branch" --json url >/dev/null 2>&1; then
                 artisan agentio:worktree "$epic" --remove && log "$epic: PR exists, worktree removed"
             elif [[ "$MERGE_POLICY" == "auto-merge" ]] && ! git -C "$ROOT" remote | grep -q .; then
-                if [[ -z "$(git -C "$ROOT" status --porcelain --untracked-files=no)" && "$(git -C "$ROOT" branch --show-current)" == "$BASE_BRANCH" ]]; then
-                    if git -C "$ROOT" merge --no-ff --no-edit "$branch" >>"$LOG_DIR/loop.log" 2>&1; then
-                        log "$epic: auto-merged $branch into $BASE_BRANCH"
-                    else
-                        git -C "$ROOT" merge --abort 2>/dev/null
-                        log "$epic: auto-merge failed (conflict), left for a human"
-                    fi
+                # The same acceptance as the dashboard's: checks, merge (aborted on a conflict), worktree, Done.
+                if artisan agentio:accept "$epic" >>"$LOG_DIR/loop.log" 2>&1; then
+                    log "$epic: auto-merged $branch into $BASE_BRANCH and closed"
                 else
-                    log "$epic: auto-merge skipped: main checkout is dirty or not on $BASE_BRANCH"
+                    log "$epic: auto-merge not possible (see above), left for a human"
                 fi
             else
                 log "$epic: ready for human review on branch $branch (worktree kept: $WORKTREES_DIR/$epic)"
@@ -295,8 +273,8 @@ case "$MODE" in
     kill) kill_sessions; exit 0 ;;
 esac
 
-if (( ${#MCP_CONFIGS[@]} == 0 )); then
-    echo "AGENTIO_MCP_CONFIG is not set: start the loop with php artisan agentio:run" >&2
+if (( ${#MCP_CONFIGS[@]} == 0 )) || [[ -z "${AGENTIO_SESSION_SETTINGS:-}" ]]; then
+    echo "AGENTIO_MCP_CONFIG or AGENTIO_SESSION_SETTINGS is not set: start the loop with php artisan agentio:run" >&2
     exit 1
 fi
 

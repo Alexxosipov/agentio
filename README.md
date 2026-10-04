@@ -12,13 +12,13 @@
 
 Autonomous agentic development cycle for Laravel: YouTrack as the source of truth, Claude Code as PM, analyst, architect, developer and reviewer.
 
-A human files an idea in YouTrack and accepts the result. Everything in between is done by Claude Code agents: requirements (project manager), system analysis kept per product module and feature (analyst), the design of each epic (architect), stories and tasks with dependencies, code and tests (developer subagents, in parallel when files do not overlap), story reviews (reviewer) and a full test run. Every epic is worked on in its own git worktree and branch `epic/<ID>-<slug>`; YouTrack is the only source of truth, so work resumes from any point after a crash.
+A human files an idea in YouTrack and accepts the result. Everything in between is done by Claude Code agents: requirements (project manager), system analysis kept per product module and feature (analyst), the design of each epic (architect), stories and tasks with dependencies, code and tests (developer subagents, in parallel when files do not overlap), story reviews (reviewer) and a full test run. Every epic is worked on in its own git worktree and in a branch named after its issue id (`TP-12`), started from the development branch `dev` and merged back into it; `main` is production. YouTrack is the only source of truth, so work resumes from any point after a crash.
 
 The agents work with YouTrack only through its **MCP server**. The package adds only **skills** to the project (`.claude/skills/agentio-*`); the loop scripts, the settings of the agents' sessions and the manual stay in the package and run through `php artisan agentio:*`. It also configures the YouTrack project, runs the loop and shows its state in the terminal and in a dashboard.
 
 ## Requirements
 
-- PHP 8.3+ with `mbstring` (`posix`, `pcntl` and `intl` recommended), Laravel 12 or 13.
+- PHP 8.3+ with `mbstring` (`posix` and `pcntl` recommended), Laravel 12 or 13.
 - git, Composer, `setsid` (util-linux; on macOS `brew install util-linux`), bun or npm when the project has a frontend build.
 - [Claude Code](https://docs.claude.com/claude-code), logged in.
 - A YouTrack instance with its MCP server (`<url>/mcp`, YouTrack Cloud or a Server version that has it) and a permanent token.
@@ -28,10 +28,10 @@ The agents work with YouTrack only through its **MCP server**. The package adds 
 ## Quick start
 
 1. Install the package as a dev dependency: `composer require obrazmisli/agentio --dev`.
-2. Install the cycle into the project (a git repository whose `.env` is git-ignored): `php artisan agentio:install`. It asks for the YouTrack URL and a permanent token (hidden input), checks them through the YouTrack MCP server, adds the `youtrack` MCP server to Claude Code if it has none, asks for the project short name (`ABC`; a missing project can be created), the base branch, the merge policy and **the directory of the epic worktrees**, offers to configure the YouTrack project and installs the skills.
-3. Commit `.claude/skills/agentio-*` and `.agentio.json` to the base branch: epic worktrees are created from it. `.env` (with the token) stays local.
+2. Install the cycle into the project (a git repository whose `.env` is git-ignored): `php artisan agentio:install`. It asks for the YouTrack URL and a permanent token (hidden input), checks them through the YouTrack MCP server, adds the `youtrack` MCP server to Claude Code if it has none, asks for the project short name (`ABC`; a missing project can be created), the production and the development branch (`main` and `dev`; the missing one is created locally), the merge policy and **the directory of the epic worktrees**, offers to configure the YouTrack project and installs the skills.
+3. Commit `.claude/skills/agentio-*` and `.agentio.json` to `dev`: epic worktrees are created from it. `.env` (with the token) stays local. Push `dev` and `main` if the project has a remote, and point the develop server at `dev` and production at `main`.
 4. File an idea in YouTrack (Type `Idea` or the `idea` tag, Stage `Backlog`), check what the loop would do with `php artisan agentio:run --dry-run`, then start it: `php artisan agentio:run`.
-5. Watch the agents at `/agentio` or with `php artisan agentio:status`, answer `[AGENT:BLOCKED]` comments, and accept epics that reach `Review` on their page in the dashboard (or by merging their `epic/<ID>-<slug>` branch yourself).
+5. Watch the agents at `/agentio` or with `php artisan agentio:status`, answer `[AGENT:BLOCKED]` comments, and accept epics that reach `Review` on their page in the dashboard or with `php artisan agentio:accept <ID>` (it merges the epic branch into `dev`). Release `dev` to `main` yourself when the develop server looks good.
 
 ## Installation
 
@@ -52,6 +52,16 @@ For local development of the package, use a path repository in the host project'
 ```bash
 composer require obrazmisli/agentio:@dev --dev
 ```
+
+## Branches
+
+| Branch | Role | Who changes it |
+|---|---|---|
+| `main` (`AGENTIO_PRODUCTION_BRANCH`) | Production | Humans: release `dev` into it |
+| `dev` (`AGENTIO_BASE_BRANCH`) | The develop server; epic branches start from it | Humans and `agentio:accept`: merge accepted epics into it |
+| `<EPIC-ID>`, e.g. `TP-12` | One epic: its tasks are committed here (`TP-14: …`), in the worktree `<worktrees>/TP-12` | The agents |
+
+Agents never push to, switch to or merge into `dev` and `main` (the session permissions and the `agentio:guard` hook refuse it); they may push and delete only branches named after issues. Epics started by an earlier agentio version keep their `epic/<ID>-<slug>` branch until they are accepted.
 
 ## What agentio adds to the project
 
@@ -96,7 +106,7 @@ php artisan agentio:yt ready-tasks TP-2
 php artisan agentio:yt validate TP-1              # structure checks of an epic or of the epics of an idea (exit 2)
 php artisan agentio:yt claim TP-14 --as=TP-14     # [AGENT:START] + agent-claimed + In Progress, verified (LOST: exit 3)
 php artisan agentio:yt release TP-14 --state=Done # Stage + the tag removed
-php artisan agentio:yt blocked | claimed-epics | state <ID> | kb-tree [<ARTICLE>] [--depth=N] | slug <ID>   # all with --json
+php artisan agentio:yt blocked | claimed-epics | state <ID> | kb-tree [<ARTICLE>] [--depth=N]   # all with --json
 ```
 
 The REST API is used only where the MCP server has no tool: `agentio:setup-youtrack` (custom fields, bundles, tags, saved searches), creating a missing project in `agentio:install`, and the read-only dashboard and `agentio:status` (they need the whole link graph and the comment feed of the project, which the MCP tools do not return).
@@ -117,7 +127,7 @@ In a terminal the command asks:
 2. **Token** — hidden input; when a token is already set it offers to keep it. Create a permanent token in YouTrack → Profile → Account Security → Tokens. The access is checked through the MCP server (`get_current_user`); on an error it explains what failed and asks again.
 3. **The youtrack MCP server** — `claude mcp get youtrack` tells whether Claude Code already has one for the project; if not, it is added: `claude mcp add --transport http --scope local youtrack <url>/mcp --header "Authorization: Bearer <token>"`. A local-scope server is stored by Claude Code in `~/.claude.json` under the project path: private, never committed. `--mcp-scope=user` adds it for all your projects instead (handy for working interactively in the epic worktrees, which have other paths). When you enter a new token, the server is replaced.
 4. **Project short name** — default `.agentio.json`, then `AGENTIO_PROJECT`. When the project does not exist (or the token cannot see it), it offers to create it (with the token owner as the leader; the token needs the permission to create projects).
-5. **Base branch** (default: `.agentio.json`, then the current branch) and **merge policy** (`local-branch`, `pull-request`, `auto-merge`).
+5. **Production branch** (default: `.agentio.json`, then `main`, `master` or the current branch), **development branch** (default: `.agentio.json`, then `dev`) and **merge policy** (`local-branch`, `pull-request`, `auto-merge`). A missing production branch is created from the current commit, a missing development branch from the production branch — locally, without switching the checkout; branches the remote lacks are reported so that you push them.
 6. **Directory of the epic worktrees** — every epic gets `<directory>/<EPIC-ID>`; it must be outside the project and is written to `.env` as `AGENTIO_WORKTREES_PATH`. There is no silent default: the loop refuses to start without it.
 7. Whether to configure the YouTrack project now (`agentio:setup-youtrack`).
 
@@ -135,7 +145,8 @@ YOUTRACK_TOKEN=perm-... php artisan agentio:install --no-interaction \
 | `--token=TOKEN` | Permanent token. Default: `YOUTRACK_TOKEN` (prefer the variable or the prompt: options stay in the shell history) |
 | `--project=KEY` | Project short name. Default: `.agentio.json`, then `AGENTIO_PROJECT` |
 | `--create-project`, `--project-name=NAME` | Create the project when it does not exist (asked when interactive); its name defaults to the short name |
-| `--base-branch=BRANCH` | Branch epic branches start from and humans merge into |
+| `--base-branch=BRANCH` | Development branch (default `dev`): what the develop server runs; epic branches start from it and are merged into it |
+| `--production-branch=BRANCH` | Production branch (default `main`): humans release the development branch into it |
 | `--merge-policy=POLICY` | `local-branch` (the branch stays local), `pull-request` (push + PR via `gh`) or `auto-merge` |
 | `--worktrees=DIR` | Directory of the epic worktrees, outside the project |
 | `--mcp-scope=local\|user` | Scope of the `youtrack` MCP server added to Claude Code (default `local`) |
@@ -229,7 +240,7 @@ Screens:
 
 When an epic is in `Review`, its page offers the human's two decisions (turn them off with `AGENTIO_UI_ACTIONS=false`):
 
-- **Accept**: `git merge --no-ff epic/<ID>-<slug>` into the base branch of the checkout the application runs from (nothing is pushed), then, as ticked, `git worktree remove` of the epic worktree, `git branch -d` of the branch, and the stories in `Review` plus the epic moved to `Done` with a comment on the epic (the epic stays in `Review` if a story has not passed review). The merge runs only when the epic is in `Review`, no agent session works on it, the epic worktree has nothing uncommitted, and the main checkout is on the base branch with no uncommitted changes to tracked files; a merge that conflicts is aborted and the conflicting files are listed. When the base branch already contains the epic (a pull request was merged), accepting only cleans up and closes the issues.
+- **Accept** (also `php artisan agentio:accept <ID>`; the loop runs it for `auto-merge` without a remote): `git merge --no-ff` of the epic branch into the development branch of the checkout the application runs from (nothing is pushed), then, as ticked, `git worktree remove` of the epic worktree, `git branch -d` of the branch, and the stories in `Review` plus the epic moved to `Done` with a comment on the epic (the epic stays in `Review` if a story has not passed review). The merge runs only when the epic is in `Review`, no agent session works on it, the epic worktree has nothing uncommitted, and the main checkout is on the base branch with no uncommitted changes to tracked files; a merge that conflicts is aborted and the conflicting files are listed. When the base branch already contains the epic (a pull request was merged), accepting only cleans up and closes the issues.
 - **Send back for rework**: a `Ready` TASK `[TASK] Review: …` with the remark in the chosen story, the remark as a comment of the story, the story and the epic back to `Ready`. The loop resumes the epic in the same worktree and branch.
 
 Issues are changed through the YouTrack MCP server, like the agents do; one action runs at a time, and the actions are POST requests protected by the session's CSRF token (so `ui.middleware` must start a session, as `web` does).
@@ -280,7 +291,8 @@ Everything can be set from `.env`; publish the config with `php artisan vendor:p
 | `AGENTIO_PROJECT` | `youtrack.project` | the project in `.agentio.json`, then `TP` | YouTrack project short name |
 | `AGENTIO_YOUTRACK_TIMEOUT` | `youtrack.timeout` | 30 | Seconds per YouTrack request (MCP and REST) |
 | `AGENTIO_YOUTRACK_RETRIES` | `youtrack.retries` | 2 | Retries of a request after a connection error, a 5xx or a 429 |
-| `AGENTIO_BASE_BRANCH` | `base_branch` | the branch in `.agentio.json`, then `main` | Base branch of the epic branches |
+| `AGENTIO_BASE_BRANCH` | `base_branch` | the branch in `.agentio.json`, then `dev` | Development branch: epic branches start from it and are merged into it |
+| `AGENTIO_PRODUCTION_BRANCH` | `production_branch` | the branch in `.agentio.json`, then `main` | Production branch: agents never touch it; humans release the development branch into it |
 | `AGENTIO_MERGE_POLICY` | `merge_policy` | the policy in `.agentio.json`, then `local-branch` | `local-branch`, `pull-request` or `auto-merge` |
 | `AGENTIO_WORKTREES_PATH` | `worktrees_path` | — (asked by `agentio:install`) | Where epic worktrees are created; the loop refuses to start without it |
 | `AGENTIO_WORKTREE_SETUP` | `worktree_setup` | — | Shell command run last in every new epic worktree with the epic id as `$1` |
