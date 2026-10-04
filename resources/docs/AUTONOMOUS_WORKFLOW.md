@@ -535,7 +535,7 @@ php artisan agentio:run --kill     # прервать работающие се�
 
 ### 6.1. Где результат
 
-Эпик в `Review` (поиск «{{project}}: эпики на приёмке», раздел «Awaiting a human (Review)» в `php artisan agentio:status`). В `loop.log` будет строка `ready for human review on branch epic/{{project}}-2-<slug> (worktree kept: <worktrees>/{{project}}-2)`.
+Эпик в `Review` (поиск «{{project}}: эпики на приёмке», раздел «Awaiting a human (Review)» в `php artisan agentio:status`). В `loop.log` будет строка `ready for human review on branch {{project}}-2 (worktree kept: <worktrees>/{{project}}-2)`.
 - Ветка: `{{project}}-2` (`git branch --list {{project}}-2`).
 - Worktree: `<worktrees>/{{project}}-2`.
 
