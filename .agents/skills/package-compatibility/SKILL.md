@@ -36,6 +36,6 @@ Keep package code, dependencies, and workflows compatible with the supported Lar
 ## Anti-Patterns
 
 - Assuming the latest local dependency version represents the whole support matrix.
-- Adding PHP syntax or Laravel APIs that exceed `composer.json` constraints.
+- Adding PHP syntax or Laravel APIs that exceed `composer.json` constraints. Local tools run on newer PHP and parse PHP 8.4+ syntax without complaint: `new Foo()->bar()` without wrapping parentheses, property hooks, asymmetric visibility. Pint's `new_expression_parentheses` rule keeps `(new Foo())->bar()`; the rest is caught only by the PHP 8.3 lanes of CI, so a red 8.3 lane is never "just the linter".
 - Assuming the executable bit on package files: Composer may unpack a release without it, so run scripts through `bash` or `php`.
 - Removing dependency stability lanes because they are slower than a single happy path.

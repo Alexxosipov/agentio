@@ -20,6 +20,9 @@
                 "try"
             ]
         },
+        "new_expression_parentheses": {
+            "use_parentheses": true
+        },
         "global_namespace_import": {
             "import_classes": true
         },

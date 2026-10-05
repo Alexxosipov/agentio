@@ -2,6 +2,10 @@
 
 ## [Unreleased](https://github.com/Alexxosipov/agentio/compare/v0.3.0...main)
 
+### Fixed
+
+- The test suite parses on PHP 8.3 again (a test used PHP 8.4's `new Foo()->bar()`, and the PHP 8.3 lanes of CI failed in the linter before running the tests); Pint's `new_expression_parentheses` rule keeps the parentheses.
+
 ## [v0.3.0](https://github.com/Alexxosipov/agentio/releases/tag/v0.3.0) - 2026-10-05
 
 Update with `composer require obrazmisli/agentio:^0.3 --dev`, then run `php artisan agentio:install` (refreshes the skills) and commit `.claude/skills/agentio-*` to the development branch together with `composer.json` and `composer.lock`. ADR-001 of an existing knowledge base is not rewritten: the architect adds the code structure rule to it on the next epic.

@@ -119,7 +119,7 @@ it('leaves the dependencies outside the epic out of its first wave', function ()
 
     expect($graph->readyTasks('E3'))->toBe([])
         ->and($graph->firstWave('E3'))->toBe(['T4'])
-        ->and(implode("\n", new StructureValidator($graph)->problems(['E3'])))->not->toContain('first wave');
+        ->and(implode("\n", (new StructureValidator($graph))->problems(['E3'])))->not->toContain('first wave');
 });
 
 it('reports a Ready epic whose tasks all wait for each other', function () {
@@ -131,7 +131,7 @@ it('reports a Ready epic whose tasks all wait for each other', function () {
     ]);
 
     expect($graph->firstWave('E1'))->toBe([])
-        ->and(new StructureValidator($graph)->problems(['E1']))->toContain('E1: the epic is Ready but its first wave of ready tasks is empty: every task waits for a task of the epic that is not Ready or not described.');
+        ->and((new StructureValidator($graph))->problems(['E1']))->toContain('E1: the epic is Ready but its first wave of ready tasks is empty: every task waits for a task of the epic that is not Ready or not described.');
 });
 
 it('detects dependency cycles', function () {
