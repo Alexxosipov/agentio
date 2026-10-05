@@ -45,6 +45,16 @@ it('passes the settings, the session settings and the MCP configs of the package
         ->toBe($package."/resources/claude/mcp/youtrack.json\n".$package.'/resources/claude/mcp/laravel-boost.json');
 });
 
+it('lets the artisan commands of the loop read the bot settings from .env afresh', function () {
+    $project = projectForLoop();
+    file_put_contents($project.'/.env', "AGENTIO_TELEGRAM_BOT_TOKEN=1:old\nAGENTIO_TRANSCRIPTION_DRIVER=openai\nAGENTIO_PROJECT=XY\n");
+
+    $environment = app(RunCommand::class)->environment(app(Settings::class), MergePolicy::LocalBranch, app(LoopState::class));
+
+    // The bot keys are unset, so the children read .env; the other agentio keys are passed as configured.
+    expect($environment)->toMatchArray(['AGENTIO_TELEGRAM_BOT_TOKEN' => false, 'AGENTIO_TRANSCRIPTION_DRIVER' => false, 'AGENTIO_PROJECT' => 'XY']);
+});
+
 it('runs the loop of the package in the project and streams its output', function () {
     projectForLoop(['XY-1']);
 

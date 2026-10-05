@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Process;
 use Illuminate\Support\Sleep;
 use Obrazmisli\Agentio\Install\EnvFile;
 use Obrazmisli\Agentio\Install\Installer;
@@ -10,11 +11,14 @@ use Obrazmisli\Agentio\Install\KnowledgeBase;
 use Obrazmisli\Agentio\Install\Manifest;
 use Obrazmisli\Agentio\Install\Placeholders;
 use Obrazmisli\Agentio\Runtime\MergePolicy;
+use Obrazmisli\Agentio\Telegram\Api\Requests\GetMe;
 use Obrazmisli\Agentio\Tests\Fakes\FakeYouTrackMcp;
+use Saloon\Http\Faking\MockClient;
+use Saloon\Http\Faking\MockResponse;
 
 const STUB_SKILLS = [
-    'agentio-develop-task', 'agentio-dispatch', 'agentio-laravel-architect', 'agentio-plan', 'agentio-project-manager',
-    'agentio-review-story', 'agentio-status', 'agentio-system-analyst', 'agentio-work-epic', 'agentio-youtrack-workflow',
+    'agentio-develop-task', 'agentio-dispatch', 'agentio-laravel-architect', 'agentio-plan', 'agentio-platform-skill', 'agentio-project-manager',
+    'agentio-review-story', 'agentio-saloon', 'agentio-status', 'agentio-system-analyst', 'agentio-telegram-assistant', 'agentio-work-epic', 'agentio-youtrack-workflow',
 ];
 
 beforeEach(function () {
@@ -407,6 +411,7 @@ it('installs without YouTrack when the URL is left empty', function () {
             'auto-merge' => 'auto-merge — merged automatically after a green full test run',
         ])
         ->expectsQuestion('Directory of the epic worktrees', '../'.basename($project).'-worktrees')
+        ->expectsConfirmation('Connect your own Telegram bot (questions of the agents, short reports, ideas by voice)?', 'no')
         ->expectsOutputToContain('YouTrack is skipped')
         ->assertSuccessful();
 
@@ -422,4 +427,17 @@ it('reports missing preconditions with hints', function () {
         ->expectsOutputToContain('git repository')
         ->expectsOutputToContain('Fix: Claude Code CLI (/nonexistent/claude)')
         ->assertSuccessful();
+});
+
+it('sets up the Telegram bot with the token it is given', function () {
+    $project = projectWithFakeClaude();
+    Process::fake(['*horizon:status*' => Process::result('Horizon is running.'), '*' => Process::result()]);
+    MockClient::global([GetMe::class => MockResponse::make(['ok' => true, 'result' => ['id' => 9, 'first_name' => 'PM', 'username' => 'xy_pm_bot']])]);
+    $token = '987654321:AAHdqTcvCH1vGWJxfSeofSAs0K5PALDsaw';
+
+    $this->artisan('agentio:install', offline($project, ['--telegram-token' => $token]))
+        ->expectsOutputToContain('the bot @xy_pm_bot')
+        ->assertSuccessful();
+
+    expect((new EnvFile($project.'/.env'))->get('AGENTIO_TELEGRAM_BOT_TOKEN'))->toBe($token);
 });

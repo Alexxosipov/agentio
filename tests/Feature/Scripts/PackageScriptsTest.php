@@ -94,8 +94,34 @@ it('gives epic sessions the session settings of the package and the project rule
     expect($settings['permissions']['allow'])->toContain('Bash(php artisan agentio:yt *)', 'Bash(php artisan agentio:commit *)', 'Bash(composer test*)', 'Bash(vendor/bin/pest*)', 'mcp__youtrack__*', 'Skill', 'Edit(./**)', 'Bash(make lint)', 'Bash(git push -u origin XY-*)', 'Bash(git merge --no-edit develop)', 'Bash(git merge --abort)')
         // "/**" is relative to the main checkout in a git worktree: it would not let the agents edit the epic worktree.
         ->and($settings['permissions']['allow'])->not->toContain('Edit(/**)', 'Bash(php -i)')
-        ->and($settings['permissions']['deny'])->toContain('Bash(git push --force*)', 'Bash(git push origin develop*)', 'Bash(git checkout develop*)', 'Bash(git push origin main*)', 'Bash(php artisan agentio:accept*)', 'Read(./.env)', 'Read(**/.env)', 'Edit(.claude/skills/agentio-*/**)', 'Read(./secrets/**)', 'mcp__laravel-boost__tinker', 'mcp__laravel-boost__get-config')
+        ->and($settings['permissions']['deny'])->toContain('Bash(git push --force*)', 'Bash(git push origin develop*)', 'Bash(git checkout develop*)', 'Bash(git push origin main*)', 'Bash(php artisan agentio:accept*)', 'Read(./.env)', 'Read(**/.env)', 'Edit(.claude/skills/agentio-*/**)', 'Read(./secrets/**)', 'mcp__laravel-boost__tinker', 'mcp__laravel-boost__record-rule', 'Bash(php artisan config:show*)', 'Edit(CLAUDE.md)')
         ->and($settings['hooks']['PreToolUse'][0]['hooks'][0]['command'])->toBe("php '{$package}/bin/agentio-guard' '--protected=develop,main,master' '--root=/srv/shared'");
+});
+
+it('gives the assistant of the Telegram bot read-only settings without YouTrack writes', function () {
+    projectForLoop();
+
+    $settings = (new SessionSettings(app(Settings::class)))->assistant();
+
+    expect($settings['permissions']['allow'])->toContain('Read', 'Skill', 'mcp__youtrack__get_issue', 'mcp__youtrack__search_issues', 'Bash(php artisan agentio:status*)')
+        ->and($settings['permissions']['allow'])->not->toContain('mcp__youtrack__*', 'Edit(./**)', 'Bash(php artisan *)')
+        ->and($settings['permissions']['deny'])->toContain('Edit', 'Write', 'mcp__youtrack__add_issue_comment', 'mcp__youtrack__update_issue', 'mcp__youtrack__create_issue', 'Bash(php artisan agentio:yt claim*)', 'Read(./.env)', 'Bash(git push origin develop*)')
+        ->and(json_decode((new SessionSettings(app(Settings::class)))->assistantJson(), true))->toBe($settings);
+});
+
+it('reports the events of the loop to the Telegram bot in the background', function () {
+    $project = projectForLoop(['XY-1']);
+    file_put_contents($project.'/artisan', str_replace('\'state\' => "Review\\n"', '\'state\' => "Done\\n"', (string) file_get_contents($project.'/artisan')));
+
+    $process = runPackageLoop($project, '--once');
+
+    // The report is queued by a background artisan call: wait for it a little.
+    for ($waited = 0; $waited < 30 && ! str_contains((string) @file_get_contents($project.'/artisan-calls.log'), 'agentio:telegram notify'); $waited++) {
+        usleep(100_000);
+    }
+
+    expect($process->getExitCode())->toBe(0, $process->getErrorOutput())
+        ->and(file_get_contents($project.'/artisan-calls.log'))->toContain('agentio:telegram notify planned XY-1');
 });
 
 it('marks an idea Blocked when its planning keeps ending unfinished', function () {

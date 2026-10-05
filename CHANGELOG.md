@@ -1,6 +1,31 @@
 # Release Notes
 
-## [Unreleased](https://github.com/Alexxosipov/agentio/compare/v0.5.0...main)
+## [Unreleased](https://github.com/Alexxosipov/agentio/compare/v0.6.0...main)
+
+## [v0.6.0](https://github.com/Alexxosipov/agentio/releases/tag/v0.6.0) - 2026-10-06
+
+Update with `composer require alexxosipov/agentio:^0.6 --dev`, then run `php artisan agentio:install` (refreshes the skills, adds `agentio-saloon`, `agentio-platform-skill` and `agentio-telegram-assistant`, and offers the Telegram bot) and `php artisan agentio:setup-youtrack` (refreshes the automation guide), and commit `.claude/skills/agentio-*` and `.agentio.json` to the development branch together with `composer.json` and `composer.lock`. ADR-001 of an existing knowledge base is not rewritten: the architect brings its «Структура кода» to the new rule on the next epic. With Laravel Boost, choose `alexxosipov/agentio` in `php artisan boost:install` to get the agentio guideline in `CLAUDE.md`.
+
+### Added
+
+- **The developer's Telegram bot**, a project manager in a chat (optional; the cycle never depends on it). It sends the questions of the agents (every new `[AGENT:BLOCKED]`) and short reports — an idea planned, an epic ready for review or merged, a session that gave up — and answers text and voice messages: a reply to a question becomes a comment of its issue («Ответ разработчика (Telegram)…») and, when it answers every question, returns the issue to the Stage its `[AGENT:BLOCKED]` names; a described feature becomes an idea for the loop; questions about the project are answered from YouTrack, the loop and the code. The messages are read by a read-only headless Claude Code session with the new `agentio-telegram-assistant` skill (`resources/claude/assistant.json`); agentio makes the YouTrack changes it decides on.
+- `php artisan agentio:setup-telegram <token>`: checks the token, writes it to `.env` (`AGENTIO_TELEGRAM_BOT_TOKEN`), sets up voice messages — an OpenAI-compatible `/audio/transcriptions` API or the local whisper.cpp CLI with ffmpeg (`AGENTIO_TRANSCRIPTION_*`, `AGENTIO_WHISPER_*`, `AGENTIO_FFMPEG_BIN`; more drivers through `TranscriptionManager::extend()`) — installs Laravel Horizon when the project has none (with `predis/predis` when PHP has no redis extension), restarts what still uses the old settings (`config:cache`, `horizon:terminate`) and pairs the developer's chat with `/start <code>` (`AGENTIO_TELEGRAM_CHAT_ID`). `agentio:install` offers it (`--telegram-token=`, `--skip-telegram`).
+- `php artisan agentio:telegram listen|notify|assist|send|status`. `agentio:run` starts the listener (long polling with `getUpdates`, written by the package itself on [Saloon](https://docs.saloon.dev), no Telegram SDK) and, when the project's Horizon is not running, Horizon, each in a process of its own next to the loop; it restarts them when they end and whenever a key of `.env` they use changes (`--no-telegram` turns the bot off). Every message goes through the `default` queue of the `redis` connection; the loop reports its events with `agentio:telegram notify` in the background.
+- The `agentio-saloon` skill: integrations with HTTP APIs without a maintained SDK through Saloon v4 (connector, requests, auth, errors and retries, DTOs, pagination, rate limits, OAuth2, tests with `MockClient`). Saloon is the one dependency the agents may add themselves: the guard allows `composer require saloonphp/*` (not `--dev`) and refuses any other package.
+- The `agentio-platform-skill` skill: when an epic brings the product to an external platform (Telegram Mini App, Telegram bot, VK Mini App, PWA, a payment provider…) without a skill in the project, the architect plans a first task that writes `.claude/skills/<platform>-development` from the official documentation (the sessions may search the web and read the documentation sites of these platforms).
+- `resources/boost/guidelines/core.md`, the agentio guideline for Laravel Boost.
+
+### Changed
+
+- The skills follow Laravel Boost and the project's conventions: a new «Laravel Boost и конвенции проекта» section of `agentio-youtrack-workflow` sets the priority (agentio process, project decisions, project conventions — `.ai/guidelines`, `.ai/rules`, the existing code —, Boost, agentio defaults), says how an autonomous session treats "ask the user", which Boost tools to use and which skills to load. The domain namespaces are now the default only for a project without a layout of its own (a project that keeps actions in `app/Actions` keeps doing so; changing the layout is a question to the human), tests go to `Feature` or `Unit` by Boost's `testing-best-practices`, Pint runs with `--format agent` on the agent's own files, Wayfinder routes are regenerated in a fresh worktree, new dependencies are the human's decision.
+- The questions to the human are written only in Russian, and the developer may answer them through the Telegram bot.
+- Session permissions: `php artisan test`, `php artisan config:show`, `boost:*`, the `record-rule` tool of Boost and edits of the files Boost generates are denied; the tools Boost 2 no longer has (`list-routes`, `list-artisan-commands`, `get-config`) are gone from the rules; `vendor/bin/phpunit` is no longer allowed; web search and the documentation sites of the supported platforms are allowed.
+
+- `php artisan about` shows an «Agentio» section (version, YouTrack, the bot, voice messages, the queue; no secrets). `composer.json` suggests `laravel/horizon`, `ext-redis`/`predis/predis` and `ext-pcntl`.
+
+### Fixed
+
+- `.env` is written atomically (a symlinked `.env` keeps its link); a new `.env` is readable by its owner only.
 
 ## [v0.5.0](https://github.com/Alexxosipov/agentio/releases/tag/v0.5.0) - 2026-10-05
 

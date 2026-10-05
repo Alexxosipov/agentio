@@ -5,6 +5,7 @@ declare(strict_types=1);
 use Illuminate\Filesystem\Filesystem;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Process;
 use Illuminate\Support\Str;
 use Obrazmisli\Agentio\Agentio;
 use Obrazmisli\Agentio\Process\ReadinessGraph;
@@ -12,9 +13,20 @@ use Obrazmisli\Agentio\Runtime\LoopState;
 use Obrazmisli\Agentio\Tests\TestCase;
 use Obrazmisli\Agentio\YouTrack\Issue;
 use Obrazmisli\Agentio\YouTrack\State;
+use Saloon\Config;
+use Saloon\Http\Faking\MockClient;
+
+// The Telegram Bot API and the transcription APIs are called through Saloon, which Http::fake() does not see:
+// a test that sends a Saloon request without a MockClient fails.
+Config::preventStrayRequests();
 
 uses(TestCase::class)
-    ->afterEach(fn () => Agentio::auth(null))
+    // A process started through the Process facade must be faked: no test runs composer, Claude Code or Horizon.
+    ->beforeEach(fn () => Process::preventStrayProcesses())
+    ->afterEach(function (): void {
+        Agentio::auth(null);
+        MockClient::destroyGlobal();
+    })
     ->in(__DIR__);
 
 /**
@@ -276,4 +288,46 @@ function writeFakeArtisan(string $project, array $ideas = []): void
             file_put_contents('.env', preg_replace('/^APP_KEY=.*\$/m', 'APP_KEY=base64:generated', (string) file_get_contents('.env')));
         }
         PHP);
+}
+
+/**
+ * A Telegram update with a message of the developer (chat 42), as getUpdates returns it.
+ *
+ * @param  array<string, mixed>  $message  Fields merged into the message (text, voice, reply_to_message, …)
+ * @return array<string, mixed>
+ */
+function telegramUpdate(int $updateId, array $message = [], string $chatId = '42'): array
+{
+    return [
+        'update_id' => $updateId,
+        'message' => [
+            'message_id' => $updateId + 1000,
+            'from' => ['id' => (int) $chatId, 'is_bot' => false, 'first_name' => 'Dev', 'username' => 'dev'],
+            'chat' => ['id' => (int) $chatId, 'type' => 'private'],
+            'date' => 1791000000,
+            'text' => 'Привет',
+            ...$message,
+        ],
+    ];
+}
+
+/**
+ * A host project with the bot set up: token, the developer's chat 42 and the logs in the project.
+ */
+function projectWithBot(?string $chatId = '42'): string
+{
+    $project = hostProject();
+    file_put_contents($project.'/.env', "APP_ENV=local\nAGENTIO_TELEGRAM_BOT_TOKEN=123456:TEST-token-0123456789abcdefghijklmnop\n".($chatId === null ? '' : "AGENTIO_TELEGRAM_CHAT_ID={$chatId}\n"));
+
+    config([
+        'agentio.telegram.token' => '123456:TEST-token-0123456789abcdefghijklmnop',
+        'agentio.telegram.chat_id' => $chatId,
+        'agentio.youtrack.url' => 'https://yt.example.com',
+        'agentio.youtrack.token' => 'secret-token',
+        'agentio.youtrack.project' => 'XY',
+        'agentio.logs_path' => $project.'/storage/logs/agents',
+    ]);
+    app()->forgetInstance(LoopState::class);
+
+    return $project;
 }

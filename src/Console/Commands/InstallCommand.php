@@ -24,6 +24,7 @@ use Obrazmisli\Agentio\Install\YouTrackSetup;
 use Obrazmisli\Agentio\Runtime\MergePolicy;
 use Obrazmisli\Agentio\Settings;
 use Obrazmisli\Agentio\YouTrack\Client;
+use Obrazmisli\Agentio\YouTrack\IssueRepository;
 use Obrazmisli\Agentio\YouTrack\Mcp\McpClient;
 use Obrazmisli\Agentio\YouTrack\Mcp\Tools;
 use Obrazmisli\Agentio\YouTrack\YouTrackException;
@@ -40,8 +41,9 @@ use function Laravel\Prompts\text;
  * server, adds the youtrack MCP server to Claude Code when it has none, asks for the YouTrack project, the
  * development and the production branch (creating the missing ones locally), the merge policy and the directory
  * of the epic worktrees, optionally configures the YouTrack project
- * (agentio:setup-youtrack) and installs the skills into .claude/skills — the only files it adds to the project
- * besides .agentio.json; the scripts and the manual stay in the package.
+ * (agentio:setup-youtrack), installs the skills into .claude/skills — the only files it adds to the project
+ * besides .agentio.json; the scripts and the manual stay in the package — and offers the developer's Telegram
+ * bot (agentio:setup-telegram).
  */
 #[AsCommand(name: 'agentio:install')]
 final class InstallCommand extends Command
@@ -61,6 +63,8 @@ final class InstallCommand extends Command
         {--worktrees= : Directory of the epic worktrees, outside the project (default: AGENTIO_WORKTREES_PATH; asked when interactive)}
         {--mcp-scope=local : Scope of the youtrack MCP server added to Claude Code: local (this project, private) or user}
         {--setup-youtrack : Also configure the YouTrack project (agentio:setup-youtrack; asked when interactive)}
+        {--telegram-token= : Set up the developer\'s Telegram bot with this token (agentio:setup-telegram; asked when interactive; prefer the prompt: arguments stay in the shell history)}
+        {--skip-telegram : Do not ask about the Telegram bot}
         {--force : Overwrite installed skills that were edited locally}
         {--dry-run : Only show what would be done}';
 
@@ -85,7 +89,7 @@ final class InstallCommand extends Command
 
         $this->components->info(($this->dryRun ? 'Dry run, nothing is changed. Plan of the agentio installation' : 'Installing agentio').' into '.$basePath.'.');
 
-        $checks = (new Preconditions($basePath, Settings::string('agentio.claude_binary') ?? 'claude'))->checks();
+        $checks = (new Preconditions($basePath, $settings->claudeBinary()))->checks();
         $this->renderChecks($checks);
 
         $scope = (string) $this->option('mcp-scope');
@@ -193,7 +197,14 @@ final class InstallCommand extends Command
             Manifest::load($basePath)->with($project, $baseBranch, $kb, $installer->hashes(), $policy->value, $productionBranch)->save($basePath);
         }
 
+        // 7. The developer's Telegram bot (optional).
+        $telegram = $this->setUpTelegram();
+
         $this->renderNextSteps($checks, $baseBranch, $kb, $connection !== null, $setup);
+
+        if ($telegram === false) {
+            $this->components->warn('The Telegram bot is not set up (see above): run php artisan agentio:setup-telegram when it is fixed.');
+        }
 
         return $setup === SetupYouTrackCommand::INCOMPLETE ? self::FAILURE : self::SUCCESS;
     }
@@ -297,7 +308,7 @@ final class InstallCommand extends Command
      */
     private function registerMcpServer(string $basePath, string $url, string $token, bool $tokenChanged, string $scope): void
     {
-        $claude = Settings::string('agentio.claude_binary') ?? 'claude';
+        $claude = $this->laravel->make(Settings::class)->claudeBinary();
 
         if (Preconditions::executable($claude) === null) {
             $this->components->warn("Claude Code CLI not found ({$claude}): add the MCP server later with php artisan agentio:install.");
@@ -533,6 +544,42 @@ final class InstallCommand extends Command
     }
 
     /**
+     * Ask whether the developer wants the Telegram bot and set it up (agentio:setup-telegram: the token in .env,
+     * voice messages, Horizon, the chat; it restarts whatever uses an old token). Returns null when skipped,
+     * otherwise whether the setup succeeded.
+     */
+    private function setUpTelegram(): ?bool
+    {
+        $token = $this->stringOption('telegram-token');
+
+        if ($this->dryRun || $this->option('skip-telegram') || ($token === null && ! $this->interactive)) {
+            return null;
+        }
+
+        if ($token === null) {
+            $configured = Settings::string('agentio.telegram.token') !== null;
+            $this->newLine();
+
+            $wanted = confirm(
+                label: $configured ? 'The Telegram bot is set up. Set it up again (token, voice messages, Horizon)?' : 'Connect your own Telegram bot (questions of the agents, short reports, ideas by voice)?',
+                default: false,
+                hint: 'A bot you create with @BotFather; its token goes to .env as AGENTIO_TELEGRAM_BOT_TOKEN. Later: php artisan agentio:setup-telegram.',
+            );
+
+            if (! $wanted) {
+                return null;
+            }
+        }
+
+        $this->newLine();
+
+        return $this->call('agentio:setup-telegram', array_filter([
+            'token' => $token,
+            '--no-interaction' => ! $this->interactive,
+        ])) === self::SUCCESS;
+    }
+
+    /**
      * Make the rest of the run (agentio:setup-youtrack) use the chosen settings.
      *
      * @param  array{url: string, token: string, tokenChanged: bool, user: array{login: string, name: string, email: string}}|null  $connection
@@ -551,6 +598,7 @@ final class InstallCommand extends Command
             config(['agentio.youtrack.url' => $connection['url'], 'agentio.youtrack.token' => $connection['token']]);
             $this->laravel->forgetInstance(Client::class);
             $this->laravel->forgetInstance(McpClient::class);
+            $this->laravel->forgetInstance(IssueRepository::class);
         }
     }
 

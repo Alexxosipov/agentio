@@ -75,6 +75,43 @@ final readonly class EnvFile
     }
 
     /**
+     * Set the keys in the file (see contentWith()); returns whether the file changed.
+     *
+     * @param  array<string, string|null>  $values
+     */
+    public function put(array $values): bool
+    {
+        $content = $this->contentWith($values);
+
+        if ($this->exists() && $content === $this->content()) {
+            return false;
+        }
+
+        // Written next to it and renamed: a reader never sees half a file (a symlinked .env keeps its link).
+        $target = is_link($this->path) ? (realpath($this->path) ?: $this->path) : $this->path;
+        $temporary = $target.'.agentio-'.bin2hex(random_bytes(4));
+        file_put_contents($temporary, $content);
+
+        // A new .env holds secrets: readable by its owner only.
+        chmod($temporary, is_file($target) ? (fileperms($target) & 0777) : 0600);
+
+        rename($temporary, $target);
+
+        return true;
+    }
+
+    /**
+     * The environment of a child process that reads the file afresh: every key of the file unset (false), so
+     * the values the current process loaded from it are not inherited.
+     *
+     * @return array<string, false>
+     */
+    public function unloaded(): array
+    {
+        return array_fill_keys($this->keys(), false);
+    }
+
+    /**
      * The keys the file defines, in order.
      *
      * @return list<string>

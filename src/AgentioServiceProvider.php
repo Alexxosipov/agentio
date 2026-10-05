@@ -4,8 +4,10 @@ declare(strict_types=1);
 
 namespace Obrazmisli\Agentio;
 
+use Composer\InstalledVersions;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Contracts\Foundation\Application;
+use Illuminate\Foundation\Console\AboutCommand;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\ServiceProvider;
@@ -14,14 +16,21 @@ use Obrazmisli\Agentio\Console\Commands\CommitCommand;
 use Obrazmisli\Agentio\Console\Commands\InstallCommand;
 use Obrazmisli\Agentio\Console\Commands\LogCommand;
 use Obrazmisli\Agentio\Console\Commands\RunCommand;
+use Obrazmisli\Agentio\Console\Commands\SetupTelegramCommand;
 use Obrazmisli\Agentio\Console\Commands\SetupYouTrackCommand;
 use Obrazmisli\Agentio\Console\Commands\StatusCommand;
+use Obrazmisli\Agentio\Console\Commands\TelegramCommand;
 use Obrazmisli\Agentio\Console\Commands\WorktreeCommand;
 use Obrazmisli\Agentio\Console\Commands\YouTrackCommand;
 use Obrazmisli\Agentio\Dashboard\YouTrackSource;
 use Obrazmisli\Agentio\Http\Middleware\Authorize;
 use Obrazmisli\Agentio\Runtime\LoopState;
 use Obrazmisli\Agentio\Runtime\SystemTimezone;
+use Obrazmisli\Agentio\Telegram\Bot;
+use Obrazmisli\Agentio\Telegram\BotSettings;
+use Obrazmisli\Agentio\Telegram\Conversation;
+use Obrazmisli\Agentio\Telegram\Transcription\Transcriber;
+use Obrazmisli\Agentio\Telegram\Transcription\TranscriptionManager;
 use Obrazmisli\Agentio\YouTrack\Client;
 use Obrazmisli\Agentio\YouTrack\IssueRepository;
 use Obrazmisli\Agentio\YouTrack\Mcp\McpClient;
@@ -66,6 +75,29 @@ final class AgentioServiceProvider extends ServiceProvider
         });
 
         $this->app->scoped(YouTrackSource::class);
+
+        $this->registerTelegram();
+    }
+
+    /**
+     * The developer's Telegram bot: its settings and Bot API client are read from the config on every
+     * resolution (a token written by agentio:setup-telegram is used at once), the transcription drivers are a
+     * Manager an application can extend().
+     */
+    private function registerTelegram(): void
+    {
+        $this->app->bind(BotSettings::class, fn (): BotSettings => BotSettings::fromConfig());
+
+        $this->app->bind(Bot::class, fn (Application $app): Bot => Bot::make(
+            (string) $app->make(BotSettings::class)->token,
+            $app->make(BotSettings::class)->apiUrl,
+        ));
+
+        $this->app->bind(Conversation::class, fn (Application $app): Conversation => new Conversation($app->make(LoopState::class)->logsPath().'/telegram'));
+
+        $this->app->singleton(TranscriptionManager::class, fn (Application $app): TranscriptionManager => new TranscriptionManager($app));
+
+        $this->app->bind(Transcriber::class, fn (Application $app): Transcriber => $app->make(TranscriptionManager::class)->driver());
     }
 
     /**
@@ -85,6 +117,8 @@ final class AgentioServiceProvider extends ServiceProvider
         $this->commands([
             InstallCommand::class,
             SetupYouTrackCommand::class,
+            SetupTelegramCommand::class,
+            TelegramCommand::class,
             RunCommand::class,
             StatusCommand::class,
             YouTrackCommand::class,
@@ -93,6 +127,10 @@ final class AgentioServiceProvider extends ServiceProvider
             CommitCommand::class,
             LogCommand::class,
         ]);
+
+        if (class_exists(AboutCommand::class)) {
+            AboutCommand::add('Agentio', fn (): array => self::about());
+        }
 
         $this->publishes([
             __DIR__.'/../config/agentio.php' => config_path('agentio.php'),
@@ -116,6 +154,24 @@ final class AgentioServiceProvider extends ServiceProvider
                     || ($user !== null && in_array(data_get($user, 'email'), (array) config('agentio.ui.allowed_emails', []), true)));
             }
         }
+    }
+
+    /**
+     * The state of agentio in php artisan about (no secrets).
+     *
+     * @return array<string, string>
+     */
+    private static function about(): array
+    {
+        $bot = BotSettings::fromConfig();
+
+        return [
+            'Version' => InstalledVersions::isInstalled('alexxosipov/agentio') ? (InstalledVersions::getPrettyVersion('alexxosipov/agentio') ?? 'dev') : 'dev',
+            'YouTrack' => Settings::string('agentio.youtrack.url') ?? 'not configured',
+            'Telegram bot' => $bot->isPaired() ? 'paired' : ($bot->isConfigured() ? 'not paired' : 'off'),
+            'Voice messages' => Settings::string('agentio.telegram.transcription.driver') ?? 'none',
+            'Telegram queue' => $bot->queueConnection.' / '.$bot->queue,
+        ];
     }
 
     private function registerRoutes(): void

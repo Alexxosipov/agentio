@@ -88,6 +88,10 @@ session_alive() {
 
 session_pid() { cat "$LOG_DIR/$1.pid" 2>/dev/null; }
 
+# A short report to the developer's Telegram bot (agentio:telegram notify queues it; without a bot it does
+# nothing). In the background and silent: the loop never waits for the bot and never fails because of it.
+notify() { ( artisan agentio:telegram notify "$@" </dev/null >/dev/null 2>&1 & ) ; }
+
 if [[ -z "${YOUTRACK_URL:-}" || -z "${YOUTRACK_TOKEN:-}" ]]; then
     echo "YOUTRACK_URL and YOUTRACK_TOKEN must be set (run php artisan agentio:install)" >&2
     exit 1
@@ -167,6 +171,7 @@ give_up() {
 **Что мешает:** сессия $what $MAX_RESTARTS раза подряд завершилась, не доведя работу до конца и без новых коммитов.
 **Что нужно от человека:** посмотреть лог \`$LOG_DIR/$name.log\` на машине \`$HOST\` (\`php artisan agentio:log $name\`), устранить причину и вернуть задачу в прежний статус." >/dev/null
     rm -f "$LOG_DIR/$name.restarts"
+    notify blocked "$id" --name="$name"
 }
 
 launch_epic() {
@@ -204,11 +209,14 @@ finish_epic() {
                 # The same acceptance as the dashboard's: checks, merge (aborted on a conflict), worktree, Done.
                 if artisan agentio:accept "$epic" >>"$LOG_DIR/loop.log" 2>&1; then
                     log "$epic: auto-merged $branch into $BASE_BRANCH and closed"
+                    notify merged "$epic"
                 else
                     log "$epic: auto-merge not possible (see above), left for a human"
+                    notify review "$epic"
                 fi
             else
                 log "$epic: ready for human review on branch $branch (worktree kept: $WORKTREES_DIR/$epic)"
+                notify review "$epic"
             fi
             ;;
         Blocked|Done) rm -f "$LOG_DIR/$epic.restarts" ;;
@@ -230,7 +238,8 @@ finish_plan() {
     local idea="$1" state restarts
     state="$(issue_state "$idea")"
     case "$state" in
-        Done|Blocked) rm -f "$LOG_DIR/plan-$idea.restarts"; log "$idea: planning finished, idea state: $state" ;;
+        Done) rm -f "$LOG_DIR/plan-$idea.restarts"; log "$idea: planning finished, idea state: $state"; notify planned "$idea" ;;
+        Blocked) rm -f "$LOG_DIR/plan-$idea.restarts"; log "$idea: planning finished, idea state: $state" ;;
         "") log "$idea: planning finished, YouTrack did not answer" ;;
         Backlog|Analysis|"In Progress")
             restarts="$(count_failure "plan-$idea")"

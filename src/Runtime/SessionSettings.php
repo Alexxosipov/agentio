@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Obrazmisli\Agentio\Runtime;
 
+use Obrazmisli\Agentio\Install\Installer;
 use Obrazmisli\Agentio\Security\GuardHook;
 use Obrazmisli\Agentio\Settings;
 
@@ -28,6 +29,9 @@ final readonly class SessionSettings
 
     /** The permissions of the planning sessions, relative to the package root. */
     public const string PLANNING_FILE = 'resources/claude/planning.json';
+
+    /** The permissions of the assistant of the Telegram bot, relative to the package root. */
+    public const string ASSISTANT_FILE = 'resources/claude/assistant.json';
 
     public function __construct(private Settings $settings) {}
 
@@ -62,19 +66,44 @@ final readonly class SessionSettings
      */
     public function planning(): array
     {
-        $package = self::read(self::packageFile(self::FILE));
-        $planning = self::read(self::packageFile(self::PLANNING_FILE));
-        $project = self::read($this->settings->basePath().'/.claude/settings.json');
+        return $this->readOnly(self::PLANNING_FILE);
+    }
 
-        return $this->compose($package, [
-            'allow' => self::rules($planning, 'allow'),
-            'deny' => [...self::rules($package, 'deny'), ...self::rules($planning, 'deny'), ...self::rules($project, 'deny'), ...$this->branchRules()],
-        ]);
+    /**
+     * The settings of the assistant of the Telegram bot, which runs in the main checkout: read-only, like
+     * planning, and without any YouTrack write (resources/claude/assistant.json).
+     *
+     * @return array<string, mixed>
+     */
+    public function assistant(): array
+    {
+        return $this->readOnly(self::ASSISTANT_FILE);
+    }
+
+    /**
+     * The MCP configs of the sessions: YouTrack, and Laravel Boost when the project has it.
+     *
+     * @return list<string>
+     */
+    public function mcpConfigs(): array
+    {
+        $configs = [self::packageFile('resources/claude/mcp/youtrack.json')];
+
+        if (Installer::hasBoost($this->settings->basePath())) {
+            $configs[] = self::packageFile('resources/claude/mcp/laravel-boost.json');
+        }
+
+        return $configs;
     }
 
     public function toJson(bool $planning = false): string
     {
         return (string) json_encode($planning ? $this->planning() : $this->epic(), JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+    }
+
+    public function assistantJson(): string
+    {
+        return (string) json_encode($this->assistant(), JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
     }
 
     /**
@@ -100,6 +129,24 @@ final readonly class SessionSettings
         }
 
         return array_values(array_unique($directories));
+    }
+
+    /**
+     * A session of the main checkout that changes no file: the allow rules of its file, the deny rules of the
+     * package, its file and the project.
+     *
+     * @return array<string, mixed>
+     */
+    private function readOnly(string $file): array
+    {
+        $package = self::read(self::packageFile(self::FILE));
+        $session = self::read(self::packageFile($file));
+        $project = self::read($this->settings->basePath().'/.claude/settings.json');
+
+        return $this->compose($package, [
+            'allow' => self::rules($session, 'allow'),
+            'deny' => [...self::rules($package, 'deny'), ...self::rules($session, 'deny'), ...self::rules($project, 'deny'), ...$this->branchRules()],
+        ]);
     }
 
     /**

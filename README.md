@@ -21,6 +21,7 @@ The agents work with YouTrack only through its **MCP server**. The package adds 
 - git, Composer, `setsid` (util-linux; on macOS `brew install util-linux`), bun or npm when the project has a frontend build.
 - [Claude Code](https://docs.claude.com/claude-code), logged in.
 - A YouTrack instance with its MCP server (`<url>/mcp`, YouTrack Cloud or a Server version that has it) and a permanent token.
+- Optional, for the [Telegram bot](#telegram-bot): Redis and Laravel Horizon (`agentio:setup-telegram` installs Horizon), and for voice messages an OpenAI-compatible speech-to-text API or [whisper.cpp](https://github.com/ggml-org/whisper.cpp) with ffmpeg.
 
 `php artisan agentio:install` checks all of this and tells you what is missing.
 
@@ -28,8 +29,8 @@ The project also needs a `test` script in its `composer.json` (the full quality 
 
 ## Quick start
 
-1. Install the package from GitHub as a dev dependency (see [Installation](#installation): add the repository to `composer.json`, then `composer require alexxosipov/agentio:^0.5 --dev`).
-2. Install the cycle into the project (a git repository whose `.env` is git-ignored): `php artisan agentio:install`. It asks for the YouTrack URL and a permanent token (hidden input), checks them through the YouTrack MCP server, adds the `youtrack` MCP server to Claude Code if it has none, asks for the project short name (`ABC`; a missing project can be created), the production and the development branch (`main` and `dev`; the missing one is created locally), the merge policy and **the directory of the epic worktrees**, offers to configure the YouTrack project and installs the skills.
+1. Install the package from GitHub as a dev dependency (see [Installation](#installation): add the repository to `composer.json`, then `composer require alexxosipov/agentio:^0.6 --dev`).
+2. Install the cycle into the project (a git repository whose `.env` is git-ignored): `php artisan agentio:install`. It asks for the YouTrack URL and a permanent token (hidden input), checks them through the YouTrack MCP server, adds the `youtrack` MCP server to Claude Code if it has none, asks for the project short name (`ABC`; a missing project can be created), the production and the development branch (`main` and `dev`; the missing one is created locally), the merge policy and **the directory of the epic worktrees**, offers to configure the YouTrack project, installs the skills and offers to connect your own [Telegram bot](#telegram-bot).
 3. Commit `.claude/skills/agentio-*` and `.agentio.json` to `dev`: epic worktrees are created from it. `.env` (with the token) stays local. Push `dev` and `main` if the project has a remote, and point the develop server at `dev` and production at `main`.
 4. File an idea in YouTrack (Type `Idea` or the `idea` tag, Stage `Backlog`), check what the loop would do with `php artisan agentio:run --dry-run`, then start it: `php artisan agentio:run`.
 5. Watch the agents at `/agentio` or with `php artisan agentio:status`, answer the questions of `[AGENT:BLOCKED]` comments (a comment in the issue, then the Stage back; see [Questions to the human](#questions-to-the-human)), and accept epics that reach `Review` on their page in the dashboard or with `php artisan agentio:accept <ID>` (it merges the epic branch into `dev`). Release `dev` to `main` yourself when the develop server looks good.
@@ -53,7 +54,7 @@ composer config repositories.agentio vcs https://github.com/Alexxosipov/agentio
 Then require it:
 
 ```bash
-composer require alexxosipov/agentio:^0.5 --dev
+composer require alexxosipov/agentio:^0.6 --dev
 ```
 
 Install it as a **dev dependency**: the cycle runs on a developer machine (Claude Code, git worktrees, the loop) and nothing of it is needed in production; it also keeps the dashboard, which shows YouTrack data and agent logs, out of production builds. Require it without `--dev` only if you want the dashboard on a shared or staging server. If you call `Agentio::auth()` from a service provider, guard it with `class_exists(Agentio::class)` so that `composer install --no-dev` keeps working.
@@ -68,11 +69,11 @@ php artisan agentio:install           # refreshes the installed skills; your edi
 php artisan agentio:setup-youtrack    # refreshes the automation guide in the knowledge base
 ```
 
-Commit the updated `.claude/skills/agentio-*` and `.agentio.json`. While the version is `0.x`, `^0.5` takes only the `0.5.*` releases: a `0.6.0` may change behaviour (see the [changelog](CHANGELOG.md)), so move to it with `composer require alexxosipov/agentio:^0.6 --dev`; from an older minor version — `composer require alexxosipov/agentio:^0.5 --dev`. To try the latest unreleased code, require `dev-main`.
+Commit the updated `.claude/skills/agentio-*` and `.agentio.json`. While the version is `0.x`, `^0.6` takes only the `0.6.*` releases: a `0.7.0` may change behaviour (see the [changelog](CHANGELOG.md)), so move to it with `composer require alexxosipov/agentio:^0.7 --dev` when it is out; from an older minor version — `composer require alexxosipov/agentio:^0.6 --dev`. To try the latest unreleased code, require `dev-main`.
 
-Up to `v0.4.0` the package was called `obrazmisli/agentio`. Composer no longer finds it under that name, so a project that requires it switches with `composer remove obrazmisli/agentio --dev && composer require alexxosipov/agentio:^0.5 --dev` (the repository entry stays the same), then commits `composer.json` and `composer.lock` to the development branch.
+Up to `v0.4.0` the package was called `obrazmisli/agentio`. Composer no longer finds it under that name, so a project that requires it switches with `composer remove obrazmisli/agentio --dev && composer require alexxosipov/agentio:^0.6 --dev` (the repository entry stays the same), then commits `composer.json` and `composer.lock` to the development branch.
 
-A project that has a copy of the package (a `path` repository such as `packages/agentio`) switches by replacing that repository with the `vcs` one above, running `composer require alexxosipov/agentio:^0.5 --dev` and deleting the copy. Commit the new `composer.json` and `composer.lock` to the development branch (`dev`) too, not only to the branch you work on: epic worktrees start from `dev` and run `composer install` from its lock file, which would still look for `packages/agentio`. `agentio:run` refuses to start while the development branch installs a package from a path it does not have, and `agentio:worktree` explains it for an epic branch made before the fix (merge `dev` into it).
+A project that has a copy of the package (a `path` repository such as `packages/agentio`) switches by replacing that repository with the `vcs` one above, running `composer require alexxosipov/agentio:^0.6 --dev` and deleting the copy. Commit the new `composer.json` and `composer.lock` to the development branch (`dev`) too, not only to the branch you work on: epic worktrees start from `dev` and run `composer install` from its lock file, which would still look for `packages/agentio`. `agentio:run` refuses to start while the development branch installs a package from a path it does not have, and `agentio:worktree` explains it for an epic branch made before the fix (merge `dev` into it).
 
 For local development of the package, use a path repository in the host project's `composer.json`:
 
@@ -102,7 +103,8 @@ Agents never push to, switch to or merge into `dev` and `main` (the session perm
 |---|---|
 | `.claude/skills/agentio-*` | The skills of the cycle (commit them) |
 | `.agentio.json` | The YouTrack project, base branch, merge policy, knowledge base article ids and the hashes of the installed skills (commit it) |
-| `.env` | `YOUTRACK_URL`, `YOUTRACK_TOKEN`, `AGENTIO_WORKTREES_PATH` (local, git-ignored) |
+| `.env` | `YOUTRACK_URL`, `YOUTRACK_TOKEN`, `AGENTIO_WORKTREES_PATH`; with the Telegram bot `AGENTIO_TELEGRAM_BOT_TOKEN`, `AGENTIO_TELEGRAM_CHAT_ID`, `AGENTIO_TRANSCRIPTION_*` (local, git-ignored) |
+| `composer.json`, `config/horizon.php` | Only when you set up the Telegram bot and the project has no Horizon: `laravel/horizon` (and `predis/predis` without the redis extension), installed by `agentio:setup-telegram` with `horizon:install` |
 | Claude Code (`~/.claude.json`) | The `youtrack` MCP server with your token (local scope: this project only, private) |
 
 Nothing else: no scripts, hooks, subagents, `.claude/settings.json` or `.mcp.json` changes, no `CLAUDE.md` block. Everything else is in the package and is reached through artisan:
@@ -110,7 +112,8 @@ Nothing else: no scripts, hooks, subagents, `.claude/settings.json` or `.mcp.jso
 | Package path | Used by |
 |---|---|
 | `scripts/agent-loop.sh`, `epic-worktree.sh`, `agent-commit.sh` | `agentio:run`, `agentio:worktree`, `agentio:commit` (the scripts refuse to run on their own) |
-| `resources/claude/settings.json`, `planning.json` | Permission rules of the agents' epic and planning sessions (passed with `--settings`, with the guard hook) |
+| `resources/claude/settings.json`, `planning.json`, `assistant.json` | Permission rules of the agents' epic and planning sessions and of the bot's assistant (passed with `--settings`, with the guard hook) |
+| `resources/boost/guidelines/core.md` | The agentio guideline for Laravel Boost: choose `alexxosipov/agentio` in `php artisan boost:install` and Boost adds it to `CLAUDE.md` |
 | `bin/agentio-guard` | The PreToolUse hook of the agents' Bash commands |
 | `resources/claude/mcp/*.json` | MCP servers of the headless sessions (`youtrack`, `laravel-boost` when the project uses Boost) |
 | `resources/docs/AUTONOMOUS_WORKFLOW.md` | The manual (copied into the YouTrack knowledge base by `agentio:setup-youtrack`) |
@@ -127,6 +130,11 @@ Packaged as Claude Code skills (a `SKILL.md` with `name` and `description` under
 | `/agentio-work-epic <EPIC>` | command (`disable-model-invocation`) | Epic orchestrator: starts subagents with the next two skills |
 | `agentio-develop-task`, `agentio-review-story` | used by subagents | One TASK: code, tests, commit; one STORY: review against acceptance criteria |
 | `/agentio-dispatch`, `/agentio-status` | read-only commands | What can start now; a summary of the project |
+| `agentio-saloon` | role | Integrations with HTTP APIs that have no maintained SDK through [Saloon](https://docs.saloon.dev) v4: connector, requests, auth, errors and retries, DTOs, pagination, rate limits, OAuth2, tests with `MockClient` |
+| `agentio-platform-skill` | role | Creating the project's own skill for an external platform (Telegram Mini App, Telegram bot, VK Mini App, PWA, a payment provider…) as the first task of an epic that brings the product there |
+| `agentio-telegram-assistant` | background (`user-invocable: false`) | The project manager behind the Telegram bot: reads a message of the developer and decides (answer to questions, comment, new idea), read-only |
+
+The skills work together with [Laravel Boost](https://github.com/laravel/boost): the project's conventions (`CLAUDE.md`/`AGENTS.md`, `.ai/guidelines`, `.ai/rules`, the existing code) come before the defaults of the agentio references (the domain namespaces are the default only for a project without a layout of its own), the Boost skills of the touched areas are loaded before the work, and what Boost leaves to "ask the user" becomes a question in `[AGENT:BLOCKED]`. The one dependency the agents may add by themselves is Saloon (`saloonphp/*`).
 
 ## YouTrack through MCP
 
@@ -230,7 +238,7 @@ The analyst and the architect load the `laravel-best-practices` skill of Laravel
 
 ### Questions to the human
 
-When only the human can decide (a business rule, money, a contract, legal requirements), the agent first finishes and records everything that does not depend on the answer, then asks **all** its questions in **one** `[AGENT:BLOCKED]` comment of the issue it works on (the idea while planning): numbered questions В1, В2, … with options, their consequences and the agent's recommendation, and the Stage to return the issue to. The issue goes to `Blocked`. Answer **with a comment in that issue** in YouTrack (`В1: б; В2: а`, or `Принимаю рекомендации`), then set Stage back as the comment says (an idea to `Backlog`, other issues to `Ready`); returning the Stage without a comment accepts all recommendations. The next pass of the loop resumes the work, moves the answers into the knowledge base articles (so they are not lost in comments) and records an `[AGENT:DECISION]`. Blocked issues and their questions are listed on the dashboard, by `php artisan agentio:yt blocked` and by the saved search «KEY: заблокированные».
+When only the human can decide (a business rule, money, a contract, legal requirements), the agent first finishes and records everything that does not depend on the answer, then asks **all** its questions in **one** `[AGENT:BLOCKED]` comment of the issue it works on (the idea while planning): numbered questions В1, В2, … with options, their consequences and the agent's recommendation, and the Stage to return the issue to. The issue goes to `Blocked`. The questions are always in Russian. Answer **with a comment in that issue** in YouTrack (`В1: б; В2: а`, or `Принимаю рекомендации`) — or reply to the question in the [Telegram bot](#telegram-bot) — then set Stage back as the comment says (an idea to `Backlog`, other issues to `Ready`); returning the Stage without a comment accepts all recommendations. The next pass of the loop resumes the work, moves the answers into the knowledge base articles (so they are not lost in comments) and records an `[AGENT:DECISION]`. Blocked issues and their questions are listed on the dashboard, by `php artisan agentio:yt blocked` and by the saved search «KEY: заблокированные».
 
 ## Running the loop
 
@@ -240,6 +248,7 @@ php artisan agentio:run --once          # one pass, waiting for the started epic
 php artisan agentio:run                 # run forever (a pass every AGENTIO_INTERVAL seconds)
 php artisan agentio:run --stop          # ask the running loop to exit after its current step
 php artisan agentio:run --kill          # stop running agent sessions (claims are kept and resumed later)
+php artisan agentio:run --no-telegram   # without the Telegram bot
 ```
 
 `agentio:run` runs the loop of the package (`scripts/agent-loop.sh`) with the settings of `config/agentio.php` and `.agentio.json` in its environment. The variables Laravel loaded from the project's `.env` (`APP_ENV`, `APP_KEY`, `DB_*`, …) are removed from that environment: inherited by the agents, they would override the `.env` of every epic worktree and the `<env>` values of `phpunit.xml`. Options passed through: `--once`, `--dry-run`, `--kill`, `--epic=KEY-N`, `--no-plan`, `--no-wait`, `--interval=SEC`, `--max-parallel=N`, `--max-parallel-tasks=N`. A leftover stop flag is reported; `--fresh` removes it before starting. SIGINT and SIGTERM are forwarded to the loop (it finishes its current step; agent sessions keep running), and the exit code is the loop's. The loop keeps `loop.pid` in the logs directory while it runs and refuses to start twice in one checkout.
@@ -272,6 +281,29 @@ php artisan agentio:status --local      # without YouTrack
 ```
 
 The YouTrack part shows counts by Type × Stage, ideas waiting for planning, ready epics with their first wave of tasks, work in progress, blocked issues with the reason from their last `[AGENT:BLOCKED]` comment, and epics awaiting a human.
+
+## Telegram bot
+
+An optional bot of your own, a project manager in a chat. It never holds up the cycle: the agents neither wait for it nor write to it, YouTrack stays the source of truth, and a failure of Telegram, Redis or the assistant never stops the loop.
+
+- **It sends** the questions of the agents (every new `[AGENT:BLOCKED]`, in Russian) and short reports: an idea was planned (its epics), an epic is ready for review (what was done) or was merged, a session gave up.
+- **It understands** text and voice messages. Reply to a question (`В1: б`, «принимаю рекомендации», or in your own words, by voice too): the answer becomes a comment of the issue («Ответ разработчика (Telegram)…») and, when it answers every question, the issue returns to the Stage its `[AGENT:BLOCKED]` names, so the loop resumes the work. Describe a new feature and it becomes an idea (`[IDEA]`, tag `idea`) for the loop to plan; ask anything about the project (what is in progress, what is blocked, what was done) and it answers from YouTrack, the loop and the code.
+- **How**: an assistant — a read-only headless Claude Code session with the `agentio-telegram-assistant` skill — reads the message with its context (the message it replies to and the issue behind it, the recent conversation) and answers with a decision; agentio makes the YouTrack changes itself, through the MCP server, and tells you what it did.
+
+Set it up:
+
+1. Create a bot with [@BotFather](https://t.me/BotFather) (`/newbot`) and copy its token.
+2. `php artisan agentio:setup-telegram <token>` (or answer yes in `agentio:install`). It checks the token (`getMe`), writes it to `.env` as `AGENTIO_TELEGRAM_BOT_TOKEN`, asks how to turn voice messages into text (`openai` — any OpenAI-compatible `/audio/transcriptions` API: OpenAI, Groq, a local whisper server; `whisper` — whisper.cpp on this machine with a ggml model and ffmpeg; `none`), makes sure Laravel Horizon is installed and works the queue (installs it when missing), restarts whatever still uses the old settings, and pairs your chat: open the `t.me/<bot>?start=<code>` link it prints and press Start (the chat id goes to `.env` as `AGENTIO_TELEGRAM_CHAT_ID`; only that chat is answered).
+3. `php artisan agentio:run` starts the bot next to the loop, each in a process of its own: the listener (`agentio:telegram listen`: long polling with `getUpdates`, the questions of the agents every `AGENTIO_TELEGRAM_WATCH_INTERVAL` seconds; log `telegram.log`) and, when the project's Horizon is not running, `php artisan horizon` (log `horizon.log`). A process that ends is started again with a growing pause. When a key of `.env` they use changes — a new token through `agentio:setup-telegram` or `agentio:install`, or by hand — they are restarted with it (the project's own Horizon gets `horizon:terminate`).
+
+Every message, in and out, goes through the `default` queue of the `redis` connection (`AGENTIO_TELEGRAM_QUEUE`, `AGENTIO_TELEGRAM_QUEUE_CONNECTION`), worked by Horizon; the assistant runs detached from the queue worker (a Claude Code session takes longer than a job may) and answers the messages one at a time, in order. The bot keeps its state (update offset, which message is about which issue, the recent conversation) in `<AGENTIO_LOGS_PATH>/telegram`, so run `agentio:run` and Horizon on the same machine.
+
+```bash
+php artisan agentio:telegram status          # token, chat, voice messages, queue, Horizon
+php artisan agentio:telegram send "Привет"   # a test message through the queue
+```
+
+The Telegram Bot API and the transcription APIs are called with [Saloon](https://docs.saloon.dev) (no Telegram SDK). An application adds its own transcription driver with `app(TranscriptionManager::class)->extend('name', fn ($app) => new MyTranscriber(...))` (`Obrazmisli\Agentio\Telegram\Transcription\Transcriber`).
 
 ## Dashboard
 
@@ -356,14 +388,23 @@ Everything can be set from `.env`; publish the config with `php artisan vendor:p
 | `AGENTIO_UI_CACHE` | `ui.cache` | 15 | Seconds YouTrack answers are cached for the dashboard (0 disables the cache; keep it above `AGENTIO_UI_POLL`, or every poll goes to YouTrack) |
 | `AGENTIO_UI_ACTIONS` | `ui.actions` | true | Whether the dashboard may accept an epic in Review (merge its branch) and send it back for rework |
 | `AGENTIO_ALLOWED_EMAILS` | `ui.allowed_emails` | — | Emails allowed to open the dashboard outside the `local` environment |
+| `AGENTIO_TELEGRAM_BOT_TOKEN`, `AGENTIO_TELEGRAM_CHAT_ID` | `telegram.token`, `telegram.chat_id` | — | The developer's bot and the paired chat (written by `agentio:setup-telegram`) |
+| `AGENTIO_TELEGRAM_QUEUE_CONNECTION`, `AGENTIO_TELEGRAM_QUEUE` | `telegram.queue_connection`, `telegram.queue` | `redis`, `default` | Where the bot's jobs go (worked by Horizon) |
+| `AGENTIO_TELEGRAM_WATCH_INTERVAL` | `telegram.watch_interval` | 60 | Seconds between two looks for new questions of the agents |
+| `AGENTIO_TELEGRAM_ASSISTANT_TIMEOUT` | `telegram.assistant_timeout` | 600 | Seconds the assistant may take for a message |
+| `AGENTIO_TELEGRAM_API_URL` | `telegram.api_url` | `https://api.telegram.org` | The Bot API server (a local Bot API server, a proxy) |
+| `AGENTIO_TRANSCRIPTION_DRIVER` | `telegram.transcription.driver` | — (`none`) | `openai`, `whisper` or `none` |
+| `AGENTIO_TRANSCRIPTION_URL`, `_KEY`, `_MODEL`, `_LANGUAGE` | `telegram.transcription.*` | `https://api.openai.com/v1`, —, `whisper-1`, `ru` | The OpenAI-compatible API |
+| `AGENTIO_WHISPER_BIN`, `AGENTIO_WHISPER_MODEL`, `AGENTIO_FFMPEG_BIN` | `telegram.transcription.whisper_binary`, `…whisper_model`, `…ffmpeg_binary` | `whisper-cli`, —, `ffmpeg` | whisper.cpp |
 
 The full manual for the people running the cycle is `resources/docs/AUTONOMOUS_WORKFLOW.md` of the package; `agentio:setup-youtrack` keeps a copy of it in the YouTrack knowledge base («Руководство по автоматизации»).
 
 ## Security
 
 - The agents work with YouTrack only through the MCP server and are not given the token: it lives in `.env` (git-ignored; `agentio:install` checks that) and in Claude Code's own MCP configuration (`~/.claude.json`), is passed to the loop in its environment and to the MCP config of the headless sessions by reference (`${YOUTRACK_TOKEN}`), and is never printed or written into committed files, logs or comments. The worktree `.env` (made from `.env.example`) has no token. The agents run as your OS user, though, with the token in their environment: the rules below refuse the usual ways to read it, but for a hard boundary run the loop in a sandbox or under a separate user, and use a token that can reach only this project.
-- Headless agents run with `--permission-mode dontAsk`: only the commands allowed by the session settings run. Epic sessions get the rules of the package plus the project's own; `git push` to the development and the production branch, force pushes, history rewrites, `composer require` and similar are denied, `Read(./.env)` is denied, and so are edits of `.agentio.json`, the agentio skills, `vendor/`, `php -i` and the `tinker` and `get-config` tools of Laravel Boost. Planning sessions run in your main checkout and are read-only (`resources/claude/planning.json`): they read the code and write YouTrack, nothing else.
-- `bin/agentio-guard` is the PreToolUse hook of every Bash command of the agents, a second line of defence. It runs from the package of the main checkout without booting the application of the worktree (code the agents edit), takes the protected branches and the extra directories from the loop (never from files of the worktree), and refuses the command when it fails. It splits the command line like a shell (quotes, `$(…)`, pipes, `cd`) and refuses: pushes to protected branches and force pushes, branch moves other than the branches of issues, merges into protected branches, history rewrites, git aliases and `git -c`/`config` writes, `git add -A`/`commit -a`/`--amend`, writes (`rm`, `mv`, `cp`, `sed -i`, `tee`, `>`) outside the project or to the agentio settings, skills and `vendor/`, `find -exec`, access to secrets and to the token (`.env`, `YOUTRACK_TOKEN`, `/proc/*/environ`, `php -i`, `config:show agentio`, `printenv`), and the commands only humans and the loop run (`agentio:install`, `agentio:setup-youtrack`, `agentio:worktree`, `agentio:accept`, `agentio:run` other than `--dry-run`, `tinker`), also behind artisan options such as `-n`.
+- Headless agents run with `--permission-mode dontAsk`: only the commands allowed by the session settings run. Epic sessions get the rules of the package plus the project's own; `git push` to the development and the production branch, force pushes, history rewrites, `composer remove/update` and adding any package other than `saloonphp/*` are denied, `Read(./.env)` is denied, and so are edits of `.agentio.json`, the agentio skills, the files Laravel Boost generates (`CLAUDE.md`, `AGENTS.md`, `boost.json`, `.mcp.json`, `.ai/guidelines`, `.ai/rules`), `vendor/`, `php -i`, `php artisan config:show`, `php artisan test` (the agents run `composer test`), `boost:*` and the `tinker` and `record-rule` tools of Laravel Boost. Web access is limited to search and the official documentation sites of the platforms they write skills for. Planning sessions run in your main checkout and are read-only (`resources/claude/planning.json`): they read the code and write YouTrack, nothing else. The assistant of the Telegram bot is read-only too and cannot write YouTrack (`resources/claude/assistant.json`): agentio makes the changes it decides on.
+- The Telegram bot answers only the paired chat; its token and the transcription key live in `.env`, never in a message, a log or an exception (the Bot API URL that contains the token is removed from transport errors).
+- `bin/agentio-guard` is the PreToolUse hook of every Bash command of the agents, a second line of defence. It runs from the package of the main checkout without booting the application of the worktree (code the agents edit), takes the protected branches and the extra directories from the loop (never from files of the worktree), and refuses the command when it fails. It splits the command line like a shell (quotes, `$(…)`, pipes, `cd`) and refuses: pushes to protected branches and force pushes, branch moves other than the branches of issues, merges into protected branches, history rewrites, git aliases and `git -c`/`config` writes, `git add -A`/`commit -a`/`--amend`, writes (`rm`, `mv`, `cp`, `sed -i`, `tee`, `>`) outside the project or to the agentio settings, skills and `vendor/`, `find -exec`, `composer require` of anything but `saloonphp/*` (and `composer remove/update`), access to secrets and to the token (`.env`, `YOUTRACK_TOKEN`, `/proc/*/environ`, `php -i`, `config:show agentio`, `printenv`), and the commands only humans and the loop run (`agentio:install`, `agentio:setup-youtrack`, `agentio:worktree`, `agentio:accept`, `agentio:run` other than `--dry-run`, `tinker`), also behind artisan options such as `-n`.
 - Agents commit only the files of their task (`agentio:commit`) and never merge into the development branch; humans accept epics (unless you choose `auto-merge`) and release to production.
 - Keep the dashboard behind the `viewAgentio` gate (it shows issue data and agent logs) and give `manageAgentio` (merging into the development branch of the checkout the app runs from) only to the people who accept epics.
 
@@ -373,7 +414,7 @@ The full manual for the people running the cycle is `resources/docs/AUTONOMOUS_W
 composer test
 ```
 
-`composer test` runs PHPStan, Pint, the 100 % type coverage check and the Pest suite (YouTrack is always faked there).
+`composer test` runs PHPStan, Pint, the 100 % type coverage check and the Pest suite (YouTrack is always faked there; Telegram and the transcription APIs through Saloon's `MockClient`, processes through `Process::fake()` — the suite refuses a real Saloon request or a real process of the facade).
 
 To work on the dashboard, run it in the workbench application with `composer serve` (http://127.0.0.1:8000/agentio). The served workbench app does not see the variables of your shell: copy `workbench/.env.example` to `workbench/.env` (git-ignored) and fill in `YOUTRACK_URL`, `YOUTRACK_TOKEN`, `AGENTIO_PROJECT` and `AGENTIO_LOGS_PATH` (e.g. the `storage/logs/agents` directory of a project that runs the loop). `composer serve` refreshes the workbench copy of that file on every start; `composer clear` removes it.
 

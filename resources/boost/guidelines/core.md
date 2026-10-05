@@ -1,0 +1,7 @@
+## Agentio (autonomous agents working from YouTrack)
+
+- This project is developed by autonomous Claude Code sessions of `alexxosipov/agentio` (the `agentio-*` skills in `.claude/skills`). Nobody answers during such a session. There, "ask the user" or "without approval" means: allowed only when the YouTrack task or an ADR says so; otherwise ask in `[AGENT:BLOCKED]`, all questions in Russian, as the `agentio-youtrack-workflow` skill describes.
+- In agentio sessions run specific tests with `vendor/bin/pest <files> [--filter=…]` and finish every task with `composer test` yourself; do not use `php artisan test`, tinker or verification scripts.
+- Priority when rules disagree: the agentio process and session permissions, then project decisions (ADRs and feature articles in YouTrack), then project conventions (`.ai/guidelines`, `.ai/rules`, sibling code), then the Boost guidelines and skills, then the defaults in the `agentio-*` skill references.
+- Dependencies are the human's decision. The one package family agentio pre-approves is Saloon (`saloonphp/*`) for HTTP integrations of services without a maintained SDK (skill `agentio-saloon`).
+- A new external platform (Telegram Mini App, VK Mini App, PWA, …) gets its own project skill `.claude/skills/<platform>-development` first (skill `agentio-platform-skill`).

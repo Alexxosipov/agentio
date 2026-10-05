@@ -86,6 +86,46 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Telegram Bot
+    |--------------------------------------------------------------------------
+    |
+    | The developer's own bot (optional), a project manager in a chat: it sends
+    | the questions of the agents ([AGENT:BLOCKED]) and short reports of the
+    | finished work, and answers the developer's text and voice messages (an
+    | answer to a question becomes a YouTrack comment and returns the issue to
+    | work, a new idea becomes a YouTrack issue). Create the bot with
+    | @BotFather and run php artisan agentio:setup-telegram <token>: it writes
+    | the token and the paired chat to .env. agentio:run starts the process
+    | that reads the updates (getUpdates) next to the loop. Every message goes
+    | through the "queue" of the "queue_connection", worked by Laravel Horizon.
+    | "transcription" turns voice messages into text: "openai" (any
+    | OpenAI-compatible /audio/transcriptions endpoint at "url") or "whisper"
+    | (the local whisper.cpp CLI with ffmpeg); null leaves voice unanswered.
+    |
+    */
+
+    'telegram' => [
+        'token' => env('AGENTIO_TELEGRAM_BOT_TOKEN'),
+        'chat_id' => env('AGENTIO_TELEGRAM_CHAT_ID'),
+        'api_url' => env('AGENTIO_TELEGRAM_API_URL', 'https://api.telegram.org'),
+        'queue_connection' => env('AGENTIO_TELEGRAM_QUEUE_CONNECTION', 'redis'),
+        'queue' => env('AGENTIO_TELEGRAM_QUEUE', 'default'),
+        'watch_interval' => (int) env('AGENTIO_TELEGRAM_WATCH_INTERVAL', 60),
+        'assistant_timeout' => (int) env('AGENTIO_TELEGRAM_ASSISTANT_TIMEOUT', 600),
+        'transcription' => [
+            'driver' => env('AGENTIO_TRANSCRIPTION_DRIVER'),
+            'url' => env('AGENTIO_TRANSCRIPTION_URL', 'https://api.openai.com/v1'),
+            'key' => env('AGENTIO_TRANSCRIPTION_KEY'),
+            'model' => env('AGENTIO_TRANSCRIPTION_MODEL', 'whisper-1'),
+            'whisper_binary' => env('AGENTIO_WHISPER_BIN', 'whisper-cli'),
+            'whisper_model' => env('AGENTIO_WHISPER_MODEL'),
+            'ffmpeg_binary' => env('AGENTIO_FFMPEG_BIN', 'ffmpeg'),
+            'language' => env('AGENTIO_TRANSCRIPTION_LANGUAGE', 'ru'),
+        ],
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | User Interface
     |--------------------------------------------------------------------------
     |

@@ -9,12 +9,13 @@ use Illuminate\Support\Facades\Route;
 use Obrazmisli\Agentio\Console\Concerns\RunsPackageScripts;
 use Obrazmisli\Agentio\Git\Git;
 use Obrazmisli\Agentio\Git\PathPackages;
-use Obrazmisli\Agentio\Install\Installer;
 use Obrazmisli\Agentio\Install\Preconditions;
+use Obrazmisli\Agentio\Queue\Horizon;
 use Obrazmisli\Agentio\Runtime\LoopState;
 use Obrazmisli\Agentio\Runtime\MergePolicy;
 use Obrazmisli\Agentio\Runtime\SessionSettings;
 use Obrazmisli\Agentio\Settings;
+use Obrazmisli\Agentio\Telegram\BotSupervisor;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Process\Process;
 use ValueError;
@@ -22,7 +23,8 @@ use ValueError;
 /**
  * Runs the agent loop of the package (scripts/agent-loop.sh, never copied into the project) with the settings of
  * config/agentio.php and .agentio.json in its environment, streaming its output and forwarding SIGINT / SIGTERM;
- * the exit code is the loop's.
+ * the exit code is the loop's. Next to it, in processes of their own, runs the developer's Telegram bot when it
+ * is set up (BotSupervisor: the listener of the bot and, when nothing else runs it, Horizon).
  */
 #[AsCommand(name: 'agentio:run')]
 final class RunCommand extends Command
@@ -45,7 +47,8 @@ final class RunCommand extends Command
         {--no-wait : With --once: start the sessions and exit without waiting}
         {--interval= : Seconds between passes}
         {--max-parallel= : Epics worked on at the same time}
-        {--max-parallel-tasks= : Task subagents per epic at the same time}';
+        {--max-parallel-tasks= : Task subagents per epic at the same time}
+        {--no-telegram : Do not start the Telegram bot (its listener and Horizon) next to the loop}';
 
     /**
      * @var string
@@ -54,7 +57,7 @@ final class RunCommand extends Command
 
     private ?Process $process = null;
 
-    public function handle(LoopState $loop, Settings $settings): int
+    public function handle(LoopState $loop, Settings $settings, Horizon $horizon): int
     {
         if ($this->option('dry-run') && ($this->option('stop') || $this->option('kill'))) {
             $this->components->error('--dry-run changes nothing: it cannot be combined with --stop or --kill.');
@@ -107,7 +110,31 @@ final class RunCommand extends Command
             }
         });
 
-        return $this->runScript($this->process);
+        $bot = $this->startBot($settings, $loop, $horizon);
+
+        try {
+            return $this->runScript($this->process, $bot === null ? null : $bot->tick(...));
+        } finally {
+            $bot?->stop();
+        }
+    }
+
+    /**
+     * The developer's Telegram bot, in processes of its own next to the loop: only for a run of the loop
+     * (not --dry-run or --kill) and when the bot is configured.
+     */
+    private function startBot(Settings $settings, LoopState $loop, Horizon $horizon): ?BotSupervisor
+    {
+        if ($this->option('no-telegram') || $this->option('dry-run') || $this->option('kill')) {
+            return null;
+        }
+
+        $bot = new BotSupervisor($settings, $loop, $horizon, fn (string $message) => $this->components->info($message));
+
+        // Not configured yet: still supervised, so a token agentio:setup-telegram writes meanwhile starts it.
+        $bot->start();
+
+        return $bot;
     }
 
     /**
@@ -118,24 +145,20 @@ final class RunCommand extends Command
      */
     public function environment(Settings $settings, MergePolicy $policy, LoopState $loop): array
     {
-        $mcp = [dirname(__DIR__, 3).'/resources/claude/mcp/youtrack.json'];
-
-        if (Installer::hasBoost($settings->basePath())) {
-            $mcp[] = dirname(__DIR__, 3).'/resources/claude/mcp/laravel-boost.json';
-        }
+        $sessions = new SessionSettings($settings);
 
         return $this->scriptEnvironment($settings, [
             'MAX_PARALLEL' => Settings::string('agentio.max_parallel'),
             'MAX_PARALLEL_TASKS' => Settings::string('agentio.max_parallel_tasks'),
             'AGENT_LOOP_INTERVAL' => Settings::string('agentio.interval'),
             'CLAUDE_BIN' => Settings::string('agentio.claude_binary'),
-            'CLAUDE_MODEL' => Settings::string('agentio.claude_model'),
+            'CLAUDE_MODEL' => $settings->claudeModel(),
             'MERGE_POLICY' => $policy->value,
             'AGENT_LOG_DIR' => $loop->logsPath(),
             'AGENTIO_STOP_FILE' => $loop->stopFile(),
-            'AGENTIO_SESSION_SETTINGS' => (new SessionSettings($settings))->toJson(),
-            'AGENTIO_PLANNING_SETTINGS' => (new SessionSettings($settings))->toJson(planning: true),
-            'AGENTIO_MCP_CONFIG' => implode("\n", $mcp),
+            'AGENTIO_SESSION_SETTINGS' => $sessions->toJson(),
+            'AGENTIO_PLANNING_SETTINGS' => $sessions->toJson(planning: true),
+            'AGENTIO_MCP_CONFIG' => implode("\n", $sessions->mcpConfigs()),
         ]);
     }
 
@@ -180,7 +203,7 @@ final class RunCommand extends Command
             $errors[] = 'The worktrees directory is not configured (AGENTIO_WORKTREES_PATH): run php artisan agentio:install';
         }
 
-        $claude = Settings::string('agentio.claude_binary') ?? 'claude';
+        $claude = $settings->claudeBinary();
 
         if (Preconditions::executable($claude) === null) {
             $errors[] = "Claude Code CLI not found ({$claude}): install it or set AGENTIO_CLAUDE_BIN";

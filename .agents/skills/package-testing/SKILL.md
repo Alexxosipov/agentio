@@ -18,7 +18,8 @@ Prove package behavior with Pest 4/5, Orchestra Testbench, and the local `tests/
 2. Cover happy-path, unhappy-path, and edge-case behavior when the feature has meaningful failure modes.
 3. Prefer focused feature tests for package integration behavior and arch tests for broad constraints.
 4. Run tests only two ways: specific tests through Pest while iterating (`vendor/bin/pest tests/Feature/SomeTest.php --filter ...`), and `composer test` at the end of every task to confirm everything is right (PHPStan, Pint, type coverage and the whole suite). A task is not done until `composer test` passes. Do not pipe test output into `tail` or `head`.
-5. Keep real package tests in the suite and remove only throwaway tests that were explicitly created for local scaffolding experiments.
+5. Fake every outside system: YouTrack with `Http::fake()` / `FakeYouTrackMcp`, Saloon connectors (Telegram, transcription) with `MockClient::global()` (`Saloon\Config::preventStrayRequests()` is on for the whole suite), processes of the `Process` facade with `Process::fake()` (stray processes are refused), time with `$this->travel()` and `Sleep::fake()`.
+6. Keep real package tests in the suite and remove only throwaway tests that were explicitly created for local scaffolding experiments.
 
 ## References
 

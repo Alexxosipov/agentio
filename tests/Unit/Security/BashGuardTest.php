@@ -147,3 +147,20 @@ it('ignores the root and empty directories among the roots', function () {
 
     expect($guard->reason('rm -rf /home/user', '/srv/app'))->toContain('outside of the project directory');
 });
+
+it('lets agents add only Saloon to the dependencies', function (string $command, ?string $reason) {
+    $refused = guard()->reason($command, '/srv/app');
+
+    $reason === null ? expect($refused)->toBeNull($command) : expect($refused)->toContain($reason);
+})->with([
+    ['composer require saloonphp/saloon --no-interaction', null],
+    ['composer require saloonphp/saloon:^4.5 saloonphp/pagination-plugin -W', null],
+    ['composer show saloonphp/saloon', null],
+    ['composer require saloonphp/saloon evil/package', 'composer require evil/package: agents may only add saloonphp/* packages'],
+    ['composer req guzzlehttp/guzzle', 'agents may only add saloonphp/* packages'],
+    ['composer require --dev saloonphp/saloon', 'as dependencies of the application (not --dev)'],
+    ['composer require', 'name the saloonphp/* packages'],
+    ['composer remove saloonphp/saloon', 'composer remove changes the dependencies'],
+    ['composer update', 'composer update changes the dependencies'],
+    ['composer -n global require laravel/installer', 'composer global changes'],
+]);

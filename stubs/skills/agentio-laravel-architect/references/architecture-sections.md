@@ -29,8 +29,8 @@
 | Маршрут | `user-avatar.update` · `PUT /settings/avatar` · `auth`, `verified` → `AvatarController@update` | — (в тесте контроллера) | загрузка (FR-1) |
 | Контроллер | `App\Users\Http\Controllers\AvatarController` | `tests/Feature/Users/Http/Controllers/AvatarControllerTest.php` | HTTP, авторизация, валидация |
 | Form Request | `App\Users\Http\Requests\UpdateUserAvatarRequest` | — (в тесте контроллера) | BR-1, BR-2 |
-| Action | `App\Users\Actions\UpdateUserAvatar` | `tests/Unit/Users/Actions/UpdateUserAvatarTest.php` | сохранить файл, поставить джоб |
-| Policy | `App\Users\Policies\UserPolicy@update` | `tests/Unit/Users/Policies/UserPolicyTest.php` | только владелец |
+| Action | `App\Users\Actions\UpdateUserAvatar` | `tests/Feature/Users/Actions/UpdateUserAvatarTest.php` | сохранить файл, поставить джоб |
+| Policy | `App\Users\Policies\UserPolicy@update` | `tests/Feature/Users/Policies/UserPolicyTest.php` | только владелец |
 | Джоб | `App\Users\Jobs\ProcessUserAvatar` | `tests/Feature/Users/Jobs/ProcessUserAvatarTest.php` | AD-1 |
 
 ### Физическая модель
@@ -38,7 +38,7 @@
 |---|---|---|---|---|---|
 | users | avatar_path | string(255) | да | — | путь на диске `public` (AD-2) |
 
-Миграции (по порядку): `add_avatar_path_to_users_table`. Модели: casts, связи, фабрики (состояния), `$hidden`.
+Миграции (по порядку): `add_avatar_path_to_users_table`. Модели: casts, связи, фабрики (состояния), сидеры — нужны ли (решение), `$hidden`.
 
 ### Интерфейс
 - `<путь к представлению / странице / ресурсу>`: данные от контроллера (имена и типы; для SPA — props, для API — формат ресурса), общие данные, flash, ошибки валидации, состояния ожидания фоновой операции.
@@ -66,7 +66,7 @@
 
 ### Тестирование
 - Файлы тестов зеркалят неймспейсы классов (столбец «Тест» в «Компонентах»).
-- Feature: <HTTP, авторизация, валидация, `Queue::fake()`, `Http::fake()`>; Unit: <Actions, джобы, правила>; надёжность: <повтор запроса, повтор джоба, сбой внешней системы, дубль вебхука>.
+- Feature: <HTTP, авторизация, валидация, Actions, джобы, `Queue::fake()`, фейки внешних клиентов (Saloon `MockClient`, фейки SDK)>; Unit: <только логика без фреймворка: расчёты, value objects>; надёжность: <повтор запроса, повтор джоба, сбой внешней системы, дубль вебхука>.
 
 Не применимо: <деньги, внешние системы — перечисли опущенные подразделы>.
 ```
@@ -80,7 +80,7 @@
 > Ведёт скилл `agentio-laravel-architect`.
 
 ### Код модуля
-- Домен: `App\Users` (`app/Users/{Models,Actions,Http,Policies,Jobs,…}`), тесты — `tests/{Feature,Unit}/Users/…` (зеркально); представления и страницы — `resources/js/pages/users/*`.
+- Домен: `App\Users` (`app/Users/{Models,Actions,Http,Policies,Jobs,…}`), тесты — `tests/{Feature,Unit}/Users/…` (зеркально; раскладка — по правилу ADR-001); представления и страницы — `resources/js/pages/users/*`.
 - Плоский код домена, ещё не перенесённый (если есть): <классы> — перенос: <шаг эпика / AD-n / не планируется>.
 - Таблицы-владельцы: `users`, `user_sessions` (колонки — в статьях фич-владельцев).
 
@@ -108,9 +108,9 @@
 | # | Шаг | Фича / решение | Зависит от | Затрагивает файлы |
 |---|---|---|---|---|
 | 1 | Миграция и модель | {{project}}-A-31 AD-2 | — | `database/migrations/..`, `app/Users/Models/User.php`, `database/factories/UserFactory.php` |
-| 2 | Action и Form Request | {{project}}-A-31 AD-1 | 1 | `app/Users/Actions/UpdateUserAvatar.php`, `app/Users/Http/Requests/UpdateUserAvatarRequest.php`, `tests/Unit/Users/Actions/UpdateUserAvatarTest.php` |
+| 2 | Action и Form Request | {{project}}-A-31 AD-1 | 1 | `app/Users/Actions/UpdateUserAvatar.php`, `app/Users/Http/Requests/UpdateUserAvatarRequest.php`, `tests/Feature/Users/Actions/UpdateUserAvatarTest.php` |
 
-Файлы — точными путями по неймспейсам домена, вместе с зеркальными тестами. Перенос плоского кода домена (если решён) — отдельный первый шаг, от него зависят все шаги домена.
+Файлы — точными путями по правилу раскладки ADR-001, вместе с зеркальными тестами. Первые шаги, от которых зависят остальные: «Скилл платформы <X>» (внешняя платформа без скилла), установка Saloon (первая интеграция без SDK), перенос кода домена (только если его решил человек).
 
 **Параллельные группы:** {2, 3} — файлы не пересекаются; …
 **Нельзя параллельно:** все миграции (одна цепочка); всё, что трогает `routes/web.php`.

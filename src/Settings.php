@@ -91,6 +91,32 @@ final readonly class Settings
             : rtrim($this->basePath, '/').'/'.rtrim($path, '/');
     }
 
+    /**
+     * The Claude Code CLI the agents run (AGENTIO_CLAUDE_BIN).
+     */
+    public function claudeBinary(): string
+    {
+        return self::string('agentio.claude_binary') ?? 'claude';
+    }
+
+    /**
+     * The model of the agents' sessions, or null for Claude Code's default (AGENTIO_CLAUDE_MODEL).
+     */
+    public function claudeModel(): ?string
+    {
+        return self::string('agentio.claude_model');
+    }
+
+    /**
+     * The command line of `php artisan <arguments>` in the project.
+     *
+     * @return list<string>
+     */
+    public function artisan(string ...$arguments): array
+    {
+        return [PHP_BINARY, rtrim($this->basePath, '/').'/artisan', ...array_values($arguments)];
+    }
+
     public static function string(string $key): ?string
     {
         $value = config($key);

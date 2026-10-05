@@ -68,6 +68,7 @@ final readonly class BashGuard
                     $words === [] => null,
                     $words[0] === 'git' => $this->git(array_slice($words, 1), $cwd),
                     $words[0] === 'php' => $this->php(array_slice($words, 1)),
+                    in_array($words[0], ['composer', 'composer.phar'], true) => self::composer(array_slice($words, 1)),
                     $words[0] === 'find' => $this->find($words, $cwd),
                     in_array($words[0], ['sed', 'perl'], true) => $this->inPlaceEdit($words, $cwd),
                     in_array($words[0], self::WRITING, true) => $this->writing($words[0], array_slice($words, 1), $cwd),
@@ -276,6 +277,43 @@ final readonly class BashGuard
             $command === 'agentio:run' && ! self::onlyDryRun(array_slice($rest, 1)) => 'php artisan agentio:run is run by humans; agents may only use --dry-run (with --epic= or --no-plan).',
             default => null,
         };
+    }
+
+    /**
+     * Agents change the dependencies of the project only to add Saloon (saloonphp/*), the HTTP client of the
+     * integrations without an SDK; everything else is a decision of the human.
+     *
+     * @param  list<string>  $args
+     */
+    private static function composer(array $args): ?string
+    {
+        while ($args !== [] && str_starts_with($args[0], '-')) {
+            $args = array_slice($args, 1);
+        }
+
+        $command = $args[0] ?? '';
+
+        if (in_array($command, ['remove', 'rm', 'uninstall', 'update', 'u', 'upgrade', 'bump', 'global', 'create-project', 'config'], true)) {
+            return "composer {$command} changes the dependencies or the setup of the project: that is a decision of the human (ask in [AGENT:BLOCKED]).";
+        }
+
+        if (! in_array($command, ['require', 'req', 'r'], true)) {
+            return null;
+        }
+
+        $packages = array_values(array_filter(array_slice($args, 1), fn (string $arg): bool => ! str_starts_with($arg, '-')));
+
+        foreach ($packages as $package) {
+            if (preg_match('#^saloonphp/[a-z0-9-]+(:[^\s]+)?$#', $package) !== 1) {
+                return "composer require {$package}: agents may only add saloonphp/* packages (Saloon, skill agentio-saloon); any other dependency is a decision of the human (ask in [AGENT:BLOCKED]).";
+            }
+        }
+
+        if ($packages === [] || array_intersect(array_slice($args, 1), ['--dev', '-D']) !== []) {
+            return 'composer require: name the saloonphp/* packages, as dependencies of the application (not --dev).';
+        }
+
+        return null;
     }
 
     /**

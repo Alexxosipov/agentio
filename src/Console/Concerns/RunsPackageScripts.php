@@ -4,9 +4,11 @@ declare(strict_types=1);
 
 namespace Obrazmisli\Agentio\Console\Concerns;
 
+use Closure;
 use Illuminate\Console\Command;
 use Obrazmisli\Agentio\Install\EnvFile;
 use Obrazmisli\Agentio\Settings;
+use Obrazmisli\Agentio\Telegram\BotSettings;
 use Symfony\Component\Console\Output\ConsoleOutputInterface;
 use Symfony\Component\Console\Output\OutputInterface;
 use Symfony\Component\Process\Process;
@@ -43,7 +45,8 @@ trait RunsPackageScripts
      * The environment of a script: the project (AGENTIO_ROOT) and the settings of config/agentio.php under the
      * names the scripts read. The variables Laravel loaded from the project's .env (APP_ENV, APP_KEY, DB_*, …) are
      * removed (false): inherited by the scripts they would override the .env of every epic worktree and the
-     * <env> values of phpunit.xml. The agentio and YouTrack ones stay.
+     * <env> values of phpunit.xml. The agentio and YouTrack ones stay, except the bot's: the artisan commands of
+     * the scripts read them from .env, where agentio:setup-telegram may change them while the loop runs.
      *
      * @param  array<string, string|null>  $extra
      * @return array<string, string|false>
@@ -53,7 +56,7 @@ trait RunsPackageScripts
         $basePath = $settings->basePath();
         $loaded = array_filter(
             (new EnvFile($basePath.'/.env'))->keys(),
-            fn (string $key): bool => ! str_starts_with($key, 'AGENTIO_') && ! str_starts_with($key, 'YOUTRACK_'),
+            fn (string $key): bool => (! str_starts_with($key, 'AGENTIO_') && ! str_starts_with($key, 'YOUTRACK_')) || BotSettings::isBotKey($key),
         );
 
         return [...array_fill_keys($loaded, false), ...array_filter([
@@ -69,15 +72,19 @@ trait RunsPackageScripts
     }
 
     /**
-     * Run the process, relaying its output; returns its exit code.
+     * Run the process, relaying its output; returns its exit code. $tick, when given, is called about every
+     * second while the process runs.
+     *
+     * @param  (Closure(): void)|null  $tick
      */
-    protected function runScript(Process $process): int
+    protected function runScript(Process $process, ?Closure $tick = null): int
     {
         $output = $this->output->getOutput();
 
         if ($output instanceof ConsoleOutputInterface && Process::isTtySupported() && stream_isatty(STDOUT) && stream_isatty(STDIN)) {
             $process->setTty(true);
-            $process->run();
+            $process->start();
+            self::waitFor($process, $tick);
 
             return $process->getExitCode() ?? self::FAILURE;
         }
@@ -89,7 +96,7 @@ trait RunsPackageScripts
             $stream->write($text, false, OutputInterface::OUTPUT_RAW);
         };
 
-        $process->run(function (string $type, string $buffer) use (&$pending, $write): void {
+        $process->start(function (string $type, string $buffer) use (&$pending, $write): void {
             $pending[$type] .= $buffer;
 
             while (($newline = strpos($pending[$type], "\n")) !== false) {
@@ -97,6 +104,7 @@ trait RunsPackageScripts
                 $pending[$type] = substr($pending[$type], $newline + 1);
             }
         });
+        self::waitFor($process, $tick);
 
         foreach ($pending as $type => $rest) {
             if ($rest !== '') {
@@ -105,5 +113,26 @@ trait RunsPackageScripts
         }
 
         return $process->getExitCode() ?? self::FAILURE;
+    }
+
+    /**
+     * Wait for the process to end, calling $tick about every second meanwhile.
+     *
+     * @param  (Closure(): void)|null  $tick
+     */
+    private static function waitFor(Process $process, ?Closure $tick): void
+    {
+        if ($tick === null) {
+            $process->wait();
+
+            return;
+        }
+
+        while ($process->isRunning()) {
+            $tick();
+            usleep(500_000);
+        }
+
+        $process->wait();
     }
 }

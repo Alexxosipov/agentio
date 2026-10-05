@@ -27,7 +27,7 @@ worktree: `/abs/path/to/worktree`
 
 **Затрагиваемые файлы:**
 - `app/Users/Actions/UpdateUserAvatar.php` (новый)
-- `tests/Unit/Users/Actions/UpdateUserAvatarTest.php` (новый)
+- `tests/Feature/Users/Actions/UpdateUserAvatarTest.php` (новый)
 - `routes/web.php`
 
 **Допущения:**
@@ -48,7 +48,7 @@ worktree: `/abs/path/to/worktree`
 
 ## [AGENT:BLOCKED]
 
-Правила — раздел «Вопросы к человеку» скилла agentio-youtrack-workflow: все вопросы задачи в одном комментарии, у каждого — что от него зависит, варианты и рекомендация. Первый абзац (до пустой строки) панель `/agentio` показывает как причину блокировки: в нём — что остановлено и сколько вопросов ждут ответа. После комментария: `php artisan agentio:yt release <ID> --state=Blocked` (если задача захвачена тобой; иначе `update_issue(issueId, customFields={"Stage": "Blocked"})`).
+Правила — раздел «Вопросы к человеку» скилла agentio-youtrack-workflow: все вопросы задачи в одном комментарии, **только на русском языке**, у каждого — что от него зависит, варианты и рекомендация. Первый абзац (до пустой строки) панель `/agentio` показывает как причину блокировки: в нём — коротко и понятно, что остановлено и сколько вопросов ждут ответа. Тот же комментарий целиком уходит в Telegram-бот разработчика (если он настроен); абзац «**Как ответить:**» бот заменяет своей подсказкой (ответ реплаем), а Stage для возврата берёт из строки «Stage → …» — пиши её именно так. После комментария: `php artisan agentio:yt release <ID> --state=Blocked` (если задача захвачена тобой; иначе `update_issue(issueId, customFields={"Stage": "Blocked"})`).
 
 ```markdown
 [AGENT:BLOCKED]

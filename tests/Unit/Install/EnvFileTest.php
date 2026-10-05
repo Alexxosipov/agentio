@@ -34,3 +34,18 @@ it('quotes only values that need it', function (string $value, string $written) 
     'space' => ['a b', '"a b"'],
     'quote and backslash' => ['a"b\\c', '"a\\"b\\\\c"'],
 ]);
+
+it('writes a new .env readable by its owner only and keeps the mode of an existing one', function () {
+    $directory = temporaryDirectory();
+    $env = new EnvFile($directory.'/.env');
+
+    expect($env->put(['AGENTIO_TELEGRAM_BOT_TOKEN' => '1:abc']))->toBeTrue()
+        ->and(fileperms($directory.'/.env') & 0777)->toBe(0600)
+        ->and($env->put(['AGENTIO_TELEGRAM_BOT_TOKEN' => '1:abc']))->toBeFalse();
+
+    chmod($directory.'/.env', 0640);
+    $env->put(['APP_NAME' => 'x']);
+
+    expect(fileperms($directory.'/.env') & 0777)->toBe(0640)
+        ->and(glob($directory.'/.env.agentio-*'))->toBe([]);
+});

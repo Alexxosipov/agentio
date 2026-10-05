@@ -4,7 +4,7 @@
 
 - Копия этого руководства в базе знаний YouTrack — статья **{{kb.guide}} «Руководство по автоматизации»** (дочерняя к {{kb.process}}). Исходник — в пакете: `vendor/alexxosipov/agentio/resources/docs/AUTONOMOUS_WORKFLOW.md`.
 - Правила процесса: иерархия, статусы, готовность, захват, комментарии. Для людей — статья **{{kb.process}} «Процесс разработки»**, для агентов — скилл `.claude/skills/agentio-youtrack-workflow/SKILL.md`. Если они расходятся, прав `php artisan agentio:yt`.
-- Пакет `alexxosipov/agentio` добавляет в проект только скиллы `.claude/skills/agentio-*`, манифест `.agentio.json` и ключи в `.env` (команда `php artisan agentio:install`). Скрипты цикла, настройки сессий агентов и это руководство остаются в пакете. Проект YouTrack настраивает `php artisan agentio:setup-youtrack`, цикл запускается `php artisan agentio:run`, сводка — `php artisan agentio:status`, наблюдение в браузере — страница `/agentio`.
+- Пакет `alexxosipov/agentio` добавляет в проект только скиллы `.claude/skills/agentio-*`, манифест `.agentio.json` и ключи в `.env` (команда `php artisan agentio:install`; Telegram-бот — по желанию, `php artisan agentio:setup-telegram`, он же ставит Laravel Horizon). Скрипты цикла, настройки сессий агентов и это руководство остаются в пакете. Проект YouTrack настраивает `php artisan agentio:setup-youtrack`, цикл запускается `php artisan agentio:run`, сводка — `php artisan agentio:status`, наблюдение в браузере — страница `/agentio`.
 
 **Содержание:**
 1. Обзор
@@ -41,7 +41,7 @@ YouTrack (проект `{{project}}`, инстанс из `YOUTRACK_URL`) — е
 | Владелец продукта (человек) | YouTrack UI, терминал | Заводит идеи, отвечает на вопросы `[AGENT:BLOCKED]` комментарием в задаче (3.3), принимает и сливает эпики | Blocked → Stage из `[AGENT:BLOCKED]`; EPIC/STORY → Done после слияния |
 | Менеджер проекта (PM) | скилл `agentio-project-manager` (в составе `/agentio-plan`) | Пишет требования к идее, создаёт EPIC → STORY → TASK, расставляет зависимости, переводит в Ready, разбирает блокировки | Idea: Backlog → Analysis → Done/Blocked; EPIC/STORY/TASK: Analysis → Ready |
 | Системный аналитик | скилл `agentio-system-analyst` (опирается на `laravel-best-practices`) | Раскладывает требования по модулям и фичам, ведёт статьи «Системной аналитики» (карта модулей, «Общие требования», статьи модулей и фич), прорабатывает особенности системы (повторы, сбои, долгие операции, деньги), ищет противоречия, пишет сводку влияния | → Blocked с вопросами к человеку |
-| Архитектор | скилл `agentio-laravel-architect` (опирается на `laravel-best-practices`) | Проектирует эпик (данные, маршруты, интерфейс, очереди, идемпотентность, платежи, внешние API, наблюдаемость), раскладывает классы по доменным неймспейсам `App\<Домен>\<Вид>` (без плоских `App\Actions`, `App\Models`…) с тестами по зеркальным путям и записывает решения с обоснованием в статьи модулей и фич, общепроектные — в ADR; задаёт порядок реализации и параллельные группы в описании эпика | → Blocked, если решение за человеком (деньги, договор, юридическое) |
+| Архитектор | скилл `agentio-laravel-architect` (опирается на `laravel-best-practices`) | Проектирует эпик (данные, маршруты, интерфейс, очереди, идемпотентность, платежи, внешние API, наблюдаемость), раскладывает классы по конвенции проекта (без неё — по доменным неймспейсам `App\<Домен>\<Вид>`) с тестами по зеркальным путям, для внешних платформ планирует скилл платформы, для интеграций без SDK — Saloon и записывает решения с обоснованием в статьи модулей и фич, общепроектные — в ADR; задаёт порядок реализации и параллельные группы в описании эпика | → Blocked, если решение за человеком (деньги, договор, юридическое) |
 | Оркестратор эпика | скилл-команда `/agentio-work-epic` | Захватывает эпик, раздаёт задачи разработчикам (независимые — параллельно), запускает ревью историй, прогоняет полный набор тестов | EPIC: Ready → In Progress → Review; STORY: Ready → In Progress → Review |
 | Разработчик | субагент `general-purpose` со скиллом `agentio-develop-task` | Реализует одну TASK: код, тесты, линтеры, коммит, `[AGENT:DONE]` | TASK: Ready → In Progress → Done |
 | Ревьюер | субагент `general-purpose` со скиллом `agentio-review-story` | Проверяет STORY по критериям приёмки и ADR; замечания оформляет новыми TASK | STORY → Blocked на 3-м раунде замечаний |
@@ -275,6 +275,46 @@ php artisan agentio:run --dry-run  # что запустил бы цикл; ни
 
 **Поле State («Состояние»)** в проекте agentio не использует: `agentio:setup-youtrack` предупреждает о нём и оставляет как есть. Если проект настраивался прежней версией agentio, статус задач хранился в State: перенесите его в Stage (в YouTrack — массовое изменение поля Stage по поиску `State: <значение>`) и перестройте доску по Stage.
 
+### 2.7. Laravel Boost и конвенции проекта
+
+agentio рассчитан на Laravel-проекты с [Laravel Boost](https://github.com/laravel/boost): его guidelines (`CLAUDE.md` или `AGENTS.md`, блок `<laravel-boost-guidelines>`), скиллы (`.claude/skills`: `laravel-best-practices`, `testing-best-practices`, скиллы фронтенда и аутентификации) и MCP-сервер (`search-docs`, `application-info`, `database-schema`, `database-query`, `last-error`, `read-log-entries`, `browser-logs`) агенты используют на каждом шаге. Закоммитьте `CLAUDE.md`/`AGENTS.md`, `.ai/` и `.claude/skills` в `{{base_branch}}`: worktree эпиков берут их оттуда.
+
+**Чьё правило сильнее** (скилл `agentio-youtrack-workflow`, раздел «Laravel Boost и конвенции проекта»):
+1. права сессии и процесс agentio (захват, коммиты, `composer test`, запреты);
+2. решения проекта — ADR и разделы «Архитектура» статей;
+3. конвенции проекта — проектные guidelines `.ai/guidelines`, правила `.ai/rules`, соседний код;
+4. общие guidelines и скиллы Boost;
+5. умолчания из референсов agentio.
+
+Поэтому раскладку кода задаёт проект: если в нём принято «Actions live in `app/Actions`», агенты так и делают; доменные неймспейсы `App\<Домен>\…` — умолчание agentio только для проекта без своей конвенции, а перевод на них — ваше решение (агент спросит в `[AGENT:BLOCKED]`). Указания Boost «спроси пользователя» агенты понимают так: разрешено то, что записано в задаче или ADR, остальное — вопрос в `[AGENT:BLOCKED]`; полный прогон тестов — их собственный `composer test`.
+
+Правила проекта для агентов удобно держать в `.ai/rules` (их пишет человек или скилл Boost `infer-conventions` — запустите его до первого `/agentio-plan` в существующем проекте). Агенты их читают, но не меняют: `CLAUDE.md`, `AGENTS.md`, `boost.json`, `.mcp.json`, `.ai/guidelines`, `.ai/rules` и скиллы Boost регенерирует Boost, правка им запрещена, как и `php artisan boost:*`, `tinker`, `record-rule` и `config:show`.
+
+**Зависимости.** Новые пакеты — ваше решение: агент предлагает их в `[AGENT:BLOCKED]`. Заранее разрешён только [Saloon](https://docs.saloon.dev) (`saloonphp/*`) — HTTP-клиент для интеграций с сервисами без готового SDK: архитектор записывает его в ADR, первая задача эпика ставит его `composer require saloonphp/saloon` (другие пакеты защита сессии не пропустит). Правила работы с ним — скилл `agentio-saloon`.
+
+**Внешние платформы.** Если идея затрагивает платформу со своей спецификой (Telegram-бот, Telegram Mini App, VK Mini App, MAX, PWA и т. п.), а скилла под неё в `.claude/skills` нет, первой задачей эпика агент пишет скилл `.claude/skills/<платформа>-development` по официальной документации (скилл `agentio-platform-skill`); остальные задачи по платформе опираются на него. Сессиям разрешён `WebFetch` только к доменам официальной документации (core.telegram.org, docs.telegram-mini-apps.com, dev.vk.com, web.dev, developer.mozilla.org, docs.saloon.dev, laravel.com, github.com, raw.githubusercontent.com) и `WebSearch`. Скилл платформы закоммитится в ветку эпика и попадёт в `{{base_branch}}` при приёмке — проверьте его, как код.
+
+### 2.8. Telegram-бот разработчика (необязательно)
+
+Свой бот — менеджер проекта в чате: присылает вопросы агентов и короткие отчёты, принимает ответы и новые идеи текстом и голосом. Цикл от него не зависит: без бота, при его сбое или пока вы молчите, всё работает через YouTrack, как описано выше.
+
+**Настройка:**
+1. Создайте бота у [@BotFather](https://t.me/BotFather) (`/newbot`) и возьмите токен.
+2. `php artisan agentio:setup-telegram <токен>` (или ответьте «да» на вопрос о боте в `agentio:install`, или `agentio:install --telegram-token=<токен>`). Команда проверяет токен, пишет его в `.env` (`AGENTIO_TELEGRAM_BOT_TOKEN`), настраивает голосовые, проверяет Laravel Horizon (и ставит его в проект, если его нет: `laravel/horizon`, `predis/predis` без расширения redis, `horizon:install`) и показывает ссылку `https://t.me/<бот>?start=<код>`.
+3. Откройте ссылку и нажмите Start: бот запомнит чат (`AGENTIO_TELEGRAM_CHAT_ID` в `.env`) и будет говорить только с ним. Код действует час; если команда уже завершилась, привязку сделает запущенный `agentio:run`.
+4. Голосовые: `--transcription=openai` — любой OpenAI-совместимый API (`AGENTIO_TRANSCRIPTION_URL`, `_KEY`, `_MODEL`; OpenAI, Groq, свой whisper-сервер) или `--transcription=whisper` — локальный whisper.cpp (`AGENTIO_WHISPER_BIN`, `AGENTIO_WHISPER_MODEL`, ffmpeg — `AGENTIO_FFMPEG_BIN`); `none` — только текст.
+
+**Как работает.** `php artisan agentio:run` запускает рядом с циклом, отдельными процессами, слушателя бота (`agentio:telegram listen`: `getUpdates`, лог `storage/logs/agents/telegram.log`) и Horizon, если в проекте он не запущен (лог `horizon.log`). Все сообщения бота идут через очередь `default` (соединение `redis`, Horizon). Когда меняется токен или другие ключи `AGENTIO_*`/`YOUTRACK_*` в `.env` (через `agentio:setup-telegram`, `agentio:install` или вручную), `agentio:run` перезапускает эти процессы, а Horizon — через `horizon:terminate`; `--no-telegram` запускает цикл без бота.
+
+**Что присылает:** вопросы агентов (`[AGENT:BLOCKED]`, по-русски) и коротко — «идея спланирована» (с эпиками), «эпик готов к приёмке» (что сделано и как принять), «эпик слит автоматически», «сессия несколько раз оборвалась, задача в Blocked».
+
+**Что умеет:**
+- **Ответ на вопросы** — reply на сообщение с вопросами, текстом или голосовым («В1: б, В2: а», «принимаю рекомендации», своими словами). Бот записывает ответ комментарием в задачу («Ответ разработчика (Telegram…)») и, если ответ полный, возвращает Stage из `[AGENT:BLOCKED]`; если ответ частичный — уточняет и Stage не трогает.
+- **Новая задача** — опишите идею своими словами: бот создаст IDEA (метка `idea`, `Backlog`), цикл её спланирует.
+- **Вопросы о проекте** — что в работе, что заблокировано, что сделано. Бот отвечает по YouTrack, коду и состоянию цикла; ничего не меняет, кроме записей выше.
+
+Проверка: `php artisan agentio:telegram status`, тестовое сообщение — `php artisan agentio:telegram send "Привет"`.
+
 ---
 
 ## 3. Работа с задачами
@@ -299,6 +339,8 @@ claude "/agentio-plan {{project}}-1"
 claude "/agentio-plan Страница профиля пользователя с загрузкой аватара"
 ```
 
+**Вариант 3: в Telegram** (если настроен бот, 2.8). Напишите или наговорите идею боту: он заведёт IDEA с пометкой «Идея поставлена разработчиком в Telegram», ближайший проход цикла её спланирует.
+
 ### 3.2. Что происходит при планировании
 
 `/agentio-plan` проходит процедуру `agentio-project-manager` целиком:
@@ -318,7 +360,7 @@ claude "/agentio-plan Страница профиля пользователя �
 
 1. Агент доделывает и записывает всё, что от ответа не зависит, и задаёт **все** вопросы задачи **одним** комментарием `[AGENT:BLOCKED]` — при планировании в идее, при работе над эпиком в той задаче, где встала работа. У каждого вопроса номер (`В1`, `В2`, …), что от ответа зависит, варианты с последствиями и **рекомендация** агента. В первом абзаце — что остановлено и куда вернуть Stage. Задача переходит в `Blocked`.
 2. Где увидеть: панель `/agentio` (конвейер и блокировки — с первым абзацем вопроса), `php artisan agentio:yt blocked`, сохранённый поиск «{{project}}: заблокированные …» в YouTrack.
-3. **Где и как ответить:** в YouTrack, **комментарием в той же задаче**, по номерам: `В1: б; В2: свой вариант — лимит 5 МБ`. Можно коротко: `Принимаю рекомендации` или `Принимаю рекомендации, кроме В2: …`. Если ответ меняет суть идеи, поправьте и описание.
+3. **Где и как ответить:** в YouTrack, **комментарием в той же задаче**, по номерам: `В1: б; В2: свой вариант — лимит 5 МБ`. Можно коротко: `Принимаю рекомендации` или `Принимаю рекомендации, кроме В2: …`. Если ответ меняет суть идеи, поправьте и описание. Или в Telegram (2.8): reply на сообщение бота с вопросами, текстом или голосовым — бот запишет комментарий и при полном ответе сам вернёт Stage (шаг 4). Вопросы агенты всегда задают по-русски.
 4. Верните Stage, указанный в комментарии: идею — в `Backlog`, EPIC/STORY/TASK — в `Ready` (поле Stage в интерфейсе YouTrack). **Возврат Stage без комментария — согласие со всеми рекомендациями.** Комментарий без возврата Stage работу не продолжит (кроме разбора PM, 7.1).
 5. Следующий проход цикла (или `claude "/agentio-plan {{project}}-1"`) продолжит с места остановки: агент находит ваши ответы (комментарии после последнего `[AGENT:BLOCKED]`), переносит их в статьи базы знаний (бизнес-правило — в статью фичи, решение — в раздел «Архитектура» или ADR) и пишет `[AGENT:DECISION]` «Ответы на В1…Вn учтены: …». Так ответ не теряется в комментариях и работает для следующих эпиков.
 
@@ -680,7 +722,9 @@ git tag v<версия> && git push origin {{production_branch}} --tags
 - **Режим разрешений.** Headless-агенты запускаются с `--permission-mode dontAsk`: выполняется только то, что разрешено настройками сессии, остальное отклоняется без вопроса. Цикл передаёт настройки через `--settings`: в каталоге, которому не подтверждено доверие (а новый worktree эпика всегда такой), Claude Code игнорирует `allow` из `.claude/settings.json` проекта.
   - **Сессии эпиков** — `resources/claude/settings.json` пакета плюс правила `.claude/settings.json` проекта: чтение и правка файлов worktree, `mcp__youtrack__*`, `Skill`, `php artisan agentio:yt|test|commit|log`, git без разрушительных операций, push веток задач (`{{project}}-*`), тесты и линтеры.
   - **Сессии планирования** (`/agentio-plan`) идут в главном каталоге проекта и поэтому только читают (`resources/claude/planning.json`): код, `agentio:yt` и MCP YouTrack. Править файлы, коммитить и запускать команды проекта им нельзя.
-  - Список `deny` для всех: `git push --force`, push в `{{base_branch}}`/`{{production_branch}}`/`main`/`master`/`HEAD`; `reset --hard`, `clean`, `rebase`, `checkout {{base_branch}}`, `worktree remove`; `composer require/remove/update`, `bun add/remove/update`, `npm install <пакет>/uninstall/update`, `sudo`, `php -i`; команды людей (`agentio:install`, `agentio:setup-youtrack`, `agentio:worktree`, `agentio:accept`, `tinker`); инструменты `tinker` и `get-config` Laravel Boost; чтение `.env`, `.env.production`/`.env.staging`, `~/.claude.json`, `~/.ssh`, `~/.config/gh`.
+  - **Ассистент Telegram-бота** (2.8) идёт в главном каталоге и только читает (`resources/claude/assistant.json`): код, состояние цикла, YouTrack без записи. Ответы, комментарии и идеи в YouTrack записывает сам agentio по его решению.
+  - Список `deny` для всех: `git push --force`, push в `{{base_branch}}`/`{{production_branch}}`/`main`/`master`/`HEAD`; `reset --hard`, `clean`, `rebase`, `checkout {{base_branch}}`, `worktree remove`; `composer remove/update/bump` (а `composer require` разрешён только для `saloonphp/*`), `bun add/remove/update`, `npm install <пакет>/uninstall/update`, `sudo`, `php -i`; `php artisan test`, `config:show`, `boost:*`; команды людей и цикла (`agentio:install`, `agentio:setup-youtrack`, `agentio:setup-telegram`, `agentio:telegram`, `agentio:worktree`, `agentio:accept`, `tinker`); инструменты `tinker` и `record-rule` Laravel Boost; правка `CLAUDE.md`, `AGENTS.md`, `boost.json`, `.mcp.json`, `.ai/guidelines`, `.ai/rules`; чтение `.env`, `.env.production`/`.env.staging`, `~/.claude.json`, `~/.ssh`, `~/.config/gh`.
+  - Сеть: `WebSearch` и `WebFetch` только к доменам официальной документации (2.7).
 - **Самозащита.** Агентам запрещено менять `.claude/settings.json`, `.agentio.json`, скиллы `.claude/skills/agentio-*` и `vendor/` — и инструментом правки, и через shell (`cp`, `sed -i`, `>`).
 - **Хук `bin/agentio-guard`** (PreToolUse для Bash) — второй рубеж. Он запускается из пакета главного каталога, не загружая приложение worktree (его код правят агенты), защищённые ветки и дополнительные каталоги получает от цикла, а не из файлов worktree, и при любой своей ошибке запрещает команду. Командную строку он разбирает как shell (кавычки, `$(…)`, конвейеры, `cd`) и запрещает:
   - push в защищённые ветки (`{{base_branch}}`, `{{production_branch}}`, `main`, `master`), force/mirror push (в том числе `-fu`), push и удаление веток, кроме веток задач (`{{project}}-N`), слияние в защищённую ветку;
@@ -690,7 +734,7 @@ git tag v<версия> && git push origin {{production_branch}} --tags
   - чтение секретов: `.env`, `php artisan config:show agentio`, ключи `agentio.youtrack…`, `YOUTRACK_TOKEN`, `ANTHROPIC_*`, `printenv`, `env`, `/proc/*/environ`, `php -i`;
   - `php artisan agentio:install`, `agentio:setup-youtrack`, `agentio:worktree`, `agentio:accept`, `tinker` и `agentio:run` иначе чем `--dry-run` — их запускают люди и цикл (в том числе с опциями artisan перед командой, например `-n`);
   - `sudo` и разрушительные системные команды.
-- **Зависимости.** Новые пакеты агентам запрещены: они спрашивают через `[AGENT:BLOCKED]`.
+- **Зависимости.** Новые пакеты агентам запрещены: они спрашивают через `[AGENT:BLOCKED]`. Единственное исключение — `composer require saloonphp/*` (Saloon для интеграций без SDK, 2.7); хук проверяет каждый пакет команды.
 - **Коммиты.** Агенты коммитят только свои файлы через `php artisan agentio:commit`.
 - **Изоляция окружения.** Каждый worktree получает свой `.env` из `.env.example` (локальное окружение, свой `APP_KEY`, своя SQLite-БД, без токена). Главный `.env` агенты не используют и не читают; `agentio:run` убирает его переменные (`APP_*`, `DB_*` и т. п.) из окружения сессий.
 - **Токены.** `YOUTRACK_TOKEN` живёт только в `.env` (он не коммитится; установщик проверяет, что `.env` игнорируется git) и в конфигурации MCP Claude Code (`~/.claude.json`). Сессиям цикла он передаётся через окружение и подстановку `${YOUTRACK_TOKEN}` в MCP-конфиге пакета; в репозиторий, логи и комментарии он не попадает. Агенты работают под вашим пользователем ОС, и токен есть в их окружении: правила выше закрывают обычные способы его прочитать, но жёсткую границу даёт только песочница или отдельный пользователь. Выдавайте циклу токен с доступом только к этому проекту. Скомпрометированный токен отзовите в Profile → Account Security → Tokens и запустите `php artisan agentio:install` с новым.
@@ -709,6 +753,9 @@ git add .claude/skills/agentio-* .agentio.json && git commit -m "Install agentio
 claude mcp get youtrack                            # MCP-сервер youtrack в Claude Code
 php artisan agentio:yt ideas && php artisan agentio:status
 
+php artisan agentio:setup-telegram <токен>          # свой Telegram-бот: токен, голосовые, Horizon, привязка чата
+php artisan agentio:telegram status                # бот: токен, чат, голосовые, очередь, Horizon
+
 # Идеи и планирование
 claude "/agentio-plan <текст идеи>"              # создать идею и спланировать
 claude "/agentio-plan {{project}}-1"             # спланировать существующую идею
@@ -721,6 +768,7 @@ php artisan agentio:run --once [--epic={{project}}-2] [--no-plan] [--no-wait] [-
 nohup php artisan agentio:run > /dev/null 2>&1 &
 php artisan agentio:run --stop         # остановить цикл (флаг storage/logs/agents/stop); --fresh — снять флаг и запустить
 php artisan agentio:run --kill         # прервать сессии эпиков (захват сохраняется)
+php artisan agentio:run --no-telegram  # цикл без Telegram-бота
 
 # Ручной оркестратор
 php artisan agentio:worktree {{project}}-2 && cd <worktrees>/{{project}}-2 && claude "/agentio-work-epic {{project}}-2"

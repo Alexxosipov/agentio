@@ -6,6 +6,11 @@ use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\ServiceProvider;
 use Obrazmisli\Agentio\AgentioServiceProvider;
 use Obrazmisli\Agentio\Runtime\LoopState;
+use Obrazmisli\Agentio\Telegram\BotSettings;
+use Obrazmisli\Agentio\Telegram\Conversation;
+use Obrazmisli\Agentio\Telegram\Listener;
+use Obrazmisli\Agentio\Telegram\MessageHandler;
+use Obrazmisli\Agentio\Telegram\Responder;
 use Obrazmisli\Agentio\YouTrack\Client;
 use Obrazmisli\Agentio\YouTrack\IssueRepository;
 use Obrazmisli\Agentio\YouTrack\Mcp\McpClient;
@@ -95,4 +100,33 @@ it('publishes the config file under the agentio-config and agentio tags', functi
 it('registers the views publish tag and loads the views', function () {
     expect(ServiceProvider::pathsToPublish(AgentioServiceProvider::class, 'agentio-views'))->toHaveCount(1)
         ->and(view()->exists('agentio::index'))->toBeTrue();
+});
+
+it('registers the Telegram bot and builds it from the config', function () {
+    config(['agentio.telegram.token' => '1:abc', 'agentio.telegram.chat_id' => '42', 'agentio.logs_path' => '/tmp/agentio-logs']);
+    app()->forgetInstance(LoopState::class);
+
+    expect(Artisan::all())->toHaveKeys(['agentio:setup-telegram', 'agentio:telegram'])
+        ->and(app(BotSettings::class)->isPaired())->toBeTrue()
+        ->and(app(Conversation::class)->directory())->toBe('/tmp/agentio-logs/telegram')
+        ->and(app(Responder::class))->toBeInstanceOf(Responder::class)
+        ->and(app(MessageHandler::class))->toBeInstanceOf(MessageHandler::class)
+        ->and(app(Listener::class))->toBeInstanceOf(Listener::class)
+        ->and(config('agentio.telegram.queue'))->toBe('default')
+        ->and(config('agentio.telegram.queue_connection'))->toBe('redis')
+        ->and(config('agentio.telegram.transcription.driver'))->toBeNull();
+
+    config(['agentio.telegram.token' => null]);
+
+    expect(app(BotSettings::class)->isConfigured())->toBeFalse();
+});
+
+it('shows the state of agentio in php artisan about without secrets', function () {
+    config(['agentio.telegram.token' => '1:secret-token', 'agentio.telegram.chat_id' => null, 'agentio.youtrack.url' => 'https://yt.example.com', 'agentio.telegram.transcription.driver' => 'whisper']);
+
+    $this->artisan('about', ['--only' => 'agentio'])
+        ->expectsOutputToContain('not paired')
+        ->expectsOutputToContain('whisper')
+        ->doesntExpectOutputToContain('secret-token')
+        ->assertSuccessful();
 });
