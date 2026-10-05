@@ -295,7 +295,32 @@ final readonly class Client
      */
     public function projectHasIssues(string $shortName): bool
     {
-        return $this->get('issues', ['query' => 'project: '.$shortName, 'fields' => 'id', '$top' => 1]) !== [];
+        return $this->hasIssues('project: '.$shortName);
+    }
+
+    /**
+     * Whether at least one issue matches a search query, e.g. "project: TP Stage: {Develop}".
+     *
+     * @throws YouTrackException
+     */
+    public function hasIssues(string $query): bool
+    {
+        return $this->get('issues', ['query' => $query, 'fields' => 'id', '$top' => 1]) !== [];
+    }
+
+    /**
+     * Agile boards visible to the token, with their projects, the field of the columns and the swimlanes.
+     *
+     * @return list<array<array-key, mixed>>
+     *
+     * @throws YouTrackException
+     */
+    public function agiles(): array
+    {
+        return $this->paginate('agiles', [
+            'fields' => 'id,name,projects(id,shortName),columnSettings(field(id,name),columns(presentation,fieldValues(name))),'
+                .'swimlaneSettings($type,enabled,field(id,name,customField(id,name)))',
+        ]);
     }
 
     /**
@@ -371,6 +396,16 @@ final readonly class Client
         return $this->post('admin/customFieldSettings/bundles/'.$kind.'/'.rawurlencode($bundleId).'/values/'.rawurlencode($valueId), $changes, [
             'fields' => 'id,name,localizedName,ordinal,isResolved',
         ]);
+    }
+
+    /**
+     * Remove a value from a bundle.
+     *
+     * @throws YouTrackException
+     */
+    public function deleteBundleValue(string $kind, string $bundleId, string $valueId): void
+    {
+        $this->delete('admin/customFieldSettings/bundles/'.$kind.'/'.rawurlencode($bundleId).'/values/'.rawurlencode($valueId));
     }
 
     /**

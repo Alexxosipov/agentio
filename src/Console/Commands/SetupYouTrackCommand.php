@@ -22,12 +22,17 @@ use ValueError;
 
 /**
  * Configures the YouTrack project for the cycle (see YouTrackSetup): Stage and Type values, tags, saved
- * searches and the knowledge base. Safe to run again at any time: what exists is found and kept, nothing is
- * created twice. The knowledge base ids are recorded in .agentio.json and in the installed skills.
+ * searches and the knowledge base, and checks the agile board. Safe to run again at any time: what exists is
+ * found and kept, nothing is created twice. The knowledge base ids are recorded in .agentio.json and in the
+ * installed skills. Exits with INCOMPLETE when the rest is set up but the human has to fix something in
+ * YouTrack (the board).
  */
 #[AsCommand(name: 'agentio:setup-youtrack')]
 final class SetupYouTrackCommand extends Command
 {
+    /** The exit code when everything is set up but the setup found errors only a human can fix. */
+    public const int INCOMPLETE = 3;
+
     /**
      * @var string
      */
@@ -38,7 +43,7 @@ final class SetupYouTrackCommand extends Command
     /**
      * @var string
      */
-    protected $description = 'Configure the YouTrack project for the agent cycle (fields, tags, saved searches, knowledge base); safe to rerun';
+    protected $description = 'Configure the YouTrack project for the agent cycle (fields, tags, saved searches, knowledge base) and check its board; safe to rerun';
 
     public function handle(Client $client, Tools $tools, Settings $settings): int
     {
@@ -89,7 +94,7 @@ final class SetupYouTrackCommand extends Command
         $this->renderSetup($setup->actions(), $dryRun);
 
         if ($dryRun) {
-            return self::SUCCESS;
+            return $this->result($setup->actions());
         }
 
         $kb = [...$manifest->kb, ...$kb];
@@ -110,7 +115,21 @@ final class SetupYouTrackCommand extends Command
             }
         }
 
-        return self::SUCCESS;
+        return $this->result($setup->actions());
+    }
+
+    /**
+     * @param  list<SetupAction>  $actions
+     */
+    private function result(array $actions): int
+    {
+        $errors = array_filter($actions, fn (SetupAction $action): bool => $action->status === SetupStatus::Error);
+
+        foreach ($errors as $action) {
+            $this->components->error("{$action->subject} {$action->name}: {$action->detail}");
+        }
+
+        return $errors === [] ? self::SUCCESS : self::INCOMPLETE;
     }
 
     /**
@@ -119,7 +138,7 @@ final class SetupYouTrackCommand extends Command
     private function renderSetup(array $actions, bool $dryRun): void
     {
         $this->table(['Status', 'Subject', 'Name', 'Detail'], array_map(fn (SetupAction $action): array => [
-            $dryRun && $action->status !== SetupStatus::Exists && $action->status !== SetupStatus::Warning ? 'will '.$action->status->value : $action->status->value,
+            $dryRun && in_array($action->status, [SetupStatus::Create, SetupStatus::Update], true) ? 'will '.$action->status->value : $action->status->value,
             $action->subject,
             $action->name,
             $action->detail,

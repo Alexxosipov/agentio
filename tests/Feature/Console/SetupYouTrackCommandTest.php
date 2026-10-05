@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Sleep;
+use Obrazmisli\Agentio\Console\Commands\SetupYouTrackCommand;
 use Obrazmisli\Agentio\Install\Installer;
 use Obrazmisli\Agentio\Install\KnowledgeBase;
 use Obrazmisli\Agentio\Install\Manifest;
@@ -134,20 +135,58 @@ it('uses the default Stage field of the project and creates nothing twice', func
         ->and($mcp->callsOf('update_article'))->toBe([]);
 });
 
-it('only adds the missing values to the Stage field of the project', function () {
+it('adds the missing values to the Stage field of the project and removes the values of YouTrack the cycle does not use', function () {
     hostProject();
     (new FakeYouTrackMcp)->fake();
-    fakeYouTrackRestApi(russianYouTrack(stages: ['Backlog', 'Develop', 'Review', 'Test', 'Staging', 'Done']));
+    fakeYouTrackRestApi(russianYouTrack(stages: ['Backlog', 'Develop', 'Review', 'Test', 'Staging', 'Done', 'On hold']));
 
     $this->artisan('agentio:setup-youtrack', ['--no-interaction' => true])
         ->expectsOutputToContain('add value Analysis')
+        ->expectsOutputToContain('remove value Develop')
         ->assertSuccessful();
 
-    $values = array_values(array_filter(restWrites(), fn (string $write): bool => str_contains($write, 'bundles/state/b-stage/values')));
+    $added = array_values(array_filter(restWrites(), fn (string $write): bool => str_starts_with($write, 'POST admin/customFieldSettings/bundles/state/b-stage/values')));
+    $removed = array_values(array_filter(restWrites(), fn (string $write): bool => str_starts_with($write, 'DELETE ')));
 
-    expect($values)->toHaveCount(4)
-        ->and(implode("\n", $values))->toContain('"name":"Analysis"', '"name":"Ready"', '"name":"In Progress"', '"name":"Blocked"')
-        ->and(implode("\n", restWrites()))->not->toContain('customFieldSettings/customFields {', 'bundles/state {', 'Develop');
+    expect($added)->toHaveCount(4)
+        ->and(implode("\n", $added))->toContain('"name":"Analysis"', '"name":"Ready"', '"name":"In Progress"', '"name":"Blocked"')
+        ->and($removed)->toBe([
+            'DELETE admin/customFieldSettings/bundles/state/b-stage/values/s-Develop []',
+            'DELETE admin/customFieldSettings/bundles/state/b-stage/values/s-Test []',
+            'DELETE admin/customFieldSettings/bundles/state/b-stage/values/s-Staging []',
+        ])
+        ->and(implode("\n", restWrites()))->not->toContain('customFieldSettings/customFields {', 'bundles/state {', 'On hold');
+});
+
+it('keeps a Stage value of YouTrack that issues of the project are in and reports it', function () {
+    hostProject();
+    $mcp = (new FakeYouTrackMcp)->fake();
+    existingKnowledgeBase($mcp);
+    fakeYouTrackRestApi([
+        ...russianYouTrack(stages: ['Backlog', 'Analysis', 'Ready', 'In Progress', 'Review', 'Blocked', 'Done', 'Develop', 'Test']),
+        'issues' => fn (string $query): array => $query === 'project: XY Stage: {Test}' ? [['id' => '2-1']] : [],
+    ]);
+
+    $this->artisan('agentio:setup-youtrack', ['--no-interaction' => true])
+        ->expectsOutputToContain('value Test is not used by the cycle but issues of the project are in it, so it is kept')
+        ->assertSuccessful();
+
+    expect(restWrites())->toBe(['DELETE admin/customFieldSettings/bundles/state/b-stage/values/s-Develop []']);
+});
+
+it('never removes values from a Stage bundle shared with other projects', function () {
+    hostProject();
+    $mcp = (new FakeYouTrackMcp)->fake();
+    existingKnowledgeBase($mcp);
+    $youtrack = russianYouTrack(stages: ['Backlog', 'Analysis', 'Ready', 'In Progress', 'Review', 'Blocked', 'Done', 'Develop']);
+    $youtrack['fields'][0]['instances'][] = ['project' => ['id' => '0-5'], 'bundle' => ['id' => 'b-stage']];
+    fakeYouTrackRestApi([...$youtrack, 'issues' => [['id' => '2-1']]]);
+
+    $this->artisan('agentio:setup-youtrack', ['--no-interaction' => true])
+        ->expectsOutputToContain('is shared with other projects')
+        ->assertSuccessful();
+
+    expect(restWrites())->toBe([]);
 });
 
 it('renames a Stage field named in Russian to Stage and attaches it instead of creating a second one', function () {
@@ -203,6 +242,7 @@ it('shows the values YouTrack localized by their English names, so the MCP serve
         'POST admin/customFieldSettings/bundles/state/b-stage/values/s-Backlog {"localizedName":null}',
         'POST admin/customFieldSettings/bundles/state/b-stage/values/s-Review {"localizedName":null}',
         'POST admin/customFieldSettings/bundles/state/b-stage/values/s-Done {"localizedName":null}',
+        'DELETE admin/customFieldSettings/bundles/state/b-stage/values/s-Develop []',
         'POST admin/customFieldSettings/bundles/enum/b-type/values/t-Task {"localizedName":null}',
     ]);
 });
@@ -285,6 +325,58 @@ it('makes new issues start in Backlog when the default of Stage is not one of th
         ->assertSuccessful();
 
     expect(restWrites())->toContain('POST admin/projects/0-9/customFields/pf-stage {"$type":"StateProjectCustomField","defaultValues":[{"id":"s-Backlog","$type":"StateBundleElement"}]}');
+});
+
+it('accepts a board of the project with columns by Stage and swimlanes by Type, named in Russian too', function () {
+    hostProject();
+    $mcp = (new FakeYouTrackMcp)->fake();
+    existingKnowledgeBase($mcp);
+    $other = agileBoard('Other');
+    $other['projects'] = [['id' => '0-5', 'shortName' => 'AB']];
+    fakeYouTrackRestApi([...russianYouTrack(), 'agiles' => [$other, agileBoard('XY Kanban', 'State', null), agileBoard('Доска XY', 'Этап', 'Тип')]]);
+
+    $this->artisan('agentio:setup-youtrack', ['--no-interaction' => true])
+        ->expectsOutputToContain('columns by Stage, swimlanes by Type')
+        ->assertSuccessful();
+
+    expect(restWrites())->toBe([]);
+});
+
+it('fails when the project has no board with columns by Stage and swimlanes by Type, after setting up the rest', function () {
+    $project = hostProject();
+    $mcp = (new FakeYouTrackMcp)->fake();
+    fakeYouTrackRestApi([...russianYouTrack(), 'agiles' => [agileBoard('XY Kanban', 'State', null), agileBoard('XY Stages', 'Stage', 'Priority')]]);
+
+    $this->artisan('agentio:setup-youtrack', ['--no-interaction' => true])
+        ->expectsOutputToContain('board XY: no board of the project')
+        ->expectsOutputToContain('«XY Kanban»: columns by State instead of Stage, no swimlanes by a field; «XY Stages»: swimlanes by Priority instead of Type')
+        ->assertExitCode(SetupYouTrackCommand::INCOMPLETE);
+
+    expect(Manifest::load($project)->kb)->toHaveCount(count(KnowledgeBase::ARTICLES))
+        ->and($mcp->callsOf('create_article'))->not->toBe([]);
+});
+
+it('fails when the project has no board at all, in a dry run too', function () {
+    hostProject();
+    (new FakeYouTrackMcp)->fake();
+    fakeYouTrackRestApi([...russianYouTrack(), 'agiles' => []]);
+
+    $this->artisan('agentio:setup-youtrack', ['--no-interaction' => true, '--dry-run' => true])
+        ->expectsOutputToContain('the project has no agile board')
+        ->assertExitCode(SetupYouTrackCommand::INCOMPLETE);
+
+    expect(restWrites())->toBe([]);
+});
+
+it('warns about the stages of the cycle that have no column on the board', function () {
+    hostProject();
+    $mcp = (new FakeYouTrackMcp)->fake();
+    existingKnowledgeBase($mcp);
+    fakeYouTrackRestApi([...russianYouTrack(), 'agiles' => [agileBoard(columns: ['Backlog', 'Ready', 'In Progress', 'Review', 'Done'])]]);
+
+    $this->artisan('agentio:setup-youtrack', ['--no-interaction' => true])
+        ->expectsOutputToContain('no column for Analysis, Blocked')
+        ->assertSuccessful();
 });
 
 it('keeps existing articles, prefers the one under the expected parent and refreshes the automation guide', function () {

@@ -11,6 +11,7 @@ use Obrazmisli\Agentio\Process\ReadinessGraph;
 use Obrazmisli\Agentio\Runtime\LoopState;
 use Obrazmisli\Agentio\Tests\TestCase;
 use Obrazmisli\Agentio\YouTrack\Issue;
+use Obrazmisli\Agentio\YouTrack\State;
 
 uses(TestCase::class)
     ->afterEach(fn () => Agentio::auth(null))
@@ -119,8 +120,37 @@ function hostProject(): string
 }
 
 /**
+ * An agile board of the project XY: columns by the given field, a column per value, and swimlanes by a field
+ * (null: no swimlanes).
+ *
+ * @param  list<string>|null  $columns  The column values, by default the stages of the cycle
+ * @return array<string, mixed>
+ */
+function agileBoard(string $name = 'XY Board', string $columnField = 'Stage', ?string $swimlaneField = 'Type', ?array $columns = null): array
+{
+    $columns ??= array_map(fn (State $state): string => $state->value, State::cases());
+
+    return [
+        'id' => 'agile-'.$name,
+        'name' => $name,
+        'projects' => [['id' => '0-9', 'shortName' => 'XY']],
+        'columnSettings' => [
+            'field' => ['id' => 'f-'.$columnField, 'name' => $columnField],
+            'columns' => array_map(fn (string $value): array => ['presentation' => $value, 'fieldValues' => [['name' => $value]]], $columns),
+        ],
+        'swimlaneSettings' => $swimlaneField === null ? null : [
+            '$type' => 'AttributeBasedSwimlaneSettings',
+            'enabled' => true,
+            'field' => ['id' => 'f-'.$swimlaneField, 'name' => $swimlaneField, 'customField' => ['id' => 'f-'.$swimlaneField, 'name' => $swimlaneField]],
+        ],
+    ];
+}
+
+/**
  * A stateful fake of the YouTrack REST API under https://yt.example.com/api: a project XY (id 0-9) with the given
- * custom fields, bundles, global fields, tags, saved searches and issues. Writes answer with new entities.
+ * custom fields, bundles, global fields, tags, saved searches, issues and agile boards (by default a board set
+ * up for the cycle). Issues are a list, or a closure from the search query to a list. Writes answer with new
+ * entities.
  *
  * @param  array<string, mixed>  $state
  */
@@ -134,6 +164,7 @@ function fakeYouTrackRestApi(array $state = []): void
         'tags' => [],
         'queries' => [],
         'issues' => [],
+        'agiles' => [agileBoard()],
         ...$state,
     ];
     $sequence = 100;
@@ -151,7 +182,8 @@ function fakeYouTrackRestApi(array $state = []): void
             $get && $path === 'admin/customFieldSettings/customFields' => $page($state['fields']),
             $get && $path === 'tags' => $page($state['tags']),
             $get && $path === 'savedQueries' => $page($state['queries']),
-            $get && $path === 'issues' => Http::response($state['issues']),
+            $get && $path === 'issues' => Http::response($state['issues'] instanceof Closure ? ($state['issues'])((string) $request['query']) : $state['issues']),
+            $get && $path === 'agiles' => $page($state['agiles']),
             $get && $path === 'users/me' => Http::response(['id' => '1-1', 'login' => 'agent', 'fullName' => 'Agent Smith']),
             $request->method() === 'DELETE' => Http::response(''),
             default => Http::response([

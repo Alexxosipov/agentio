@@ -115,6 +115,19 @@ if [[ ! -f .env && -f .env.example ]]; then
     ' "$package" .env "${settings[@]}"
 fi
 
+# A lock file that installs a package from a path the worktree does not have (a copy of agentio in
+# packages/agentio, replaced by a Composer repository on another branch) makes composer install fail.
+missing="$(php -r '
+    foreach ([$argv[1]."/vendor/autoload.php", $argv[1]."/../../autoload.php"] as $autoload) {
+        if (is_file($autoload)) { require $autoload; break; }
+    }
+    foreach (Obrazmisli\Agentio\Git\PathPackages::missingIn($argv[2]) as $name => $path) { echo "$name ($path) "; }
+' "$package" "$dir")"
+if [[ -n "$missing" ]]; then
+    log "ERROR: composer.lock of the branch $(git -C "$dir" branch --show-current) installs ${missing}from a path the worktree does not have: commit the composer.json and composer.lock that install it from its repository to $base, then merge $base into the epic branch (git -C $dir merge $base)"
+    exit 1
+fi
+
 composer install --no-interaction --prefer-dist --no-progress >&2
 
 if [[ -f artisan ]]; then

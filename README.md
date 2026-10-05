@@ -26,11 +26,11 @@ The agents work with YouTrack only through its **MCP server**. The package adds 
 
 ## Quick start
 
-1. Install the package from GitHub as a dev dependency (see [Installation](#installation): add the repository to `composer.json`, then `composer require obrazmisli/agentio:^0.1 --dev`).
+1. Install the package from GitHub as a dev dependency (see [Installation](#installation): add the repository to `composer.json`, then `composer require obrazmisli/agentio:^0.2 --dev`).
 2. Install the cycle into the project (a git repository whose `.env` is git-ignored): `php artisan agentio:install`. It asks for the YouTrack URL and a permanent token (hidden input), checks them through the YouTrack MCP server, adds the `youtrack` MCP server to Claude Code if it has none, asks for the project short name (`ABC`; a missing project can be created), the production and the development branch (`main` and `dev`; the missing one is created locally), the merge policy and **the directory of the epic worktrees**, offers to configure the YouTrack project and installs the skills.
 3. Commit `.claude/skills/agentio-*` and `.agentio.json` to `dev`: epic worktrees are created from it. `.env` (with the token) stays local. Push `dev` and `main` if the project has a remote, and point the develop server at `dev` and production at `main`.
 4. File an idea in YouTrack (Type `Idea` or the `idea` tag, Stage `Backlog`), check what the loop would do with `php artisan agentio:run --dry-run`, then start it: `php artisan agentio:run`.
-5. Watch the agents at `/agentio` or with `php artisan agentio:status`, answer `[AGENT:BLOCKED]` comments, and accept epics that reach `Review` on their page in the dashboard or with `php artisan agentio:accept <ID>` (it merges the epic branch into `dev`). Release `dev` to `main` yourself when the develop server looks good.
+5. Watch the agents at `/agentio` or with `php artisan agentio:status`, answer the questions of `[AGENT:BLOCKED]` comments (a comment in the issue, then the Stage back; see [Questions to the human](#questions-to-the-human)), and accept epics that reach `Review` on their page in the dashboard or with `php artisan agentio:accept <ID>` (it merges the epic branch into `dev`). Release `dev` to `main` yourself when the develop server looks good.
 
 ## Installation
 
@@ -51,7 +51,7 @@ composer config repositories.agentio vcs https://github.com/Alexxosipov/agentio
 Then require it:
 
 ```bash
-composer require obrazmisli/agentio:^0.1 --dev
+composer require obrazmisli/agentio:^0.2 --dev
 ```
 
 Install it as a **dev dependency**: the cycle runs on a developer machine (Claude Code, git worktrees, the loop) and nothing of it is needed in production; it also keeps the dashboard, which shows YouTrack data and agent logs, out of production builds. Require it without `--dev` only if you want the dashboard on a shared or staging server. If you call `Agentio::auth()` from a service provider, guard it with `class_exists(Agentio::class)` so that `composer install --no-dev` keeps working.
@@ -66,9 +66,9 @@ php artisan agentio:install           # refreshes the installed skills; your edi
 php artisan agentio:setup-youtrack    # refreshes the automation guide in the knowledge base
 ```
 
-Commit the updated `.claude/skills/agentio-*` and `.agentio.json`. While the version is `0.x`, `^0.1` takes only the `0.1.*` releases: a `0.2.0` may change behaviour (see the [changelog](CHANGELOG.md)), so move to it with `composer require obrazmisli/agentio:^0.2 --dev`. To try the latest unreleased code, require `dev-main`.
+Commit the updated `.claude/skills/agentio-*` and `.agentio.json`. While the version is `0.x`, `^0.2` takes only the `0.2.*` releases: a `0.3.0` may change behaviour (see the [changelog](CHANGELOG.md)), so move to it with `composer require obrazmisli/agentio:^0.3 --dev`; from `0.1` to `0.2` — `composer require obrazmisli/agentio:^0.2 --dev`. To try the latest unreleased code, require `dev-main`.
 
-A project that has a copy of the package (a `path` repository such as `packages/agentio`) switches by replacing that repository with the `vcs` one above, running `composer require obrazmisli/agentio:^0.1 --dev` and deleting the copy.
+A project that has a copy of the package (a `path` repository such as `packages/agentio`) switches by replacing that repository with the `vcs` one above, running `composer require obrazmisli/agentio:^0.2 --dev` and deleting the copy. Commit the new `composer.json` and `composer.lock` to the development branch (`dev`) too, not only to the branch you work on: epic worktrees start from `dev` and run `composer install` from its lock file, which would still look for `packages/agentio`. `agentio:run` refuses to start while the development branch installs a package from a path it does not have, and `agentio:worktree` explains it for an epic branch made before the fix (merge `dev` into it).
 
 For local development of the package, use a path repository in the host project's `composer.json`:
 
@@ -118,7 +118,7 @@ Packaged as Claude Code skills (a `SKILL.md` with `name` and `description` under
 | Skill | Kind | Purpose |
 |---|---|---|
 | `agentio-youtrack-workflow` | background (`user-invocable: false`) | Process rules: hierarchy, Stage, readiness, claims, `[AGENT:*]` comments, MCP tools, queries, knowledge base map |
-| `agentio-project-manager`, `agentio-system-analyst`, `agentio-laravel-architect` | roles | Requirements and decomposition; system analysis per module and feature; epic design and ADR |
+| `agentio-project-manager`, `agentio-system-analyst`, `agentio-laravel-architect` | roles | Requirements and decomposition; system analysis per module and feature; architecture decisions in module and feature articles, ADR, references on queues, idempotency, payments, external APIs and operations |
 | `/agentio-plan <ID or text>` | command (`disable-model-invocation`) | Full planning of an idea |
 | `/agentio-work-epic <EPIC>` | command (`disable-model-invocation`) | Epic orchestrator: starts subagents with the next two skills |
 | `agentio-develop-task`, `agentio-review-story` | used by subagents | One TASK: code, tests, commit; one STORY: review against acceptance criteria |
@@ -188,11 +188,12 @@ The token is never printed. The command is idempotent and safe to rerun after up
 
 ### `agentio:setup-youtrack`
 
-Configures the YouTrack project for the cycle. It can run any number of times: everything is looked up first and **nothing is created twice**; nothing is deleted or moved, and only the fields and values below are renamed.
+Configures the YouTrack project for the cycle and checks its board. It can run any number of times: everything is looked up first and **nothing is created twice**; nothing is moved, only YouTrack's own Stage values below are deleted, and only the fields and values below are renamed. It exits with code 3 when everything else is set up but the board needs a human (then `agentio:install` still installs the skills and fails at the end).
 
-- **Fields.** The cycle uses the fields YouTrack gives new projects — **Stage** (the status of an issue) and **Type** («Тип») — and never creates a second field of the same meaning: a field is found by its name or by its localized name, and only the missing values are added to its bundle (Stage: Backlog, Analysis, Ready, In Progress, Review, Blocked, Done, next to YouTrack's own Develop, Test, Staging, which the cycle does not use; Type: Idea, Epic, Story, Task). New issues default to Stage `Backlog` and Type `Task` when the field has no default among these values (YouTrack's `Submitted` would hide an idea from the loop). A bundle shared with other projects, or the default bundle YouTrack gives new projects, is never changed: a project without issues is switched to its own `KEY Stages` / `KEY Types`, a project with issues gets a warning.
-- **English names.** The agents read the values through the YouTrack MCP server, which answers with the localized name of a value: a YouTrack in Russian shows `Backlog` as «Очередь», `Done` as «Готово», and the cycle would not recognize them. So in the project's own bundles the cycle's values lose their localized name (they are shown as `Backlog`, `Review`, `Done`, …), a value named in Russian («Очередь», «В работе», «Задача», …) is renamed to the cycle's name (its issues keep it), and a Stage or Type field named in Russian («Этап», «Тип») is renamed to `Stage` / `Type` — a global field, so every project that uses it sees the new name. YouTrack's own values the cycle does not use (Develop, Test, Staging) keep their localized names.
-- **No State field.** Status is Stage only; build the board columns on Stage. A `State` field («Состояние») of the project is reported and left as is. In a project set up by an earlier agentio version the status lives in State: copy it to Stage (a bulk update by `State: <value>` in YouTrack).
+- **Fields.** The cycle uses the fields YouTrack gives new projects — **Stage** (the status of an issue) and **Type** («Тип») — and never creates a second field of the same meaning: a field is found by its name or by its localized name, and the missing values are added to its bundle (Stage: Backlog, Analysis, Ready, In Progress, Review, Blocked, Done; Type: Idea, Epic, Story, Task). The values YouTrack gives Stage that the cycle does not use — Develop, Test, Staging — are deleted from the project's own bundle, so nobody moves an issue into a status the cycle never leaves; a value that issues of the project are in is kept with a warning (move them, then rerun). New issues default to Stage `Backlog` and Type `Task` when the field has no default among these values (YouTrack's `Submitted` would hide an idea from the loop). A bundle shared with other projects, or the default bundle YouTrack gives new projects, is never changed: a project without issues is switched to its own `KEY Stages` / `KEY Types`, a project with issues gets a warning.
+- **English names.** The agents read the values through the YouTrack MCP server, which answers with the localized name of a value: a YouTrack in Russian shows `Backlog` as «Очередь», `Done` as «Готово», and the cycle would not recognize them. So in the project's own bundles the cycle's values lose their localized name (they are shown as `Backlog`, `Review`, `Done`, …), a value named in Russian («Очередь», «В работе», «Задача», …) is renamed to the cycle's name (its issues keep it), and a Stage or Type field named in Russian («Этап», «Тип») is renamed to `Stage` / `Type` — a global field, so every project that uses it sees the new name.
+- **Board.** The project must have an agile board with **columns by Stage** and **swimlanes by Type**: the setup checks every board of the project and reports an error with what is wrong (columns by another field, no swimlanes, swimlanes by another field) when none fits; a fitting board without a column for some stage gets a warning. The board is the team's own view, so the setup never creates or changes it: in YouTrack, open the board settings → Columns and rows, set the columns to Stage (a column per value) and the swimlanes to Type, then rerun.
+- **No State field.** Status is Stage only. A `State` field («Состояние») of the project is reported and left as is. In a project set up by an earlier agentio version the status lives in State: copy it to Stage (a bulk update by `State: <value>` in YouTrack).
 - The `idea` and `agent-claimed` tags and the `KEY: …` saved searches.
 - The knowledge base tree (through the MCP server): product overview, system analysis (the root with the module map and «Общие требования»), architecture (overview, data model, ADR, ADR-001), development process, the automation guide and the glossary. New articles are short templates; existing articles with the same title are kept as they are — except «Руководство по автоматизации», which is kept equal to the manual of the installed agentio version.
 
@@ -210,13 +211,22 @@ The system analysis is kept as a tree of product modules and their features, not
 ```
 Системная аналитика        root: the method in short and the module map (module → article → features)
 ├── Общие требования       roles and permissions, cross-cutting non-functional requirements, external systems, global constraints
-├── Пользователи           a module: purpose, scope, roles, features, entity index, dependencies on other modules
-│   ├── Регистрация        a feature: goal, scenarios, FR/BR, data model, interfaces, NFR, risks — only what applies
+├── Пользователи           a module: purpose, scope, roles, features, entity index, dependencies, module architecture
+│   ├── Регистрация        a feature: goal, scenarios, FR/BR, data model, interfaces, system behaviour (retries, failures,
+│   │                      long operations, money), NFR, risks — and its architecture: decisions AD-n with their reasons
 │   └── Профиль и аватар
 └── …
 ```
 
 `agentio:setup-youtrack` creates only the root and «Общие требования»; the `agentio-system-analyst` skill adds modules and features as the product grows. `php artisan agentio:yt kb-tree [<ARTICLE>] [--depth=N] [--json]` prints the tree with article ids; agents create articles under their parent with the `create_article` tool of the MCP server (`parentArticle`). Articles of the earlier per-layer structure («1. Бизнес-контекст и цели» … «7. Ограничения, допущения и риски») are kept as a read-only archive; the analyst moves their content into feature articles.
+
+The architecture lives in the same tree, next to the requirements it implements: the `agentio-laravel-architect` skill writes the decisions of a feature (with their reasons and rejected options, numbered `AD-n`) into the «Архитектура» section of the feature article and the decisions of a module into «Архитектура модуля» of the module article. ADRs are kept for project-wide decisions; «Архитектура: обзор» maps the modules to the code and the infrastructure, «Модель данных» indexes the tables by their feature articles. No article per epic is created any more: the implementation order of an epic goes into its description, and the «Эпик <ID>: …» articles of earlier versions are a read-only archive whose decisions the architect moves into feature and module articles.
+
+The analyst and the architect load the `laravel-best-practices` skill of Laravel Boost (`agentio:install` reports when the project has none) and follow its rule files: the analyst writes requirements the stack can meet and goes through the behaviour of the system (retries, concurrency, long operations, failures of external systems, money), the architect designs by it plus the references of the skill on queues, idempotency, payments (idempotency keys, webhooks, reconciliation), external APIs (timeouts, retries, circuit breaking) and operations.
+
+### Questions to the human
+
+When only the human can decide (a business rule, money, a contract, legal requirements), the agent first finishes and records everything that does not depend on the answer, then asks **all** its questions in **one** `[AGENT:BLOCKED]` comment of the issue it works on (the idea while planning): numbered questions В1, В2, … with options, their consequences and the agent's recommendation, and the Stage to return the issue to. The issue goes to `Blocked`. Answer **with a comment in that issue** in YouTrack (`В1: б; В2: а`, or `Принимаю рекомендации`), then set Stage back as the comment says (an idea to `Backlog`, other issues to `Ready`); returning the Stage without a comment accepts all recommendations. The next pass of the loop resumes the work, moves the answers into the knowledge base articles (so they are not lost in comments) and records an `[AGENT:DECISION]`. Blocked issues and their questions are listed on the dashboard, by `php artisan agentio:yt blocked` and by the saved search «KEY: заблокированные».
 
 ## Running the loop
 

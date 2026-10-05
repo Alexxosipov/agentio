@@ -1,6 +1,24 @@
 # Release Notes
 
-## [Unreleased](https://github.com/Alexxosipov/agentio/compare/v0.1.0...main)
+## [Unreleased](https://github.com/Alexxosipov/agentio/compare/v0.2.0...main)
+
+## [v0.2.0](https://github.com/Alexxosipov/agentio/releases/tag/v0.2.0) - 2026-10-05
+
+Update with `composer require obrazmisli/agentio:^0.2 --dev`, then run `php artisan agentio:install` (refreshes the skills) and `php artisan agentio:setup-youtrack` (cleans Stage up, checks the board, refreshes the guide), and commit `.claude/skills/agentio-*` and `.agentio.json` to the development branch together with `composer.json` and `composer.lock`.
+
+### Changed
+
+- The architecture lives in the knowledge base next to the requirements: the architect writes the decisions of a feature, with their reasons and rejected options (`AD-n`), into an «Архитектура» section of the feature article and the decisions of a module into «Архитектура модуля» of the module article; ADRs are kept for project-wide decisions, «Архитектура: обзор» maps the modules to the code, «Модель данных» indexes the tables by their feature articles. No «Эпик <ID>: …» article is created any more: the implementation order goes into the epic description, and the epic articles of earlier versions are a read-only archive the architect moves into feature and module articles. The `epic-design-template.md` reference of the architect skill is replaced by `architecture-sections.md`.
+- The system analyst and the architect load the `laravel-best-practices` skill of Laravel Boost and follow its rule files. The analyst goes through the behaviour of the system for every feature (long operations, retries, concurrency, failures of external systems, money, notifications, data, volumes, time) with the new `system-aspects.md` reference and records it in a new «Особенности системы» section; the architect has a reliability checklist and new references: `queues-and-jobs.md` (what goes to a queue, job design), `idempotency-and-consistency.md`, `payments.md` (minor units, payment state machine, provider idempotency keys, webhooks, reconciliation, ledger, refunds), `external-integrations.md` (adapters, timeouts, retries, circuit breaking, webhooks) and `operations.md` (observability, cache, files, security, zero-downtime migrations). `agentio:install` reports a project without the skill.
+- Questions to the human follow one protocol (the «Вопросы к человеку» section of the workflow skill): the agent finishes and records what does not depend on the answers, asks all its questions in one `[AGENT:BLOCKED]` of the issue it works on (the idea while planning) with numbered questions, options and its recommendation, and names the Stage to return the issue to. The human answers with a comment in that issue (`В1: б; В2: а`, or `Принимаю рекомендации`) and returns the Stage; returning it without a comment accepts the recommendations. The resumed agent moves the answers into the knowledge base and records an `[AGENT:DECISION]`.
+- `agentio:setup-youtrack` deletes the values YouTrack gives Stage that the cycle does not use (Develop, Test, Staging) from the project's own bundle; a value issues of the project are in is kept with a warning.
+- `agentio:setup-youtrack` checks that the project has an agile board with columns by Stage and swimlanes by Type and exits with code 3 when it has none (the rest of the setup is done; `agentio:install` still installs the skills and fails at the end); a fitting board without a column for a stage gets a warning. The board is never created or changed.
+- Planning sessions may run `php artisan list`; the workflow skill says that the Bash tool reports the exit code itself (`; echo "exit=$?"` was denied).
+
+### Fixed
+
+- Epic worktrees failed on `composer install` when the development branch still installed agentio from `packages/agentio` (a project that moved to the Composer package on another branch only), and the loop retried every pass. `agentio:run` now refuses to start while the development branch installs a package from a path it does not have, `agentio:worktree` explains it for an epic branch made before the fix, and `loop.log` shows the reason of a failed worktree setup.
+- `agentio:yt validate` reported an epic that waits for another epic as having an empty first wave; only the dependencies inside the epic count for the first wave now.
 
 ## [v0.1.0](https://github.com/Alexxosipov/agentio/releases/tag/v0.1.0) - 2026-10-05
 

@@ -20,6 +20,7 @@ use Obrazmisli\Agentio\Install\Preconditions;
 use Obrazmisli\Agentio\Install\SetupAction;
 use Obrazmisli\Agentio\Install\SetupStatus;
 use Obrazmisli\Agentio\Install\YouTrackAccess;
+use Obrazmisli\Agentio\Install\YouTrackSetup;
 use Obrazmisli\Agentio\Runtime\MergePolicy;
 use Obrazmisli\Agentio\Settings;
 use Obrazmisli\Agentio\YouTrack\Client;
@@ -169,10 +170,15 @@ final class InstallCommand extends Command
         }
 
         // 5. The YouTrack project setup (records the knowledge base ids in .agentio.json).
+        $setup = null;
+
         if ($connection !== null && $projectExists === true && $this->shouldSetUpYouTrack($project)) {
             $this->newLine();
 
-            if ($this->call('agentio:setup-youtrack', ['--project' => $project, '--dry-run' => $this->dryRun]) !== self::SUCCESS) {
+            $setup = $this->call('agentio:setup-youtrack', ['--project' => $project, '--dry-run' => $this->dryRun]);
+
+            // INCOMPLETE: the rest of the project is set up, so the skills are installed; the run fails at the end.
+            if ($setup !== self::SUCCESS && $setup !== SetupYouTrackCommand::INCOMPLETE) {
                 return self::FAILURE;
             }
         }
@@ -187,9 +193,9 @@ final class InstallCommand extends Command
             Manifest::load($basePath)->with($project, $baseBranch, $kb, $installer->hashes(), $policy->value, $productionBranch)->save($basePath);
         }
 
-        $this->renderNextSteps($checks, $baseBranch, $kb, $connection !== null);
+        $this->renderNextSteps($checks, $baseBranch, $kb, $connection !== null, $setup);
 
-        return self::SUCCESS;
+        return $setup === SetupYouTrackCommand::INCOMPLETE ? self::FAILURE : self::SUCCESS;
     }
 
     /**
@@ -608,6 +614,7 @@ final class InstallCommand extends Command
                 SetupStatus::Create => $this->dryRun ? '<fg=yellow>will be created</>' : '<fg=green>created</>',
                 SetupStatus::Update => '<fg=yellow>updated</>',
                 SetupStatus::Warning => '<fg=yellow>warning</>',
+                SetupStatus::Error => '<fg=red>error</>',
             });
         }
     }
@@ -635,8 +642,9 @@ final class InstallCommand extends Command
     /**
      * @param  list<Check>  $checks
      * @param  array<string, string>  $kb
+     * @param  int|null  $setup  The exit code of agentio:setup-youtrack, null when it did not run
      */
-    private function renderNextSteps(array $checks, string $baseBranch, array $kb, bool $connected): void
+    private function renderNextSteps(array $checks, string $baseBranch, array $kb, bool $connected, ?int $setup): void
     {
         $steps = [];
 
@@ -653,7 +661,12 @@ final class InstallCommand extends Command
         }
 
         $steps[] = "Commit .claude/skills/agentio-* and .agentio.json to {$baseBranch}: the epic worktrees take the skills from it (.env stays local). Point the develop server at {$baseBranch} and production at the production branch.";
-        $steps[] = 'In YouTrack, build the board columns on the Stage field, if you want a board.';
+
+        if ($setup === SetupYouTrackCommand::INCOMPLETE) {
+            $steps[] = 'Fix the YouTrack board agentio:setup-youtrack reported: '.YouTrackSetup::BOARD_HINT.'.';
+        } elseif ($setup === null) {
+            $steps[] = 'The YouTrack project needs an agile board with columns by Stage and swimlanes by Type: agentio:setup-youtrack checks it.';
+        }
         $steps[] = 'See what the loop would start: php artisan agentio:run --dry-run, then start it: php artisan agentio:run';
 
         if ((bool) config('agentio.ui.enabled', true)) {

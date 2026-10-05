@@ -18,12 +18,17 @@ use Obrazmisli\Agentio\YouTrack\YouTrackException;
  *
  * Fields: the cycle uses the fields YouTrack gives new projects — Stage (the status of an issue) and Type
  * («Тип») — and never creates a second field of the same meaning: a field is found by its name or its
- * localized name, and only the missing values are added to its bundle (Stage keeps its own values, e.g.
- * Develop or Test, next to the cycle's). A bundle the project shares with other projects, or the default
+ * localized name, and the missing values are added to its bundle. The values YouTrack gives Stage and the
+ * cycle does not use (Develop, Test, Staging) are removed from the project's own bundle, unless issues of
+ * the project are in them (reported). A bundle the project shares with other projects, or the default
  * bundle new projects get, is never changed: an empty project is switched to a bundle of its own
  * ("<KEY> Stages"), a project with issues gets a warning. New issues default to Stage Backlog and Type Task
  * when the field has no default among the cycle's values. A State field («Состояние») is not used by the
  * cycle: it is reported and left as is.
+ *
+ * Board: the project must have an agile board with columns by Stage and swimlanes by Type. The setup only
+ * checks it (a board is the team's own view): a project without such a board is an error the human fixes in
+ * YouTrack before running the setup again.
  *
  * English names: the agents read the values through the MCP server, which answers with the localized name
  * of a value (a Russian YouTrack shows Backlog as «Очередь»), and refer to the fields by name. So the cycle's
@@ -33,7 +38,8 @@ use Obrazmisli\Agentio\YouTrack\YouTrackException;
  *
  * Fields, bundles, tags, saved searches and the project id need the REST API (the MCP server has no tools
  * for them); the knowledge base articles are found, created and updated through the MCP server. Existing
- * entities are never deleted or moved, and only the fields and values above are renamed; an existing article
+ * entities are never moved, only the Stage values above are deleted and only the fields and values above
+ * are renamed; an existing article
  * is never changed, except the automation guide, which is a copy of the manual of the installed agentio version.
  */
 final class YouTrackSetup
@@ -58,6 +64,12 @@ final class YouTrackSetup
 
     /** The status field of other YouTrack projects; the cycle keeps the status in Stage (State::FIELD). */
     public const string UNUSED_STATE = 'State';
+
+    /** The values YouTrack gives the Stage field of a new project that the cycle does not use. */
+    public const array DEFAULT_STAGES = ['Develop', 'Test', 'Staging'];
+
+    /** How to set up the board the cycle requires, for the human. */
+    public const string BOARD_HINT = 'create an agile board for the project in YouTrack (or change one): in the board settings, Columns and rows → columns by the Stage field, a column per value (Backlog, Analysis, Ready, In Progress, Review, Blocked, Done), and swimlanes by the Type field (Idea, Epic, Story, Task); then run php artisan agentio:setup-youtrack again';
 
     /** @var list<SetupAction> */
     private array $actions = [];
@@ -114,6 +126,7 @@ final class YouTrackSetup
         $this->ensureField($project, $projectId, $fields, State::FIELD, 'state', $project.' Stages', $states, State::Backlog->value);
         $this->ensureField($project, $projectId, $fields, 'Type', 'enum', $project.' Types', $types, IssueType::Task->value);
         $this->unusedState($fields);
+        $this->checkBoard($project);
 
         $this->ensureTags([Tag::Idea->value, Tag::Claimed->value]);
         $this->ensureSavedSearches(self::savedSearches($project));
@@ -164,6 +177,10 @@ final class YouTrackSetup
                 $full = $this->findBundle($kind, 'id', $bundle['id']) ?? $bundle;
                 $full['values'] = $this->ensureBundleValues($kind, $full, $values);
                 $this->ensureDefault($projectId, $attached, $name, $full, $values, $default, $bundleType);
+
+                if ($name === State::FIELD) {
+                    $this->removeDefaultStages($project, $full);
+                }
 
                 return;
             }
@@ -245,6 +262,126 @@ final class YouTrackSetup
         }
 
         return [...$field, 'name' => $name];
+    }
+
+    /**
+     * Remove the values YouTrack gives Stage that the cycle does not use (Develop, Test, Staging) from the
+     * project's own bundle: an agent or a human would move an issue into a status the cycle never leaves. A
+     * value issues of the project are in is kept and reported: deleting it would empty their Stage. Runs after
+     * ensureDefault(), so the default of new issues is never one of these values.
+     *
+     * @param  array<array-key, mixed>  $bundle  The project's own Stage bundle with its values
+     *
+     * @throws YouTrackException
+     */
+    private function removeDefaultStages(string $project, array $bundle): void
+    {
+        $bundleName = (string) ($bundle['name'] ?? $bundle['id'] ?? '');
+
+        foreach (is_array($bundle['values'] ?? null) ? $bundle['values'] : [] as $value) {
+            if (! is_array($value) || ! is_string($value['name'] ?? null) || ! in_array($value['name'], self::DEFAULT_STAGES, true)) {
+                continue;
+            }
+
+            $name = $value['name'];
+
+            if ($this->client->hasIssues(sprintf('project: %s %s: {%s}', $project, State::FIELD, $name))) {
+                $this->record('bundle', $bundleName, SetupStatus::Warning, "value {$name} is not used by the cycle but issues of the project are in it, so it is kept: move them to a stage of the cycle (a search by Stage: {$name}) and run the setup again");
+
+                continue;
+            }
+
+            $this->record('bundle', $bundleName, SetupStatus::Update, "remove value {$name} (YouTrack's own, not used by the cycle)");
+
+            if (! $this->dryRun && is_string($bundle['id'] ?? null) && is_string($value['id'] ?? null)) {
+                $this->client->deleteBundleValue('state', $bundle['id'], $value['id']);
+            }
+        }
+    }
+
+    /**
+     * The project must have an agile board with columns by Stage and swimlanes by Type: the human follows the
+     * cycle on it. Only checked, never created or changed; a board of several projects counts too.
+     *
+     * @throws YouTrackException
+     */
+    private function checkBoard(string $project): void
+    {
+        $problems = [];
+
+        foreach ($this->client->agiles() as $board) {
+            $projects = array_map(fn (mixed $item): mixed => is_array($item) ? ($item['shortName'] ?? null) : null, is_array($board['projects'] ?? null) ? $board['projects'] : []);
+
+            if (! in_array($project, $projects, true)) {
+                continue;
+            }
+
+            $name = (string) ($board['name'] ?? $board['id'] ?? '?');
+            $columns = is_array($board['columnSettings'] ?? null) ? $board['columnSettings'] : [];
+            $columnField = is_array($columns['field'] ?? null) && is_string($columns['field']['name'] ?? null) ? $columns['field']['name'] : null;
+            $swimlaneField = self::swimlaneField($board);
+            $wrong = [];
+
+            if (! self::isField($columnField, State::FIELD)) {
+                $wrong[] = 'columns by '.($columnField ?? 'no field').' instead of Stage';
+            }
+
+            if (! self::isField($swimlaneField, IssueType::FIELD)) {
+                $wrong[] = $swimlaneField === null ? 'no swimlanes by a field' : "swimlanes by {$swimlaneField} instead of Type";
+            }
+
+            if ($wrong !== []) {
+                $problems[] = "«{$name}»: ".implode(', ', $wrong);
+
+                continue;
+            }
+
+            $shown = [];
+
+            foreach (is_array($columns['columns'] ?? null) ? $columns['columns'] : [] as $column) {
+                foreach (is_array($column) && is_array($column['fieldValues'] ?? null) ? $column['fieldValues'] : [] as $value) {
+                    $shown[] = is_array($value) ? ($value['name'] ?? null) : null;
+                }
+            }
+
+            $missing = array_values(array_filter(array_map(fn (State $state): string => $state->value, State::cases()), fn (string $stage): bool => ! in_array($stage, $shown, true)));
+
+            $missing === []
+                ? $this->record('board', $name, SetupStatus::Exists, 'columns by Stage, swimlanes by Type')
+                : $this->record('board', $name, SetupStatus::Warning, 'columns by Stage, swimlanes by Type, but no column for '.implode(', ', $missing).': the issues in these stages are not on the board; add the columns in the board settings');
+
+            return;
+        }
+
+        $this->record('board', $project, SetupStatus::Error, ($problems === [] ? 'the project has no agile board' : 'no board of the project has columns by Stage and swimlanes by Type ('.implode('; ', $problems).')').': '.self::BOARD_HINT);
+    }
+
+    /**
+     * The custom field the swimlanes of a board are built on, or null without swimlanes by a field.
+     *
+     * @param  array<array-key, mixed>  $board
+     */
+    private static function swimlaneField(array $board): ?string
+    {
+        $settings = is_array($board['swimlaneSettings'] ?? null) ? $board['swimlaneSettings'] : [];
+
+        if (($settings['$type'] ?? null) !== 'AttributeBasedSwimlaneSettings' || ($settings['enabled'] ?? true) === false || ! is_array($settings['field'] ?? null)) {
+            return null;
+        }
+
+        $field = $settings['field'];
+        $custom = is_array($field['customField'] ?? null) ? $field['customField'] : [];
+        $name = $custom['name'] ?? $field['name'] ?? null;
+
+        return is_string($name) ? $name : null;
+    }
+
+    /**
+     * Whether a field name is the field, or one of its names in other UI languages («Этап», «Тип»).
+     */
+    private static function isField(?string $name, string $field): bool
+    {
+        return $name !== null && ($name === $field || in_array($name, self::FIELD_ALIASES[$field] ?? [], true));
     }
 
     /**

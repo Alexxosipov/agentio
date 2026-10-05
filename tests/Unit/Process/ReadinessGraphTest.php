@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use Obrazmisli\Agentio\Process\ReadinessGraph;
+use Obrazmisli\Agentio\Process\StructureValidator;
 use Obrazmisli\Agentio\Process\TreeNode;
 use Obrazmisli\Agentio\YouTrack\Issue;
 use Obrazmisli\Agentio\YouTrack\IssueType;
@@ -104,6 +105,33 @@ it('computes readiness of epics', function () {
         ->and(projectGraph(['T1' => ['Task', 'In Progress', 'S1']])->isEpicReady('E1'))->toBeFalse()
         ->and(projectGraph(['E1' => ['Epic', 'Ready', null, ['X1']]])->isEpicReady('E1'))->toBeFalse()
         ->and(projectGraph(['E1' => ['Epic', 'Ready', null, [], ['agent-claimed']]])->isEpicReady('E1'))->toBeFalse();
+});
+
+it('leaves the dependencies outside the epic out of its first wave', function () {
+    $graph = projectGraph([
+        'E3' => ['Epic', 'Ready', null, ['E1']],
+        'S4' => ['Story', 'Ready', 'E3'],
+        'T4' => ['Task', 'Ready', 'S4', ['X1']],
+        'T5' => ['Task', 'Ready', 'S4', ['T4']],
+        'T6' => ['Task', 'Ready', 'S4', ['T7']],
+        'T7' => ['Task', 'Analysis', 'S4'],
+    ]);
+
+    expect($graph->readyTasks('E3'))->toBe([])
+        ->and($graph->firstWave('E3'))->toBe(['T4'])
+        ->and(implode("\n", new StructureValidator($graph)->problems(['E3'])))->not->toContain('first wave');
+});
+
+it('reports a Ready epic whose tasks all wait for each other', function () {
+    $graph = graphOf([
+        'E1' => ['Epic', 'Ready'],
+        'S1' => ['Story', 'Ready', 'E1'],
+        'T1' => ['Task', 'Ready', 'S1', ['T2']],
+        'T2' => ['Task', 'Analysis', 'S1'],
+    ]);
+
+    expect($graph->firstWave('E1'))->toBe([])
+        ->and(new StructureValidator($graph)->problems(['E1']))->toContain('E1: the epic is Ready but its first wave of ready tasks is empty: every task waits for a task of the epic that is not Ready or not described.');
 });
 
 it('detects dependency cycles', function () {

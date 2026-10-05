@@ -1,1 +1,1 @@
-> Архитектурные решения (Architecture Decision Records). Каждое решение — дочерняя статья `ADR-<NNN>: <решение>` по шаблону скилла `agentio-laravel-architect` (references/adr-template.md).
+> Архитектурные решения уровня проекта (Architecture Decision Records): стек, слои, конвенции, сквозные механизмы, новые зависимости. Каждое — дочерняя статья `ADR-<NNN>: <решение>` по шаблону скилла `agentio-laravel-architect` (references/adr-template.md). Решения одной фичи или одного модуля записываются в их статьях «Системной аналитики» ({{kb.analysis}}).

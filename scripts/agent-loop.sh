@@ -170,7 +170,7 @@ give_up() {
 }
 
 launch_epic() {
-    local epic="$1" dir pid
+    local epic="$1" dir pid reason
     if ! git -C "$ROOT" cat-file -e "$BASE_BRANCH:.claude/skills/agentio-work-epic/SKILL.md" 2>/dev/null; then
         log "ERROR: the agentio skills (.claude/skills/agentio-*) are not committed to $BASE_BRANCH; epic worktrees would not have them"
         return 1
@@ -178,6 +178,8 @@ launch_epic() {
     log "$epic: preparing worktree"
     if ! dir="$(artisan agentio:worktree "$epic" 2>>"$LOG_DIR/$epic.setup.log" | tail -n 1)" || [[ ! -d "$dir" ]]; then
         log "$epic: worktree setup failed, see $LOG_DIR/$epic.setup.log"
+        reason="$(grep -F 'ERROR:' "$LOG_DIR/$epic.setup.log" 2>/dev/null | tail -n 1 || true)"
+        [[ -n "$reason" ]] && log "$epic: ${reason#*ERROR: }"
         return 1
     fi
     echo "===== $(date '+%F %T') /agentio-work-epic $epic in $dir =====" >>"$LOG_DIR/$epic.log"

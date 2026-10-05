@@ -9,8 +9,8 @@ use Symfony\Component\Process\Process;
 
 /**
  * What the autonomous cycle needs on this machine: a git repository whose .env is ignored (it gets the
- * YouTrack token), the Claude Code CLI, PHP extensions, the shell tools of the loop and a JS package manager
- * (optional).
+ * YouTrack token), the Claude Code CLI, PHP extensions, the shell tools of the loop, a JS package manager
+ * (optional) and the laravel-best-practices skill of Laravel Boost the analyst and the architect follow (optional).
  */
 final readonly class Preconditions
 {
@@ -37,6 +37,7 @@ final readonly class Preconditions
             new Check('setsid', $this->has('setsid'), true, 'agent sessions are started with setsid (util-linux; on macOS: brew install util-linux)'),
             new Check('flock', $this->has('flock'), false, 'agentio:commit falls back to a mkdir lock without it'),
             new Check('bun or npm', $this->has('bun') || $this->has('npm'), false, 'needed only when the project has a frontend build'),
+            new Check('laravel-best-practices skill', is_file($this->basePath.'/.claude/skills/laravel-best-practices/SKILL.md'), false, 'the analyst and the architect design by it: composer require laravel/boost --dev, then php artisan boost:install with its skills, and commit .claude/skills'),
         ];
     }
 

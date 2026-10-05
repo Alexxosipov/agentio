@@ -334,6 +334,21 @@ it('configures the YouTrack project with --setup-youtrack and records the knowle
         ->and($manifest->files)->toHaveCount(count((new Installer($project, dirname(__DIR__, 3).'/stubs', new Placeholders('XY', 'main', MergePolicy::LocalBranch)))->stubFiles()));
 });
 
+it('installs the skills but fails when the YouTrack project has no board set up for the cycle', function () {
+    $project = projectWithFakeClaude(hasYouTrackServer: true);
+    (new FakeYouTrackMcp)->fake();
+    fakeYouTrackRestApi(['agiles' => []]);
+    config(['agentio.youtrack.url' => FakeYouTrackMcp::URL, 'agentio.youtrack.token' => 'secret-token']);
+
+    $this->artisan('agentio:install', offline($project, ['--setup-youtrack' => true]))
+        ->expectsOutputToContain('the project has no agile board')
+        ->expectsOutputToContain('Fix the YouTrack board agentio:setup-youtrack reported')
+        ->assertFailed();
+
+    expect(Manifest::load($project)->kb)->toHaveCount(count(KnowledgeBase::ARTICLES))
+        ->and($project.'/.claude/skills/agentio-work-epic/SKILL.md')->toBeFile();
+});
+
 it('asks for the connection, the project and the settings, and offers the setup', function () {
     $project = projectWithFakeClaude();
     (new FakeYouTrackMcp)->fake();

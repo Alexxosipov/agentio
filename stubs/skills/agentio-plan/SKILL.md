@@ -16,13 +16,14 @@ allowed-tools: Skill Bash(php artisan agentio:yt *) mcp__youtrack__*
    - Если `$ARGUMENTS` похож на ID (`{{project}}-\d+`) — это идея.
    - Иначе это текст идеи: создай задачу `[IDEA] <краткое summary>` с описанием = текст: `create_issue(project="{{project}}", summary=…, description=…, customFields={"Type": "Idea", "Stage": "Backlog"})`, метка `idea` (`manage_issue_tags`). Дальше работай с её ID.
    - Если у идеи уже есть эпики (`search_issues "project: {{project}} Type: Epic relates to: <IDEA>"`) и `[AGENT:DONE]` от планирования — это повторный запуск. Сверь состояние с процедурой ниже и доделай недостающее, ничего не дублируя.
+   - Если в идее есть `[AGENT:BLOCKED]` — человек ответил и вернул идею в Backlog: сначала перенеси ответы в статьи по разделу «Вопросы к человеку» скилла agentio-youtrack-workflow, затем продолжай с шага, на котором планирование остановилось.
 2. **Примени скилл agentio-project-manager** (Skill) и пройди его процедуру планирования целиком:
    - захват идеи → требования;
-   - **agentio-system-analyst** (Skill) → статьи модулей и фич, карта модулей, сводка влияния;
-   - эпики → **agentio-laravel-architect** (Skill) для каждого эпика → проект, ADR, порядок реализации;
+   - **agentio-system-analyst** (Skill) → статьи модулей и фич (с особенностями системы), карта модулей, сводка влияния; оба скилла ниже и аналитик опираются на скилл `laravel-best-practices`, если он есть в проекте;
+   - эпики → **agentio-laravel-architect** (Skill) для каждого эпика → решения в разделах «Архитектура» статей фич и модулей, ADR, порядок реализации в описании эпика;
    - декомпозиция STORY/TASK → зависимости (включая пересечения по файлам);
    - `php artisan agentio:yt validate <IDEA>` → Ready → `[AGENT:DONE]` → `php artisan agentio:yt release <IDEA> --state=Done`.
-3. Если на любом шаге нужен человек — `[AGENT:BLOCKED]` в идее, `php artisan agentio:yt release <IDEA> --state=Blocked` и остановись.
+3. Если на любом шаге нужен человек — доделай всё, что от ответа не зависит, и задай все вопросы одним `[AGENT:BLOCKED]` в идее (раздел «Вопросы к человеку» скилла agentio-youtrack-workflow: варианты, рекомендация, Stage для возврата `Backlog`), затем `php artisan agentio:yt release <IDEA> --state=Blocked` и остановись.
 
 ## Итог (последнее сообщение)
 

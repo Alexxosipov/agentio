@@ -18,6 +18,7 @@
             "Bash(php artisan agentio:run --dry-run*)",
             "Bash(php artisan route:list*)",
             "Bash(php artisan about*)",
+            "Bash(php artisan list*)",
             "Bash(git status*)",
             "Bash(git diff*)",
             "Bash(git log*)",

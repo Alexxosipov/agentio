@@ -7,6 +7,8 @@ namespace Obrazmisli\Agentio\Console\Commands;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Route;
 use Obrazmisli\Agentio\Console\Concerns\RunsPackageScripts;
+use Obrazmisli\Agentio\Git\Git;
+use Obrazmisli\Agentio\Git\PathPackages;
 use Obrazmisli\Agentio\Install\Installer;
 use Obrazmisli\Agentio\Install\Preconditions;
 use Obrazmisli\Agentio\Runtime\LoopState;
@@ -188,6 +190,13 @@ final class RunCommand extends Command
             if (Settings::string('agentio.youtrack.'.$key) === null) {
                 $errors[] = "{$variable} is not set: run php artisan agentio:install (it writes .env)";
             }
+        }
+
+        $base = $settings->baseBranch();
+
+        foreach (PathPackages::missingOnBranch(new Git($settings->basePath()), 'refs/heads/'.$base) as $package => $path) {
+            $errors[] = "The composer.lock of the development branch {$base} installs {$package} from the path {$path}, which {$base} does not have, so composer install fails in every epic worktree: "
+                ."commit the composer.json and composer.lock that install it from its repository to {$base} (e.g. merge {$settings->productionBranch()} into {$base})";
         }
 
         return $errors;

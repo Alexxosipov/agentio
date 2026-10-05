@@ -183,6 +183,31 @@ final class ReadinessGraph
         return array_values(array_filter($this->descendants($epicId), $this->isTaskReady(...)));
     }
 
+    /**
+     * Tasks of the epic that can be started once everything outside the epic it waits for is done: the
+     * dependencies on other epics (of the epic, its stories or its tasks) are left out.
+     *
+     * @return list<string>
+     */
+    public function firstWave(string $epicId): array
+    {
+        return array_values(array_filter($this->descendants($epicId), function (string $id) use ($epicId): bool {
+            $task = $this->find($id);
+
+            if ($task === null || ! $task->hasType(IssueType::Task) || ! $task->hasState(State::Ready) || $task->isClaimed()) {
+                return false;
+            }
+
+            foreach ($this->unmetDependencies($id) as $dependency) {
+                if ($this->epicOf($dependency) === $epicId) {
+                    return false;
+                }
+            }
+
+            return true;
+        }));
+    }
+
     public function isEpicReady(string $id): bool
     {
         $epic = $this->find($id);

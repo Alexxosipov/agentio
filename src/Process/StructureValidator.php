@@ -10,7 +10,8 @@ use Obrazmisli\Agentio\YouTrack\State;
 /**
  * The structure rules of planned work (agentio:yt validate): every issue under an epic has the summary prefix
  * of its Type and a parent of the right type, every story has tasks, a Ready epic has a first wave of ready
- * tasks, and no dependency forms a cycle.
+ * tasks (counting only the dependencies inside the epic: an epic that waits for another epic is planned right),
+ * and no dependency forms a cycle.
  */
 final readonly class StructureValidator
 {
@@ -47,8 +48,8 @@ final readonly class StructureValidator
                 }
             }
 
-            if ($this->graph->get($epic)->hasState(State::Ready) && $this->graph->readyTasks($epic) === []) {
-                $problems[] = "{$epic}: the epic is Ready but its first wave of ready tasks is empty.";
+            if ($this->graph->get($epic)->hasState(State::Ready) && $this->graph->firstWave($epic) === []) {
+                $problems[] = "{$epic}: the epic is Ready but its first wave of ready tasks is empty: every task waits for a task of the epic that is not Ready or not described.";
             }
         }
 
