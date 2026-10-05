@@ -19,16 +19,19 @@
 ### Решения
 | ID | Решение | Обоснование | Отвергнуто | Источник |
 |---|---|---|---|---|
-| AD-1 | Аватар обрабатывается джобом `ProcessUserAvatar` в очереди `media` | BR-3: до 10 МБ, обработка 2–5 с; запрос не ждёт | синхронно в контроллере — таймауты; Spatie Media Library — новая зависимость ради одного поля | {{project}}-2 |
+| AD-1 | Аватар обрабатывается джобом `App\Users\Jobs\ProcessUserAvatar` в очереди `media` | BR-3: до 10 МБ, обработка 2–5 с; запрос не ждёт | синхронно в контроллере — таймауты; Spatie Media Library — новая зависимость ради одного поля | {{project}}-2 |
 
 ### Компоненты
-| Вид | Имя | Назначение |
-|---|---|---|
-| Маршрут | `user-avatar.update` · `PUT /settings/avatar` · `auth`, `verified` | загрузка (FR-1) |
-| Form Request | `UpdateUserAvatarRequest` | BR-1, BR-2 |
-| Action | `App\Actions\Users\UpdateUserAvatar` | сохранить файл, поставить джоб |
-| Policy | `UserPolicy@update` | только владелец |
-| Джоб | `ProcessUserAvatar` | AD-1 |
+Полные имена классов в неймспейсе домена (`App\<Домен>\<Вид>\<Класс>`, см. `code-structure.md`) и зеркальный путь теста каждого класса.
+
+| Вид | Имя | Тест | Назначение |
+|---|---|---|---|
+| Маршрут | `user-avatar.update` · `PUT /settings/avatar` · `auth`, `verified` → `AvatarController@update` | — (в тесте контроллера) | загрузка (FR-1) |
+| Контроллер | `App\Users\Http\Controllers\AvatarController` | `tests/Feature/Users/Http/Controllers/AvatarControllerTest.php` | HTTP, авторизация, валидация |
+| Form Request | `App\Users\Http\Requests\UpdateUserAvatarRequest` | — (в тесте контроллера) | BR-1, BR-2 |
+| Action | `App\Users\Actions\UpdateUserAvatar` | `tests/Unit/Users/Actions/UpdateUserAvatarTest.php` | сохранить файл, поставить джоб |
+| Policy | `App\Users\Policies\UserPolicy@update` | `tests/Unit/Users/Policies/UserPolicyTest.php` | только владелец |
+| Джоб | `App\Users\Jobs\ProcessUserAvatar` | `tests/Feature/Users/Jobs/ProcessUserAvatarTest.php` | AD-1 |
 
 ### Физическая модель
 | Таблица | Колонка | Тип | Null | Индекс / FK / уникальность | Комментарий |
@@ -43,7 +46,7 @@
 ### Очереди и фоновые процессы
 | Джоб / событие / задача планировщика | Очередь | tries / backoff / timeout | Уникальность | Идемпотентность | При окончательном сбое |
 |---|---|---|---|---|---|
-| `ProcessUserAvatar` | media | 3 / 10,60,300 / 120 | `ShouldBeUnique` по user_id | повторная обработка перезаписывает тот же файл | `failed()`: статус `failed`, письмо пользователю |
+| `App\Users\Jobs\ProcessUserAvatar` | media | 3 / 10,60,300 / 120 | `ShouldBeUnique` по user_id | повторная обработка перезаписывает тот же файл | `failed()`: статус `failed`, письмо пользователю |
 
 ### Идемпотентность и согласованность
 - Повтор запроса / ретрай / дубль вебхука → <чем защищено: уникальный индекс, ключ идемпотентности, проверка состояния, блокировка>.
@@ -62,6 +65,7 @@
 - Логи с контекстом: <что и с какими ID>; алерты: <на что>; как найти зависшие операции: <запрос, команда, панель>.
 
 ### Тестирование
+- Файлы тестов зеркалят неймспейсы классов (столбец «Тест» в «Компонентах»).
 - Feature: <HTTP, авторизация, валидация, `Queue::fake()`, `Http::fake()`>; Unit: <Actions, джобы, правила>; надёжность: <повтор запроса, повтор джоба, сбой внешней системы, дубль вебхука>.
 
 Не применимо: <деньги, внешние системы — перечисли опущенные подразделы>.
@@ -76,19 +80,20 @@
 > Ведёт скилл `agentio-laravel-architect`.
 
 ### Код модуля
-- Namespace и каталоги: `App\Actions\Users`, `App\Models\User`, `app/Http/Controllers/Settings/*`, `resources/js/pages/settings/*`.
+- Домен: `App\Users` (`app/Users/{Models,Actions,Http,Policies,Jobs,…}`), тесты — `tests/{Feature,Unit}/Users/…` (зеркально); представления и страницы — `resources/js/pages/users/*`.
+- Плоский код домена, ещё не перенесённый (если есть): <классы> — перенос: <шаг эпика / AD-n / не планируется>.
 - Таблицы-владельцы: `users`, `user_sessions` (колонки — в статьях фич-владельцев).
 
 ### Контракт для других модулей
 | Что | Имя | Кто использует |
 |---|---|---|
-| Action | `App\Actions\Users\CreateUser` | «Платежи» ({{project}}-A-..) |
-| Событие | `UserRegistered` (после коммита) | «Уведомления» |
+| Action | `App\Users\Actions\CreateUser` | «Платежи» ({{project}}-A-..) |
+| Событие | `App\Users\Events\UserRegistered` (после коммита) | «Уведомления» |
 
 ### Решения модуля
 | ID | Решение | Обоснование | Отвергнуто | Источник |
 |---|---|---|---|---|
-| AD-1 | Внешний провайдер X вызывается только через `App\Services\X\Client` | один адаптер: таймауты, ретраи, логи, фейк в тестах | вызовы из Actions напрямую | {{project}}-2 |
+| AD-1 | Внешний провайдер X вызывается только через `App\Users\Integrations\X\Client` | один адаптер: таймауты, ретраи, логи, фейк в тестах | вызовы из Actions напрямую | {{project}}-2 |
 
 ### Сквозные механизмы модуля
 - Очереди: <имена, приоритеты>; кэш: <ключи, сброс>; файлы: <диски>; планировщик: <задачи>; интеграции: <системы и адаптеры>.
@@ -102,8 +107,10 @@
 ## Порядок реализации
 | # | Шаг | Фича / решение | Зависит от | Затрагивает файлы |
 |---|---|---|---|---|
-| 1 | Миграция и модель | {{project}}-A-31 AD-2 | — | `database/migrations/..`, `app/Models/..` |
-| 2 | Action и Form Request | {{project}}-A-31 AD-1 | 1 | `app/Actions/..`, `app/Http/Requests/..` |
+| 1 | Миграция и модель | {{project}}-A-31 AD-2 | — | `database/migrations/..`, `app/Users/Models/User.php`, `database/factories/UserFactory.php` |
+| 2 | Action и Form Request | {{project}}-A-31 AD-1 | 1 | `app/Users/Actions/UpdateUserAvatar.php`, `app/Users/Http/Requests/UpdateUserAvatarRequest.php`, `tests/Unit/Users/Actions/UpdateUserAvatarTest.php` |
+
+Файлы — точными путями по неймспейсам домена, вместе с зеркальными тестами. Перенос плоского кода домена (если решён) — отдельный первый шаг, от него зависят все шаги домена.
 
 **Параллельные группы:** {2, 3} — файлы не пересекаются; …
 **Нельзя параллельно:** все миграции (одна цепочка); всё, что трогает `routes/web.php`.

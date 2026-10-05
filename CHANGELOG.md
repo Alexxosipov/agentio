@@ -1,6 +1,14 @@
 # Release Notes
 
-## [Unreleased](https://github.com/Alexxosipov/agentio/compare/v0.2.0...main)
+## [Unreleased](https://github.com/Alexxosipov/agentio/compare/v0.3.0...main)
+
+## [v0.3.0](https://github.com/Alexxosipov/agentio/releases/tag/v0.3.0) - 2026-10-05
+
+Update with `composer require obrazmisli/agentio:^0.3 --dev`, then run `php artisan agentio:install` (refreshes the skills) and commit `.claude/skills/agentio-*` to the development branch together with `composer.json` and `composer.lock`. ADR-001 of an existing knowledge base is not rewritten: the architect adds the code structure rule to it on the next epic.
+
+### Changed
+
+- The code is laid out by domain namespaces: the architect puts every class into `App\<Domain>\<Kind>\<Class>` (a domain per module of the analysis, `App\Shared\…` for code of several domains) instead of flat `App\Actions`, `App\Models`, `App\Services`, `App\Http\Controllers` and the like; migrations, factories, seeders, `config`, `routes`, `lang` and the application skeleton (`App\Providers`) stay flat. Every test mirrors the namespace of the class it tests (`App\Users\Actions\X` → `tests/Unit/Users/Actions/XTest.php`). The new `code-structure.md` reference of the architect skill describes the layout, the Laravel wiring it needs (factories, policies, listeners, commands, morph map, generators) and how flat code is moved; the rule goes into ADR-001, the «Компоненты» table of a feature lists full class names with their test paths, the developer creates classes by their full names and the reviewer flags flat classes and tests that do not mirror their class.
 
 ## [v0.2.0](https://github.com/Alexxosipov/agentio/releases/tag/v0.2.0) - 2026-10-05
 

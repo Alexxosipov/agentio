@@ -20,7 +20,8 @@ allowed-tools: Skill Bash(php artisan agentio:yt *) Bash(php artisan agentio:tes
 3. **Разведка.** Найди 2–3 соседних файла того же вида и повтори их структуру. Перед использованием API пакета — документация установленной версии (`mcp__laravel-boost__search-docs`, если подключён Laravel Boost). Для фронтенда, аутентификации и тестов — скиллы проекта по этим темам, если они есть.
 4. **Реализация — строго в рамках задачи.**
    - Только то, что в «Что сделать» и критериях приёмки. «Вне рамок» не трогай.
-   - Новые файлы — через `php artisan make:* --no-interaction`.
+   - Новые файлы — через `php artisan make:* --no-interaction` с полным именем класса в неймспейсе домена (`php artisan make:class 'App\Users\Actions\UpdateUserAvatar'`): короткое имя кладёт класс в плоский каталог по умолчанию. Плоские `App\Actions`, `App\Models`, `App\Http\Controllers` и т. п. не пополняй, даже если соседний код лежит там; исключения — миграции, фабрики, сиды, `config`, `routes`, каркас (`App\Providers`). Если задача называет класс без домена или с плоским путём — бери домен из «Архитектуры» статьи фичи и модуля и отметь это в `[AGENT:DONE]`.
+   - Тест зеркалит неймспейс тестируемого класса: `App\Users\Actions\UpdateUserAvatar` → `tests/Unit/Users/Actions/UpdateUserAvatarTest.php` (`php artisan make:test Users/Actions/UpdateUserAvatarTest --unit`), `App\Users\Http\Controllers\AvatarController` → `tests/Feature/Users/Http/Controllers/AvatarControllerTest.php`.
    - Обнаружил смежную работу (баг, недостающий кусок, рефакторинг) — **не делай молча**. Создай TASK: `create_issue(project="{{project}}", parentIssue=<STORY>, summary="[TASK] …", description=…, customFields={"Type": "Task", "Stage": "Backlog"})` по шаблону и связь `relates to` с текущей задачей (`link_issues`). Упомяни её в `[AGENT:DONE]`.
    - Существенное решение, не описанное в задаче или ADR, — `[AGENT:DECISION]`.
    - Не можешь продолжать без человека — `[AGENT:BLOCKED]`, `php artisan agentio:yt release <TASK> --state=Blocked`, верни `BLOCKED <TASK>: <причина>`.
@@ -45,6 +46,7 @@ allowed-tools: Skill Bash(php artisan agentio:yt *) Bash(php artisan agentio:tes
 
 - [ ] Контекст прочитан, задача захвачена (код 0).
 - [ ] Сделано только то, что в задаче; смежная работа оформлена новыми TASK.
+- [ ] Новые классы — в неймспейсе домена, тесты зеркалят неймспейсы классов.
 - [ ] Тесты написаны, `php artisan agentio:test` по своим тестам — passed; форматтер, статический анализ, линтеры фронта — passed.
 - [ ] Закоммичены только свои файлы, сообщение начинается с `<TASK>:`.
 - [ ] `[AGENT:DONE]` записан, `agentio:yt release --state=Done` выполнен.

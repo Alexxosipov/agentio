@@ -26,7 +26,8 @@ worktree: `/abs/path/to/worktree`
 2. ...
 
 **Затрагиваемые файлы:**
-- `app/Actions/UpdateUserAvatar.php` (новый)
+- `app/Users/Actions/UpdateUserAvatar.php` (новый)
+- `tests/Unit/Users/Actions/UpdateUserAvatarTest.php` (новый)
 - `routes/web.php`
 
 **Допущения:**
