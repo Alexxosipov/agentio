@@ -2,7 +2,7 @@
 name: agentio-develop-task
 description: Реализует ровно одну TASK из YouTrack (проект {{project}}) в worktree эпика — читает контекст через MCP youtrack, захватывает задачу, пишет код и тесты, гоняет тесты и линтеры, коммитит только свои файлы с ID задачи, пишет [AGENT:DONE] и освобождает задачу. Используется субагентом, которого запускает оркестратор agentio-work-epic, по одному на TASK; в промпте — TASK, BRANCH и WORKTREE.
 argument-hint: TASK=<ID> BRANCH=<ветка эпика> WORKTREE=<путь>
-allowed-tools: Skill Bash(php artisan agentio:yt *) Bash(php artisan agentio:test *) Bash(php artisan agentio:commit *) mcp__youtrack__*
+allowed-tools: Skill Bash(php artisan agentio:yt *) Bash(composer test*) Bash(vendor/bin/pest *) Bash(php artisan agentio:commit *) mcp__youtrack__*
 ---
 
 # Разработка одной TASK
@@ -25,12 +25,12 @@ allowed-tools: Skill Bash(php artisan agentio:yt *) Bash(php artisan agentio:tes
    - Обнаружил смежную работу (баг, недостающий кусок, рефакторинг) — **не делай молча**. Создай TASK: `create_issue(project="{{project}}", parentIssue=<STORY>, summary="[TASK] …", description=…, customFields={"Type": "Task", "Stage": "Backlog"})` по шаблону и связь `relates to` с текущей задачей (`link_issues`). Упомяни её в `[AGENT:DONE]`.
    - Существенное решение, не описанное в задаче или ADR, — `[AGENT:DECISION]`.
    - Не можешь продолжать без человека — `[AGENT:BLOCKED]`, `php artisan agentio:yt release <TASK> --state=Blocked`, верни `BLOCKED <TASK>: <причина>`.
-5. **Тесты и качество** (требования к покрытию и линтерам — в `CLAUDE.md` и ADR-001; полный гейт — `php artisan agentio:test --full`):
-   - форматтер PHP, если он есть в проекте: `vendor/bin/pint <свои php-файлы>`;
-   - `php artisan agentio:test <свои тестовые файлы или --filter=…>` — **никогда** не запускай тесты (`pest`, `phpunit`, `artisan test`) через `| tail`/`| head`: браузерные тесты могут оставить процесс, который держит пайп. Только `php artisan agentio:test`: вывод уходит в лог, печатается итог;
-   - статический анализ и линтеры проекта, если они есть (например, `vendor/bin/phpstan --no-progress`, `vendor/bin/rector --dry-run`), если менял PHP;
-   - проверки фронтенда из `package.json` (типы, линтер) через менеджер пакетов проекта (`bun run …` или `npm run …`), если менял фронтенд.
-   - Если сломались тесты, не относящиеся к твоим файлам, это может быть параллельная задача в том же worktree. Перезапусти один раз; если ошибка сохраняется — опиши её в `[AGENT:DONE]` в разделе «что осталось», чужой код не чини.
+5. **Тесты и качество** (требования к покрытию и линтерам — в `CLAUDE.md` и ADR-001). Тесты запускаются **только** двумя способами:
+   - по ходу работы, когда нужны конкретные тесты, — только через Pest: `vendor/bin/pest <свои тестовые файлы> [--filter=…]`;
+   - в конце задачи — **обязательно** `composer test`: полный гейт проекта (тесты, линтеры, статический анализ, покрытие — что настроено в скрипте `test` в `composer.json`). Задача не готова, пока `composer test` не зелёный.
+   - Других способов нет: не `php artisan test`, не `vendor/bin/phpunit`, не отдельные скрипты. **Никогда** не передавай вывод тестов в `| tail`/`| head`: браузерные тесты могут оставить процесс, который держит пайп, и команда зависнет.
+   - Пока работаешь: форматтер PHP, если он есть в проекте (`vendor/bin/pint <свои php-файлы>`); проверки фронтенда из `package.json` (типы, линтер) через менеджер пакетов проекта (`bun run …` или `npm run …`), если менял фронтенд и они не входят в `composer test`.
+   - Если в `composer test` сломались тесты, не относящиеся к твоим файлам, это может быть параллельная задача в том же worktree. Перезапусти один раз; если ошибка сохраняется — опиши её в `[AGENT:DONE]` в разделе «что осталось», чужой код не чини.
 6. **Коммит — только своих файлов** (в worktree параллельно может работать другой разработчик):
    ```bash
    php artisan agentio:commit <TASK> "<что сделано>" <файл> [<файл>...]
@@ -47,6 +47,6 @@ allowed-tools: Skill Bash(php artisan agentio:yt *) Bash(php artisan agentio:tes
 - [ ] Контекст прочитан, задача захвачена (код 0).
 - [ ] Сделано только то, что в задаче; смежная работа оформлена новыми TASK.
 - [ ] Новые классы — в неймспейсе домена, тесты зеркалят неймспейсы классов.
-- [ ] Тесты написаны, `php artisan agentio:test` по своим тестам — passed; форматтер, статический анализ, линтеры фронта — passed.
+- [ ] Тесты написаны; в конце задачи `composer test` — passed (конкретные тесты по ходу работы — только `vendor/bin/pest`).
 - [ ] Закоммичены только свои файлы, сообщение начинается с `<TASK>:`.
 - [ ] `[AGENT:DONE]` записан, `agentio:yt release --state=Done` выполнен.

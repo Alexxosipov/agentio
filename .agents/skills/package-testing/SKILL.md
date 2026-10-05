@@ -17,7 +17,7 @@ Prove package behavior with Pest 4/5, Orchestra Testbench, and the local `tests/
 1. Start with TDD: write the smallest failing package test for the requested behavior, then implement the smallest change that makes it pass.
 2. Cover happy-path, unhappy-path, and edge-case behavior when the feature has meaningful failure modes.
 3. Prefer focused feature tests for package integration behavior and arch tests for broad constraints.
-4. Use `composer test:unit -- --filter ...` while iterating, `composer test:types` when type-sensitive tests or code changed, and `composer test` before finishing.
+4. Run tests only two ways: specific tests through Pest while iterating (`vendor/bin/pest tests/Feature/SomeTest.php --filter ...`), and `composer test` at the end of every task to confirm everything is right (PHPStan, Pint, type coverage and the whole suite). A task is not done until `composer test` passes. Do not pipe test output into `tail` or `head`.
 5. Keep real package tests in the suite and remove only throwaway tests that were explicitly created for local scaffolding experiments.
 
 ## References
@@ -41,3 +41,4 @@ Prove package behavior with Pest 4/5, Orchestra Testbench, and the local `tests/
 - Relying only on smoke tests when behavior needs assertions.
 - Testing implementation details when observable package behavior is available.
 - Keeping throwaway scaffolding experiment tests in the package test suite.
+- Finishing a task without a green `composer test`, or running tests any other way than `composer test` and `vendor/bin/pest`.

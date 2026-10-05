@@ -69,24 +69,6 @@ return [
 
     /*
     |--------------------------------------------------------------------------
-    | Tests
-    |--------------------------------------------------------------------------
-    |
-    | Commands of php artisan agentio:test, which the agents use for every test
-    | run: "command" gets the arguments (e.g. --filter=Profile), and
-    | "full_command" is the full quality gate (agentio:test --full). Null keeps
-    | the defaults: `php artisan test --compact`, and `composer test` when
-    | composer.json has a "test" script.
-    |
-    */
-
-    'tests' => [
-        'command' => env('AGENTIO_TEST_COMMAND'),
-        'full_command' => env('AGENTIO_FULL_TEST_COMMAND'),
-    ],
-
-    /*
-    |--------------------------------------------------------------------------
     | Logs
     |--------------------------------------------------------------------------
     |

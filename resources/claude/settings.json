@@ -10,8 +10,6 @@
             "mcp__youtrack__*",
             "mcp__laravel-boost__*",
             "Bash(php artisan agentio:yt *)",
-            "Bash(php artisan agentio:test)",
-            "Bash(php artisan agentio:test *)",
             "Bash(php artisan agentio:commit *)",
             "Bash(php artisan agentio:log *)",
             "Bash(php artisan agentio:status*)",

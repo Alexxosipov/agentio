@@ -91,7 +91,7 @@ it('gives epic sessions the session settings of the package and the project rule
 
     $settings = (new SessionSettings(app(Settings::class)))->epic();
 
-    expect($settings['permissions']['allow'])->toContain('Bash(php artisan agentio:yt *)', 'Bash(php artisan agentio:commit *)', 'Bash(php artisan agentio:test *)', 'mcp__youtrack__*', 'Skill', 'Edit(./**)', 'Bash(make lint)', 'Bash(git push -u origin XY-*)', 'Bash(git merge --no-edit develop)', 'Bash(git merge --abort)')
+    expect($settings['permissions']['allow'])->toContain('Bash(php artisan agentio:yt *)', 'Bash(php artisan agentio:commit *)', 'Bash(composer test*)', 'Bash(vendor/bin/pest*)', 'mcp__youtrack__*', 'Skill', 'Edit(./**)', 'Bash(make lint)', 'Bash(git push -u origin XY-*)', 'Bash(git merge --no-edit develop)', 'Bash(git merge --abort)')
         // "/**" is relative to the main checkout in a git worktree: it would not let the agents edit the epic worktree.
         ->and($settings['permissions']['allow'])->not->toContain('Edit(/**)', 'Bash(php -i)')
         ->and($settings['permissions']['deny'])->toContain('Bash(git push --force*)', 'Bash(git push origin develop*)', 'Bash(git checkout develop*)', 'Bash(git push origin main*)', 'Bash(php artisan agentio:accept*)', 'Read(./.env)', 'Read(**/.env)', 'Edit(.claude/skills/agentio-*/**)', 'Read(./secrets/**)', 'mcp__laravel-boost__tinker', 'mcp__laravel-boost__get-config')
@@ -158,42 +158,6 @@ it('does not start an epic whose skills are not committed to the base branch', f
     expect($process->getExitCode())->toBe(0, $process->getErrorOutput())
         ->and(file_get_contents($project.'/storage/logs/agents/loop.log'))->toContain('the agentio skills (.claude/skills/agentio-*) are not committed to develop');
 });
-
-it('runs the configured test commands through agentio:test', function () {
-    $project = projectForLoop();
-    file_put_contents($project.'/composer.json', json_encode(['scripts' => ['test' => 'echo full-gate-from-composer']]));
-    config(['agentio.tests.command' => 'echo narrow', 'agentio.tests.full_command' => null]);
-
-    expect(Artisan::call('agentio:test', ['arguments' => ['--filter=Profile']]))->toBe(0)
-        ->and(Artisan::output())->toContain('narrow --filter=Profile', 'exit=0 log='.$project.'/storage/logs/tests/')
-        ->and(Artisan::call('agentio:test', ['--full' => true]))->toBe(0)
-        ->and(Artisan::output())->toContain('full-gate-from-composer');
-
-    config(['agentio.tests.command' => 'exit 7']);
-
-    expect(Artisan::call('agentio:test'))->toBe(7)
-        ->and(Artisan::output())->toContain('exit=7');
-});
-
-it('kills what a test run leaves behind, and only that', function () {
-    $project = projectForLoop();
-    $other = new Process(['sleep', '30']);
-    $other->start();
-    config(['agentio.tests.command' => 'sleep 30 & echo $! > '.$project.'/left.pid; echo started']);
-
-    try {
-        expect(Artisan::call('agentio:test'))->toBe(0)
-            ->and(Artisan::output())->toContain('exit=0');
-
-        $left = (int) file_get_contents($project.'/left.pid');
-        usleep(200_000);
-
-        expect(posix_kill($left, 0))->toBeFalse()
-            ->and($other->isRunning())->toBeTrue();
-    } finally {
-        $other->stop(0);
-    }
-})->skip(! function_exists('posix_kill'), 'needs the posix extension');
 
 it('commits only the given files of a task through agentio:commit', function () {
     $project = projectForLoop();

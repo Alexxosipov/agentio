@@ -24,9 +24,11 @@ The agents work with YouTrack only through its **MCP server**. The package adds 
 
 `php artisan agentio:install` checks all of this and tells you what is missing.
 
+The project also needs a `test` script in its `composer.json` (the full quality gate: tests, linters, static analysis — whatever the project uses): the agents finish every task with `composer test` and run single tests with `vendor/bin/pest`.
+
 ## Quick start
 
-1. Install the package from GitHub as a dev dependency (see [Installation](#installation): add the repository to `composer.json`, then `composer require obrazmisli/agentio:^0.2 --dev`).
+1. Install the package from GitHub as a dev dependency (see [Installation](#installation): add the repository to `composer.json`, then `composer require obrazmisli/agentio:^0.4 --dev`).
 2. Install the cycle into the project (a git repository whose `.env` is git-ignored): `php artisan agentio:install`. It asks for the YouTrack URL and a permanent token (hidden input), checks them through the YouTrack MCP server, adds the `youtrack` MCP server to Claude Code if it has none, asks for the project short name (`ABC`; a missing project can be created), the production and the development branch (`main` and `dev`; the missing one is created locally), the merge policy and **the directory of the epic worktrees**, offers to configure the YouTrack project and installs the skills.
 3. Commit `.claude/skills/agentio-*` and `.agentio.json` to `dev`: epic worktrees are created from it. `.env` (with the token) stays local. Push `dev` and `main` if the project has a remote, and point the develop server at `dev` and production at `main`.
 4. File an idea in YouTrack (Type `Idea` or the `idea` tag, Stage `Backlog`), check what the loop would do with `php artisan agentio:run --dry-run`, then start it: `php artisan agentio:run`.
@@ -51,7 +53,7 @@ composer config repositories.agentio vcs https://github.com/Alexxosipov/agentio
 Then require it:
 
 ```bash
-composer require obrazmisli/agentio:^0.2 --dev
+composer require obrazmisli/agentio:^0.4 --dev
 ```
 
 Install it as a **dev dependency**: the cycle runs on a developer machine (Claude Code, git worktrees, the loop) and nothing of it is needed in production; it also keeps the dashboard, which shows YouTrack data and agent logs, out of production builds. Require it without `--dev` only if you want the dashboard on a shared or staging server. If you call `Agentio::auth()` from a service provider, guard it with `class_exists(Agentio::class)` so that `composer install --no-dev` keeps working.
@@ -66,9 +68,9 @@ php artisan agentio:install           # refreshes the installed skills; your edi
 php artisan agentio:setup-youtrack    # refreshes the automation guide in the knowledge base
 ```
 
-Commit the updated `.claude/skills/agentio-*` and `.agentio.json`. While the version is `0.x`, `^0.2` takes only the `0.2.*` releases: a `0.3.0` may change behaviour (see the [changelog](CHANGELOG.md)), so move to it with `composer require obrazmisli/agentio:^0.3 --dev`; from `0.1` to `0.2` — `composer require obrazmisli/agentio:^0.2 --dev`. To try the latest unreleased code, require `dev-main`.
+Commit the updated `.claude/skills/agentio-*` and `.agentio.json`. While the version is `0.x`, `^0.4` takes only the `0.4.*` releases: a `0.5.0` may change behaviour (see the [changelog](CHANGELOG.md)), so move to it with `composer require obrazmisli/agentio:^0.5 --dev`; from an older minor version — `composer require obrazmisli/agentio:^0.4 --dev`. To try the latest unreleased code, require `dev-main`.
 
-A project that has a copy of the package (a `path` repository such as `packages/agentio`) switches by replacing that repository with the `vcs` one above, running `composer require obrazmisli/agentio:^0.2 --dev` and deleting the copy. Commit the new `composer.json` and `composer.lock` to the development branch (`dev`) too, not only to the branch you work on: epic worktrees start from `dev` and run `composer install` from its lock file, which would still look for `packages/agentio`. `agentio:run` refuses to start while the development branch installs a package from a path it does not have, and `agentio:worktree` explains it for an epic branch made before the fix (merge `dev` into it).
+A project that has a copy of the package (a `path` repository such as `packages/agentio`) switches by replacing that repository with the `vcs` one above, running `composer require obrazmisli/agentio:^0.4 --dev` and deleting the copy. Commit the new `composer.json` and `composer.lock` to the development branch (`dev`) too, not only to the branch you work on: epic worktrees start from `dev` and run `composer install` from its lock file, which would still look for `packages/agentio`. `agentio:run` refuses to start while the development branch installs a package from a path it does not have, and `agentio:worktree` explains it for an epic branch made before the fix (merge `dev` into it).
 
 For local development of the package, use a path repository in the host project's `composer.json`:
 
@@ -105,7 +107,7 @@ Nothing else: no scripts, hooks, subagents, `.claude/settings.json` or `.mcp.jso
 
 | Package path | Used by |
 |---|---|
-| `scripts/agent-loop.sh`, `epic-worktree.sh`, `agent-commit.sh`, `run-tests.sh` | `agentio:run`, `agentio:worktree`, `agentio:commit`, `agentio:test` (the scripts refuse to run on their own) |
+| `scripts/agent-loop.sh`, `epic-worktree.sh`, `agent-commit.sh` | `agentio:run`, `agentio:worktree`, `agentio:commit` (the scripts refuse to run on their own) |
 | `resources/claude/settings.json`, `planning.json` | Permission rules of the agents' epic and planning sessions (passed with `--settings`, with the guard hook) |
 | `bin/agentio-guard` | The PreToolUse hook of the agents' Bash commands |
 | `resources/claude/mcp/*.json` | MCP servers of the headless sessions (`youtrack`, `laravel-boost` when the project uses Boost) |
@@ -251,10 +253,11 @@ Headless sessions run `claude -p … --permission-mode dontAsk` with everything 
 | Command | Purpose |
 |---|---|
 | `php artisan agentio:yt <action>` | YouTrack helper over the MCP server (see above) |
-| `php artisan agentio:test [args]`, `--full` | Run the tests (`AGENTIO_TEST_COMMAND`, default `php artisan test --compact`) or the full gate (`AGENTIO_FULL_TEST_COMMAND`, default `composer test`); the output goes to `storage/logs/tests/`, the result is printed, Playwright servers left by browser tests are killed |
 | `php artisan agentio:commit <TASK> "<message>" <files…>` | Commit only the given files with the `<TASK>: ` prefix, under a repository lock |
 | `php artisan agentio:worktree <EPIC> [--remove]` | Create and prepare the worktree of an epic (used by the loop) |
 | `php artisan agentio:log <ID>` | Print a session log in a readable form (`--lines`, `--follow`) |
+
+The agents run tests the project's own way: `composer test` (the full quality gate) at the end of every task, and `vendor/bin/pest <files> [--filter=…]` for single tests while they work. There is no other way to run them.
 
 `agentio:worktree` gives each worktree its own `.env` (made from `.env.example`: own `APP_KEY`, SQLite database, cache/queue/session prefixes, `APP_URL` port), runs `composer install`, migrations and — when there is a `bun.lock` or `package-lock.json` and a `build` script — the frontend build. Add project-specific steps (seeders, services) with `AGENTIO_WORKTREE_SETUP`: a shell command run last in the new worktree with the epic id as `$1`.
 
@@ -342,8 +345,6 @@ Everything can be set from `.env`; publish the config with `php artisan vendor:p
 | `AGENTIO_MAX_PARALLEL`, `AGENTIO_MAX_PARALLEL_TASKS` | `max_parallel`, `max_parallel_tasks` | 2, 2 | Epics at the same time; task subagents per epic |
 | `AGENTIO_INTERVAL` | `interval` | 300 | Seconds between passes of the loop |
 | `AGENTIO_CLAUDE_BIN`, `AGENTIO_CLAUDE_MODEL` | `claude_binary`, `claude_model` | `claude`, — | Claude Code executable; model of the headless sessions |
-| `AGENTIO_TEST_COMMAND` | `tests.command` | `php artisan test --compact` | Narrow test run of `agentio:test` (gets its arguments) |
-| `AGENTIO_FULL_TEST_COMMAND` | `tests.full_command` | `composer test` (when defined) | Full quality gate (`agentio:test --full`) |
 | `AGENTIO_LOGS_PATH` | `logs_path` | `storage/logs/agents` | Where the loop writes `loop.log`, `loop.pid`, `<ID>.pid`/`<ID>.log` (epic sessions), `plan-<ID>.pid`/`plan-<ID>.log` (planning sessions) and the `stop` flag; the dashboard, `agentio:status` and `agentio:log` read it |
 | `AGENTIO_TIMEZONE` | `timezone` | the machine's time zone | Time zone of the local timestamps the loop writes (`loop.log`, session headers); detected from `$TZ`, `/etc/timezone` or `/etc/localtime` when empty |
 | `AGENTIO_UI_ENABLED` | `ui.enabled` | `true` | Register the dashboard routes |

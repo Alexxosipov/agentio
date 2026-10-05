@@ -139,6 +139,19 @@ it('packages every skill the way Claude Code expects', function () {
         ->and(file_get_contents($project.'/.claude/skills/agentio-youtrack-workflow/SKILL.md'))->toContain('user-invocable: false');
 });
 
+it('tells the agents to finish with composer test and to run single tests through pest', function () {
+    $project = projectWithFakeClaude();
+    $this->artisan('agentio:install', offline($project))->assertSuccessful();
+
+    $files = installedFilesIn($project);
+
+    expect(implode('', $files))->not->toContain('agentio:test')
+        ->and($files['.claude/skills/agentio-youtrack-workflow/SKILL.md'])->toContain('## Тесты', 'composer test', 'vendor/bin/pest')
+        ->and($files['.claude/skills/agentio-develop-task/SKILL.md'])->toContain('Bash(composer test*) Bash(vendor/bin/pest *)', '`composer test`', '`vendor/bin/pest')
+        ->and($files['.claude/skills/agentio-review-story/SKILL.md'])->toContain('Bash(composer test*)', '`composer test`')
+        ->and($files['.claude/skills/agentio-work-epic/SKILL.md'])->toContain('Bash(composer test*)', '`composer test`');
+});
+
 it('is idempotent', function () {
     $project = projectWithFakeClaude();
     $this->artisan('agentio:install', offline($project))->assertSuccessful();

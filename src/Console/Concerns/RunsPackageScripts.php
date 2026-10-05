@@ -63,8 +63,6 @@ trait RunsPackageScripts
             'AGENTIO_PROJECT' => $settings->project(),
             'BASE_BRANCH' => $settings->baseBranch(),
             'WORKTREES_DIR' => $settings->worktreesPath(),
-            'AGENTIO_TEST_COMMAND' => Settings::string('agentio.tests.command'),
-            'AGENTIO_FULL_TEST_COMMAND' => Settings::string('agentio.tests.full_command'),
             'AGENTIO_WORKTREE_SETUP' => Settings::string('agentio.worktree_setup'),
             ...$extra,
         ], fn (?string $value): bool => $value !== null)];

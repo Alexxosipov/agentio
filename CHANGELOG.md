@@ -1,6 +1,18 @@
 # Release Notes
 
-## [Unreleased](https://github.com/Alexxosipov/agentio/compare/v0.3.0...main)
+## [Unreleased](https://github.com/Alexxosipov/agentio/compare/v0.4.0...main)
+
+## [v0.4.0](https://github.com/Alexxosipov/agentio/releases/tag/v0.4.0) - 2026-10-05
+
+Update with `composer require obrazmisli/agentio:^0.4 --dev`, then run `php artisan agentio:install` (refreshes the skills) and commit `.claude/skills/agentio-*` to the development branch together with `composer.json` and `composer.lock`. Make sure the project's `composer.json` has a `test` script — the full quality gate the agents now run at the end of every task; move whatever `AGENTIO_TEST_COMMAND` and `AGENTIO_FULL_TEST_COMMAND` did into it and delete them from `.env` (and the `tests` key from a published `config/agentio.php`). `storage/logs/tests/` is no longer written and can be deleted.
+
+### Removed
+
+- `php artisan agentio:test`, its `scripts/run-tests.sh` and `scripts/php/testing.ini`, and the `tests.command` / `tests.full_command` settings (`AGENTIO_TEST_COMMAND`, `AGENTIO_FULL_TEST_COMMAND`). Projects that relied on its `zend.assertions=1` set it in php.ini or in their `test` script.
+
+### Changed
+
+- The agents run tests only through the project's own tools: `composer test` (the full quality gate) at the end of every task, by the developer, the story reviewer and the epic orchestrator, and `vendor/bin/pest <files> [--filter=…]` for specific tests while they work. The rule is a new «Тесты» section of `agentio-youtrack-workflow`, the skills allow `composer test` and `vendor/bin/pest` instead of `agentio:test`, and the task, comment, ADR-001 and acceptance templates name `composer test`.
 
 ### Fixed
 

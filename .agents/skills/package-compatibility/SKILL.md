@@ -18,7 +18,7 @@ Keep package code, dependencies, and workflows compatible with the supported Lar
 2. Check changed code against Laravel 12/13 APIs and PHP 8.3+ syntax before adopting newer framework or language features.
 3. Review `.github/workflows/tests.yml` for dependency stability lanes, prefer-lowest coverage and prefer-stable coverage. The package runs on Linux and macOS only (bash, setsid, posix), so CI has no Windows lane.
 4. When changing dependencies, confirm constraints still allow the intended Laravel and Testbench versions.
-5. Validate with the smallest local command available, then rely on CI for full OS and dependency matrix coverage.
+5. Run specific tests with `vendor/bin/pest <files> [--filter ...]` while working, finish every task with `composer test`, then rely on CI for full OS and dependency matrix coverage.
 
 ## References
 

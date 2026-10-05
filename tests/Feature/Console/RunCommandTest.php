@@ -34,7 +34,6 @@ it('passes the settings, the session settings and the MCP configs of the package
         'AGENTIO_STOP_FILE' => $project.'/storage/logs/agents/stop',
         'AGENTIO_SESSION_SETTINGS' => (new SessionSettings(app(Settings::class)))->toJson(),
         'AGENTIO_MCP_CONFIG' => $package.'/resources/claude/mcp/youtrack.json',
-        'AGENTIO_TEST_COMMAND' => 'vendor/bin/pest --compact',
         // The variables Laravel loaded from the project .env stay out of the loop and of the agents' sessions.
         'APP_ENV' => false,
         'DB_DATABASE' => false,

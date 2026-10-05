@@ -19,7 +19,7 @@ Add package features in the right place and wire them through the service provid
 3. Create the capability files under Laravel-native package paths and use the configured package names, namespaces, publish tags, URLs, and badges consistently.
 4. Wire the capability through the service provider using the patterns in *Provider wiring* below.
 5. Use `package-testing` for coverage, update README or contributing documentation when user-facing behavior changes, use `package-compatibility` for matrix-sensitive changes, and use `package-release` for release tasks.
-6. Add only the files needed for the requested capability and validate with the narrowest relevant command before broader checks.
+6. Add only the files needed for the requested capability; run the specific tests with `vendor/bin/pest <files> [--filter ...]` while working and finish every task with `composer test`.
 
 ## Provider Wiring
 

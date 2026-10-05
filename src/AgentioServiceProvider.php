@@ -16,7 +16,6 @@ use Obrazmisli\Agentio\Console\Commands\LogCommand;
 use Obrazmisli\Agentio\Console\Commands\RunCommand;
 use Obrazmisli\Agentio\Console\Commands\SetupYouTrackCommand;
 use Obrazmisli\Agentio\Console\Commands\StatusCommand;
-use Obrazmisli\Agentio\Console\Commands\TestCommand;
 use Obrazmisli\Agentio\Console\Commands\WorktreeCommand;
 use Obrazmisli\Agentio\Console\Commands\YouTrackCommand;
 use Obrazmisli\Agentio\Dashboard\YouTrackSource;
@@ -92,7 +91,6 @@ final class AgentioServiceProvider extends ServiceProvider
             WorktreeCommand::class,
             AcceptCommand::class,
             CommitCommand::class,
-            TestCommand::class,
             LogCommand::class,
         ]);
 

@@ -2,7 +2,7 @@
 name: agentio-review-story
 description: Проверяет STORY из YouTrack (проект {{project}}) целиком — изменения в ветке эпика против критериев приёмки Given/When/Then, статей фич и ADR, полный прогон тестов и линтеров. Замечания оформляет новыми TASK в той же STORY, код не меняет. Используется субагентом, которого запускает оркестратор agentio-work-epic после того, как все TASK истории в Done; в промпте — STORY, BRANCH, WORKTREE и BASE.
 argument-hint: STORY=<ID> BRANCH=<ветка эпика> WORKTREE=<путь> BASE=<ветка разработки>
-allowed-tools: Skill Bash(php artisan agentio:yt *) Bash(php artisan agentio:test *) Bash(git log *) Bash(git show *) Bash(git diff *) mcp__youtrack__*
+allowed-tools: Skill Bash(php artisan agentio:yt *) Bash(composer test*) Bash(vendor/bin/pest *) Bash(git log *) Bash(git show *) Bash(git diff *) mcp__youtrack__*
 ---
 
 # Ревью одной STORY
@@ -24,7 +24,7 @@ allowed-tools: Skill Bash(php artisan agentio:yt *) Bash(php artisan agentio:tes
    - Структура кода (ADR-001): каждый новый или перенесённый класс — в неймспейсе домена `App\<Домен>\<Вид>\<Класс>`, а не в плоских `App\Actions`, `App\Models`, `App\Http\Controllers`, `App\Services`, `App\Jobs` и т. п. (исключения — миграции, фабрики, сиды, `config`, `routes`, `lang`, каркас `App\Providers`); путь каждого нового теста зеркалит неймспейс тестируемого класса (`App\Users\Actions\X` → `tests/Unit/Users/Actions/XTest.php`). Нарушение — замечание.
    - Безопасность: авторизация каждого маршрута, валидация ввода и файлов, mass assignment, N+1.
    - Рамки: нет ли изменений, не относящихся к истории.
-   - Полный прогон: `php artisan agentio:test --full` (полный гейт проекта: тесты, линтеры, анализ, покрытие — что настроено). Никогда не запускай тесты через `| tail`.
+   - Полный прогон в конце ревью: `composer test` (полный гейт проекта: тесты, линтеры, анализ, покрытие — что настроено в скрипте `test` в `composer.json`). Конкретные тесты, если нужно перепроверить отдельный критерий, — только `vendor/bin/pest <файлы> [--filter=…]`. Других способов запуска тестов нет; никогда не передавай их вывод в `| tail`/`| head`.
 4. **Вердикт.**
    - **Есть замечания:** на каждое — новая TASK в той же STORY: `create_issue(project="{{project}}", parentIssue=<STORY>, summary="[TASK] Review: …", description=…, customFields={"Type": "Task", "Stage": "Ready"})`, описание по шаблону (что не так, где — файл и строка, критерий приёмки). Если две задачи-замечания трогают одни файлы — `depends on` между ними. Затем `[AGENT:DECISION]` в STORY со списком замечаний и вердиктом `CHANGES REQUESTED (раунд N)`.
    - **Замечаний нет:** `[AGENT:DONE]` в STORY: по каждому критерию — чем подтверждён; результат полного прогона; вердикт `APPROVED`.
@@ -38,6 +38,6 @@ allowed-tools: Skill Bash(php artisan agentio:yt *) Bash(php artisan agentio:tes
 ## Чек-лист
 
 - [ ] Каждый критерий приёмки сопоставлен с кодом и тестом.
-- [ ] Полный прогон выполнен через `php artisan agentio:test --full`, результат приведён.
+- [ ] Полный прогон выполнен через `composer test`, результат приведён.
 - [ ] Каждое замечание — отдельная Ready TASK в той же STORY с файлом и строкой.
 - [ ] Вердикт записан комментарием в STORY.

@@ -3,7 +3,7 @@ name: agentio-work-epic
 description: Оркестратор эпика проекта {{project}} — захватывает EPIC, идёт по готовым TASK согласно зависимостям, отдаёт каждую задачу субагенту со скиллом agentio-develop-task (независимые — параллельно), после каждой STORY запускает субагента со скиллом agentio-review-story, в конце оформляет результат по политике слияния и переводит эпик в Review. Повторный запуск продолжает с места остановки по данным YouTrack. Запускается циклом агентов в worktree эпика.
 argument-hint: <ID эпика {{project}}-N>
 disable-model-invocation: true
-allowed-tools: Skill Agent Bash(php artisan agentio:yt *) Bash(php artisan agentio:test *) Bash(git *) mcp__youtrack__*
+allowed-tools: Skill Agent Bash(php artisan agentio:yt *) Bash(composer test*) Bash(vendor/bin/pest *) Bash(git *) mcp__youtrack__*
 ---
 
 # /agentio-work-epic $ARGUMENTS
@@ -73,7 +73,7 @@ git rev-parse --show-toplevel # путь worktree
      - `pull-request` / `auto-merge`: `git fetch origin {{base_branch}}`, затем `git merge --no-edit origin/{{base_branch}}`.
 
      При конфликте выполни `git diff --name-only --diff-filter=U` (список файлов), затем `git merge --abort`. Сам конфликты не разрешай: перечисли файлы в `[AGENT:DONE]` эпика в разделе «что осталось» — их разрешит человек при приёмке.
-  1. `php artisan agentio:test --full` — полный прогон на ветке. Если красный — создай TASK-исправление в соответствующей STORY (Ready) и вернись в цикл (не более 2 раз, потом `[AGENT:BLOCKED]`).
+  1. `composer test` — полный прогон на ветке (единственный способ полного прогона; вывод не передавай в `| tail`/`| head`). Если красный — создай TASK-исправление в соответствующей STORY (Ready) и вернись в цикл (не более 2 раз, потом `[AGENT:BLOCKED]`).
   2. Действуй по политике слияния `MERGE_POLICY` (в этом проекте — `{{merge_policy}}`):
      - `local-branch` — ничего не пушить. Ветка остаётся в worktree.
      - `pull-request` — `git push -u origin <ветка>` и `gh pr create --base <BASE_BRANCH> --head <ветка> --title "<EPIC>: <название>" --body <сводка>`.

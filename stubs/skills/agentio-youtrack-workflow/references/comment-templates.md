@@ -84,9 +84,9 @@ Stage для возврата: идея — `Backlog`, EPIC/STORY/TASK — `Read
 - Action `UpdateUserAvatar`, джоб `ProcessUserAvatar` (очередь `media`), маршрут `user-avatar.update`.
 **Коммиты:** `abc1234`, `def5678` (ветка `{{project}}-10`).
 **Как проверить:**
-- `php artisan agentio:test --filter=Avatar`
+- `vendor/bin/pest --filter=Avatar`
 - Вручную: /settings/profile → загрузить PNG → превью появляется после обработки очереди.
-**Тесты/линтеры:** `php artisan agentio:test` — passed (N tests), pint/phpstan — passed.
+**Тесты/линтеры:** `composer test` — passed (N tests, pint/phpstan в составе гейта).
 **Что осталось / смежная работа:** {{project}}-57 (создана: ограничение размера файла в конфиге).
 ```
 

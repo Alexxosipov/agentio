@@ -118,14 +118,13 @@ EPIC берётся, когда он в `Ready`, его зависимости-�
 | `.env` | `YOUTRACK_URL`, `YOUTRACK_TOKEN`, `AGENTIO_WORKTREES_PATH` (не коммитится) |
 | `config/agentio.php` | Только если вы опубликовали конфиг (`php artisan vendor:publish --tag=agentio-config`); без него всё задаётся в `.env` |
 | `storage/logs/agents/` | Логи и служебные файлы цикла: `loop.log`, `loop.pid`, `loop.lock`, `stop`, `<EPIC>.log`, `<EPIC>.pid`, `<EPIC>.restarts`, `<EPIC>.setup.log`, `plan-<IDEA>.log`, `plan-<IDEA>.pid`, `plan-<IDEA>.restarts` |
-| `storage/logs/tests/` | Вывод прогонов `php artisan agentio:test` |
 | `<worktrees>/<EPIC>` | Рабочие копии эпиков (вне проекта) |
 
 **В пакете** (`vendor/obrazmisli/agentio`, в проект не копируется):
 
 | Путь | Назначение |
 |---|---|
-| `vendor/obrazmisli/agentio/scripts` | `agent-loop.sh` (цикл), `epic-worktree.sh` (worktree эпика), `agent-commit.sh` (коммит перечисленных файлов под блокировкой), `run-tests.sh` (тесты с выводом в файл). Запускаются только через команды `php artisan agentio:*`: без окружения, которое задаёт команда, скрипты отказываются работать |
+| `vendor/obrazmisli/agentio/scripts` | `agent-loop.sh` (цикл), `epic-worktree.sh` (worktree эпика), `agent-commit.sh` (коммит перечисленных файлов под блокировкой). Запускаются только через команды `php artisan agentio:*`: без окружения, которое задаёт команда, скрипты отказываются работать |
 | `resources/claude/settings.json`, `planning.json` | Настройки headless-сессий эпиков и планирования: белый и чёрный списки |
 | `bin/agentio-guard` | Хук PreToolUse для Bash в headless-сессиях |
 | `resources/claude/mcp/youtrack.json`, `laravel-boost.json` | MCP-серверы headless-сессий (Laravel Boost — если он есть в проекте) |
@@ -142,7 +141,6 @@ EPIC берётся, когда он в `Ready`, его зависимости-�
 | `php artisan agentio:yt <действие>` | Вычисления процесса через MCP: готовность, дерево эпика, проверка графа, захват, дерево базы знаний (`php artisan agentio:yt help`) |
 | `php artisan agentio:worktree <EPIC> [--remove]` | Создать и подготовить или удалить worktree эпика |
 | `php artisan agentio:accept <EPIC>` | Принять эпик в `Review`: слить его ветку в `{{base_branch}}`, удалить worktree, перевести истории и эпик в `Done` (как кнопка панели; 6.5) |
-| `php artisan agentio:test [аргументы]`, `--full` | Тесты с выводом в файл и уборкой процессов браузерных тестов |
 | `php artisan agentio:commit <TASK> "<сообщение>" <файлы…>` | Коммит только перечисленных файлов под блокировкой (для параллельных субагентов) |
 | `php artisan agentio:log <ID\|plan-ID\|путь> [--lines=N] [--follow]` | Лог сессии агента в человекочитаемом виде |
 | `/agentio` | Веб-страница наблюдения за процессом |
@@ -176,11 +174,12 @@ EPIC берётся, когда он в `Ready`, его зависимости-�
 | `setsid` (util-linux; на macOS — `brew install util-linux`), желательно `flock` | `command -v setsid flock` |
 | bun или npm — если у проекта есть фронтенд-сборка | `bun -v` / `npm -v` |
 | Claude Code, вход выполнен | `claude --version`, `claude -p "ok"` |
+| Скрипт `test` в `composer.json` проекта — полный гейт (тесты, линтеры, анализ, покрытие) | `composer test` |
 | Всё, что нужно самому проекту для тестов (БД, Redis, браузеры для браузерных тестов и т. п.) | — |
 
 `php artisan agentio:install` проверяет эти предусловия и печатает, чего не хватает. `php artisan agentio:run` не стартует без установленных скиллов, без `AGENTIO_WORKTREES_PATH`, без Claude Code и без `YOUTRACK_URL` / `YOUTRACK_TOKEN`; сам цикл при старте проверяет `php`, `git`, `composer`, `setsid` и `claude` (или то, что задано в `AGENTIO_CLAUDE_BIN`). Менеджер JS-пакетов `php artisan agentio:worktree` выбирает по lock-файлу (`bun.lock` → bun, `package-lock.json` → npm); без lock-файла или без скрипта `build` в `package.json` фронтенд-шаги пропускаются.
 
-`php artisan agentio:test` сам включает `zend.assertions=1`: многие системные php.ini выключают `assert()`, и строгий гейт покрытия падает на строках с `assert()`.
+Агенты запускают тесты только так: `composer test` в конце каждой задачи (полный гейт проекта) и `vendor/bin/pest <файлы> [--filter=…]` для конкретных тестов по ходу работы. Многие системные php.ini выключают `assert()` (`zend.assertions=-1`), и строгий гейт покрытия падает на строках с `assert()`: включите `zend.assertions = 1` в php.ini или в скрипте `test` (`php -d zend.assertions=1 vendor/bin/pest …`).
 
 ### 2.2. Токен и установка
 
@@ -450,7 +449,6 @@ claude "/agentio-work-epic {{project}}-2"
 | `AGENTIO_INTERVAL` (`interval`) | 300 | Пауза между проходами, сек |
 | `AGENTIO_CLAUDE_BIN` (`claude_binary`) | `claude` | Исполняемый файл Claude Code |
 | `AGENTIO_CLAUDE_MODEL` (`claude_model`) | — | Модель агентов (`opus`, `sonnet`, …) |
-| `AGENTIO_TEST_COMMAND`, `AGENTIO_FULL_TEST_COMMAND` (`tests.command`, `tests.full_command`) | `php artisan test --compact`; `composer test` (если есть такой скрипт) | Команды `php artisan agentio:test`: узкий прогон и полный гейт (`--full`) |
 | `AGENTIO_LOGS_PATH` (`logs_path`) | `storage/logs/agents` | Логи, pid-файлы и флаг остановки цикла |
 | `AGENTIO_TIMEZONE` (`timezone`) | часовой пояс машины | Часовой пояс времени в логах цикла |
 | `AGENTIO_YOUTRACK_TIMEOUT`, `AGENTIO_YOUTRACK_RETRIES` (`youtrack.timeout`, `youtrack.retries`) | 30; 2 | Таймаут запроса к YouTrack, сек; повторы при сбое |
@@ -545,7 +543,7 @@ php artisan agentio:run --kill     # прервать работающие се�
 
 - STORY и их вердикты (все `APPROVED`).
 - Список коммитов (`git log --oneline {{base_branch}}..HEAD`): каждый коммит начинается с ID задачи.
-- Результат полного прогона (`php artisan agentio:test --full`). Перед ним оркестратор вливает `{{base_branch}}` в ветку эпика, так что тесты проверяют код вместе с уже принятыми эпиками; если слияние дало конфликты, оркестратор его отменяет и перечисляет файлы в «что осталось» — их разрешаете вы при приёмке.
+- Результат полного прогона (`composer test`). Перед ним оркестратор вливает `{{base_branch}}` в ветку эпика, так что тесты проверяют код вместе с уже принятыми эпиками; если слияние дало конфликты, оркестратор его отменяет и перечисляет файлы в «что осталось» — их разрешаете вы при приёмке.
 - Ветка или PR и команды приёмки.
 - Созданная смежная работа: новые TASK в Backlog, которые требуют вашего решения.
 
@@ -567,11 +565,11 @@ php artisan serve --port=8102        # откройте APP_URL; очереди 
 
 ```bash
 cd <worktrees>/{{project}}-2
-php artisan agentio:test --full              # полный гейт проекта (AGENTIO_FULL_TEST_COMMAND, по умолчанию composer test)
-php artisan agentio:test --filter=Profile    # выборочно (AGENTIO_TEST_COMMAND, по умолчанию php artisan test --compact)
+composer test                          # полный гейт проекта — так агенты завершают каждую задачу
+vendor/bin/pest --filter=Profile       # конкретные тесты
 ```
 
-Вывод пишется в `storage/logs/tests/<время>-<pid>.log`, на экран — краткий итог и `exit=… log=…`. Не передавайте вывод тестов в `tail` через конвейер: см. 7.2.
+Не передавайте вывод тестов в `tail` через конвейер: см. 7.2.
 
 ### 6.5. Принять
 
@@ -658,8 +656,8 @@ git tag v<версия> && git push origin {{production_branch}} --tags
 | `agentio:setup-youtrack`: `value Develop is not used by the cycle but issues of the project are in it` | В значении Stage, которое цикл не использует, есть задачи. Переведите их в статусы цикла (поиск `Stage: Develop`, массовое изменение) и запустите команду снова — значение будет удалено. |
 | В логе агента нет инструментов `mcp__youtrack__*` | Неверный токен или URL в `.env`. Проверьте: `php artisan agentio:yt ideas`. Сессии цикла берут MCP из конфига пакета с этими значениями (2.4). |
 | В интерактивном `claude` нет сервера `youtrack` или `/mcp` показывает его как failed | Проверьте `claude mcp get youtrack`. Нет сервера или устарел токен — запустите `php artisan agentio:install` (он добавит сервер заново). В каталоге worktree сервер из области `local` не виден (2.4). |
-| Тесты «висят» после прохождения | Сиротский процесс `playwright run-server` от браузерных тестов держит stdout, и `<тесты> \| tail` ждёт вечно. Запускайте тесты **только** через `php artisan agentio:test`: он пишет вывод в файл и убивает такие процессы своего каталога. Вручную: `pkill -f '^node .*playwright run-server'`. |
-| Строгий гейт покрытия падает на строках с `assert()` | Системный php.ini с `zend.assertions=-1`. Используйте `php artisan agentio:test --full` (включает assertions сам) или выставьте `zend.assertions = 1`. |
+| Тесты «висят» после прохождения | Сиротский процесс `playwright run-server` от браузерных тестов держит stdout, и `<тесты> \| tail` ждёт вечно. Не передавайте вывод тестов в конвейер (`composer test`, `vendor/bin/pest` — без `\| tail`/`\| head`). Оставшиеся процессы: `pkill -f '^node .*playwright run-server'`. |
+| Строгий гейт покрытия падает на строках с `assert()` | Системный php.ini с `zend.assertions=-1`. Выставьте `zend.assertions = 1` в php.ini или в скрипте `test` в `composer.json` (`php -d zend.assertions=1 vendor/bin/pest …`). |
 | В логе агента `⚠️` с отказом в разрешении на команду с `$(...)`, обратными кавычками или `$VAR` | Headless-агенты работают в `--permission-mode dontAsk`: команды с подстановками не совпадают с белым списком и отклоняются без вопроса. Поэтому `claim` сам берёт ветку и worktree из git, а скиллы требуют писать значения буквально. Если агенту нужна новая безопасная команда, добавьте правило в `.claude/settings.json` проекта → `permissions.allow` и закоммитьте в `{{base_branch}}`: цикл объединяет эти правила с настройками пакета. |
 | Отказ `agentio guard: …` | Хук `agentio-guard` отклонил команду агента. Так задумано (раздел 8): агент должен выбрать безопасный путь или написать `[AGENT:BLOCKED]`. |
 | `claim` вернул `LOST: {{project}}-… is claimed by …` (код 3) | Задачу держит другой владелец, и агент её не трогает. Это нормально при гонке двух агентов или машин. Если владелец «мёртв» (старый путь, другая машина), снимите захват: `php artisan agentio:yt release {{project}}-2 --state=Ready --comment="[AGENT:RELEASE] перезапуск на другой машине"`. |
@@ -739,7 +737,7 @@ tail -f storage/logs/agents/loop.log
 php artisan agentio:yt release {{project}}-42 --state=Ready --comment="[AGENT:RELEASE] ..."   # снять захват
 
 # Приёмка
-cd <worktrees>/{{project}}-2 && php artisan agentio:test --full && php artisan serve --port=8102
+cd <worktrees>/{{project}}-2 && composer test && php artisan serve --port=8102
 php artisan agentio:accept {{project}}-2          # слить в {{base_branch}}, убрать worktree, STORY и EPIC → Done
 php artisan agentio:worktree {{project}}-2 --remove
 

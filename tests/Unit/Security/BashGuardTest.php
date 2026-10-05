@@ -45,7 +45,8 @@ it('allows the ordinary commands of the agents', function (string $command) {
     'php artisan agentio:yt claim XY-1 --as=XY-1',
     'php artisan agentio:yt claim XY-1 --as=XY-1 --plan="1. Добавить ключ в .env.example и .env
 - rm -rf /tmp/cache не нужен"',
-    'php artisan agentio:test --filter=Profile',
+    'composer test',
+    'vendor/bin/pest tests/Feature/ProfileTest.php --filter=Profile',
     'php artisan agentio:commit XY-1 "Add it" app/Models/Note.php',
     'php artisan agentio:run --dry-run',
     'php artisan agentio:run --dry-run --epic=XY-2',

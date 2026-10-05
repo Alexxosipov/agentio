@@ -410,7 +410,7 @@ final readonly class EpicAcceptance
 
             ## Критерии приёмки
             - [ ] Замечание устранено, результат подтверждён тестом.
-            - [ ] `php artisan agentio:test` проходит.
+            - [ ] `composer test` проходит.
 
             ## Затрагиваемые области кода (оценка)
             Определи по замечанию и коду STORY {$storyId}.

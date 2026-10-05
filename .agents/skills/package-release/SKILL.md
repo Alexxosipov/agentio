@@ -15,7 +15,7 @@ Prepare a safe package release checklist and implementation without tagging, pus
 ## Workflow
 
 1. Review `CHANGELOG.md`, generated release notes config, GitHub release workflows, open diff, and pending package changes.
-2. Validate the release state with `composer test` before recommending a release.
+2. Validate the release state with `composer test` before recommending a release (the only full test run; specific tests run through `vendor/bin/pest`).
 3. Confirm whether version metadata needs to change: this package relies on Git tags (`vMAJOR.MINOR.PATCH` on `main`), not a version in `composer.json`; host projects install it from the GitHub repository as a `vcs` repository.
 4. Review tag naming, release branch, and GitHub release workflow behavior before any release command: pushing a `v*` tag runs `.github/workflows/release.yml`, which needs a `## [vX.Y.Z]` section in `CHANGELOG.md` and publishes it as the release notes. The steps are in the Releasing section of `.github/CONTRIBUTING.md`.
 5. Do not tag, push, or publish without explicit user approval.

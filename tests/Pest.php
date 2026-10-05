@@ -236,7 +236,6 @@ function projectForLoop(array $ideas = []): string
         'agentio.worktrees_path' => $project.'/worktrees',
         'agentio.claude_binary' => $project.'/bin/claude',
         'agentio.logs_path' => $project.'/storage/logs/agents',
-        'agentio.tests.command' => 'vendor/bin/pest --compact',
     ]);
     app()->forgetInstance(LoopState::class);
 

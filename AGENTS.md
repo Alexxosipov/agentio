@@ -12,7 +12,8 @@ This repository is a Laravel package. Keep the package focused, idiomatic, and e
 
 ## Quick Commands
 
-- Full validation: `composer test`
+- Full validation: `composer test` — run it at the end of every task to confirm everything is right; it is the only full test run.
+- Specific tests: `vendor/bin/pest tests/Feature/SomeTest.php --filter=...` — the only way to run single tests.
 - Formatting check: `composer lint:check`
 - Static analysis: `composer analyse`
 - Pest tests: `composer test:unit`
