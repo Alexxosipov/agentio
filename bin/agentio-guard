@@ -15,7 +15,7 @@ foreach ([__DIR__.'/../vendor/autoload.php', __DIR__.'/../../../autoload.php'] a
 }
 
 if (! class_exists(Obrazmisli\Agentio\Security\GuardHook::class)) {
-    fwrite(STDERR, "agentio guard: the autoloader of obrazmisli/agentio was not found, the command is refused\n");
+    fwrite(STDERR, "agentio guard: the autoloader of alexxosipov/agentio was not found, the command is refused\n");
 
     exit(2);
 }

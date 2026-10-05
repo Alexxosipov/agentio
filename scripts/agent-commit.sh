@@ -2,7 +2,7 @@
 # Commits only the given files, under a repository-wide lock, so that several
 # subagents developing tasks in one worktree never pick up each other's changes.
 #
-# Part of obrazmisli/agentio; run it with:
+# Part of alexxosipov/agentio; run it with:
 #   php artisan agentio:commit <TASK-ID> "<message>" <file> [<file>...]
 # Deleted files are passed the same way; the message gets the "<TASK-ID>: " prefix.
 set -euo pipefail

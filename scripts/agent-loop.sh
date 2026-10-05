@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Autonomous development loop of obrazmisli/agentio: plans ideas and works on ready epics with Claude Code
+# Autonomous development loop of alexxosipov/agentio: plans ideas and works on ready epics with Claude Code
 # in headless mode. Part of the package; start it with `php artisan agentio:run`, which passes the settings:
 #
 #   php artisan agentio:run                 run forever (a pass every AGENT_LOOP_INTERVAL seconds, or as soon as

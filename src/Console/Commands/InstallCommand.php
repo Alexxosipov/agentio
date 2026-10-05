@@ -673,7 +673,7 @@ final class InstallCommand extends Command
             $steps[] = 'Open the dashboard: '.url(Settings::string('agentio.ui.path') ?? 'agentio');
         }
 
-        $steps[] = 'The manual: the «Руководство по автоматизации» article in YouTrack (vendor/obrazmisli/agentio/resources/docs/AUTONOMOUS_WORKFLOW.md).';
+        $steps[] = 'The manual: the «Руководство по автоматизации» article in YouTrack (vendor/alexxosipov/agentio/resources/docs/AUTONOMOUS_WORKFLOW.md).';
 
         $this->newLine();
         $this->line('<options=bold>Next steps</>');

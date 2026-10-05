@@ -137,12 +137,12 @@ it('refuses to start when the development branch installs a package from a path 
     $project = projectForLoop();
     $git = fn (string ...$arguments) => (new Process(['git', '-c', 'user.name=t', '-c', 'user.email=t@example.com', ...$arguments], $project))->mustRun();
     $git('init', '-q', '-b', 'develop');
-    file_put_contents($project.'/composer.lock', json_encode(['packages' => [['name' => 'obrazmisli/agentio', 'dist' => ['type' => 'path', 'url' => 'packages/agentio']]]]));
+    file_put_contents($project.'/composer.lock', json_encode(['packages' => [['name' => 'alexxosipov/agentio', 'dist' => ['type' => 'path', 'url' => 'packages/agentio']]]]));
     $git('add', 'composer.lock');
     $git('commit', '-q', '-m', 'lock');
 
     $this->artisan('agentio:run', ['--dry-run' => true])
-        ->expectsOutputToContain('The composer.lock of the development branch develop installs obrazmisli/agentio from the path packages/agentio')
+        ->expectsOutputToContain('The composer.lock of the development branch develop installs alexxosipov/agentio from the path packages/agentio')
         ->assertFailed();
 
     expect($project.'/artisan-calls.log')->not->toBeFile();

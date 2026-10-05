@@ -2,9 +2,9 @@
 
 Человек заводит идею в YouTrack и принимает результат. Всё остальное делают агенты Claude Code: требования, системную аналитику, архитектуру, задачи, код, тесты и ревью.
 
-- Копия этого руководства в базе знаний YouTrack — статья **{{kb.guide}} «Руководство по автоматизации»** (дочерняя к {{kb.process}}). Исходник — в пакете: `vendor/obrazmisli/agentio/resources/docs/AUTONOMOUS_WORKFLOW.md`.
+- Копия этого руководства в базе знаний YouTrack — статья **{{kb.guide}} «Руководство по автоматизации»** (дочерняя к {{kb.process}}). Исходник — в пакете: `vendor/alexxosipov/agentio/resources/docs/AUTONOMOUS_WORKFLOW.md`.
 - Правила процесса: иерархия, статусы, готовность, захват, комментарии. Для людей — статья **{{kb.process}} «Процесс разработки»**, для агентов — скилл `.claude/skills/agentio-youtrack-workflow/SKILL.md`. Если они расходятся, прав `php artisan agentio:yt`.
-- Пакет `obrazmisli/agentio` добавляет в проект только скиллы `.claude/skills/agentio-*`, манифест `.agentio.json` и ключи в `.env` (команда `php artisan agentio:install`). Скрипты цикла, настройки сессий агентов и это руководство остаются в пакете. Проект YouTrack настраивает `php artisan agentio:setup-youtrack`, цикл запускается `php artisan agentio:run`, сводка — `php artisan agentio:status`, наблюдение в браузере — страница `/agentio`.
+- Пакет `alexxosipov/agentio` добавляет в проект только скиллы `.claude/skills/agentio-*`, манифест `.agentio.json` и ключи в `.env` (команда `php artisan agentio:install`). Скрипты цикла, настройки сессий агентов и это руководство остаются в пакете. Проект YouTrack настраивает `php artisan agentio:setup-youtrack`, цикл запускается `php artisan agentio:run`, сводка — `php artisan agentio:status`, наблюдение в браузере — страница `/agentio`.
 
 **Содержание:**
 1. Обзор
@@ -120,11 +120,11 @@ EPIC берётся, когда он в `Ready`, его зависимости-�
 | `storage/logs/agents/` | Логи и служебные файлы цикла: `loop.log`, `loop.pid`, `loop.lock`, `stop`, `<EPIC>.log`, `<EPIC>.pid`, `<EPIC>.restarts`, `<EPIC>.setup.log`, `plan-<IDEA>.log`, `plan-<IDEA>.pid`, `plan-<IDEA>.restarts` |
 | `<worktrees>/<EPIC>` | Рабочие копии эпиков (вне проекта) |
 
-**В пакете** (`vendor/obrazmisli/agentio`, в проект не копируется):
+**В пакете** (`vendor/alexxosipov/agentio`, в проект не копируется):
 
 | Путь | Назначение |
 |---|---|
-| `vendor/obrazmisli/agentio/scripts` | `agent-loop.sh` (цикл), `epic-worktree.sh` (worktree эпика), `agent-commit.sh` (коммит перечисленных файлов под блокировкой). Запускаются только через команды `php artisan agentio:*`: без окружения, которое задаёт команда, скрипты отказываются работать |
+| `vendor/alexxosipov/agentio/scripts` | `agent-loop.sh` (цикл), `epic-worktree.sh` (worktree эпика), `agent-commit.sh` (коммит перечисленных файлов под блокировкой). Запускаются только через команды `php artisan agentio:*`: без окружения, которое задаёт команда, скрипты отказываются работать |
 | `resources/claude/settings.json`, `planning.json` | Настройки headless-сессий эпиков и планирования: белый и чёрный списки |
 | `bin/agentio-guard` | Хук PreToolUse для Bash в headless-сессиях |
 | `resources/claude/mcp/youtrack.json`, `laravel-boost.json` | MCP-серверы headless-сессий (Laravel Boost — если он есть в проекте) |
@@ -188,7 +188,7 @@ EPIC берётся, когда он в `Ready`, его зависимости-�
 3. Установите пакет и запустите установку:
 
 ```bash
-composer require obrazmisli/agentio --dev
+composer require alexxosipov/agentio --dev
 php artisan agentio:install
 ```
 
@@ -225,7 +225,7 @@ AGENTIO_WORKTREES_PATH=/home/<user>/projects/<проект>-worktrees
 
 ### 2.4. MCP-сервер YouTrack
 
-**Для агентов цикла** ничего настраивать не нужно. Цикл запускает их с `--strict-mcp-config --mcp-config vendor/obrazmisli/agentio/resources/claude/mcp/youtrack.json` (и `laravel-boost.json`, если проект использует Laravel Boost). В файле стоят подстановки, значения которых `agentio:run` берёт из `.env` и передаёт в окружение цикла:
+**Для агентов цикла** ничего настраивать не нужно. Цикл запускает их с `--strict-mcp-config --mcp-config vendor/alexxosipov/agentio/resources/claude/mcp/youtrack.json` (и `laravel-boost.json`, если проект использует Laravel Boost). В файле стоят подстановки, значения которых `agentio:run` берёт из `.env` и передаёт в окружение цикла:
 
 ```json
 "youtrack": {
@@ -651,7 +651,7 @@ git tag v<версия> && git push origin {{production_branch}} --tags
 | `YOUTRACK_URL is not set …`, `YOUTRACK_URL and YOUTRACK_TOKEN must be set …` | Нет значений в `.env`. Запустите `php artisan agentio:install` (2.2). |
 | `The agentio skills are not installed …` или `The worktrees directory is not configured (AGENTIO_WORKTREES_PATH) …` | Установка не завершена: запустите `php artisan agentio:install`. |
 | `ERROR: the agentio skills (.claude/skills/agentio-*) are not committed to {{base_branch}}` | Скиллы не закоммичены в базовую ветку, и worktree их не получит. Закоммитьте `.claude/skills/agentio-*` и `.agentio.json`. |
-| `agentio:run`: `The composer.lock of the development branch {{base_branch}} installs obrazmisli/agentio from the path packages/agentio …`; в `loop.log` — `worktree setup failed`, в `<EPIC>.setup.log` — `Source path "packages/agentio" is not found` или `composer.lock of the branch … installs … from a path the worktree does not have` | Пакет переведён с копии в `packages/agentio` на установку через Composer только в одной ветке (например, в `{{production_branch}}`), а в `{{base_branch}}` остались старые `composer.json` и `composer.lock`. Worktree эпика создаётся из `{{base_branch}}` и ставит зависимости по её lock-файлу. Закоммитьте новые `composer.json` и `composer.lock` в `{{base_branch}}` (например, `git checkout {{base_branch}} && git merge {{production_branch}}`). Ветку эпика, созданную до исправления, обновите: `git -C <worktree> merge {{base_branch}}`, затем снова `php artisan agentio:run`. |
+| `agentio:run`: `The composer.lock of the development branch {{base_branch}} installs alexxosipov/agentio from the path packages/agentio …`; в `loop.log` — `worktree setup failed`, в `<EPIC>.setup.log` — `Source path "packages/agentio" is not found` или `composer.lock of the branch … installs … from a path the worktree does not have` | Пакет переведён с копии в `packages/agentio` на установку через Composer только в одной ветке (например, в `{{production_branch}}`), а в `{{base_branch}}` остались старые `composer.json` и `composer.lock`. Worktree эпика создаётся из `{{base_branch}}` и ставит зависимости по её lock-файлу. Закоммитьте новые `composer.json` и `composer.lock` в `{{base_branch}}` (например, `git checkout {{base_branch}} && git merge {{production_branch}}`). Ветку эпика, созданную до исправления, обновите: `git -C <worktree> merge {{base_branch}}`, затем снова `php artisan agentio:run`. |
 | `agentio:setup-youtrack`: `error board …: the project has no agile board` или `no board of the project has columns by Stage and swimlanes by Type` | Создайте или поправьте доску проекта в YouTrack: настройки доски → Columns and rows — столбцы по Stage, дорожки по Type (2.6). Затем снова `php artisan agentio:setup-youtrack`. |
 | `agentio:setup-youtrack`: `value Develop is not used by the cycle but issues of the project are in it` | В значении Stage, которое цикл не использует, есть задачи. Переведите их в статусы цикла (поиск `Stage: Develop`, массовое изменение) и запустите команду снова — значение будет удалено. |
 | В логе агента нет инструментов `mcp__youtrack__*` | Неверный токен или URL в `.env`. Проверьте: `php artisan agentio:yt ideas`. Сессии цикла берут MCP из конфига пакета с этими значениями (2.4). |
@@ -701,7 +701,7 @@ git tag v<версия> && git push origin {{production_branch}} --tags
 
 ```bash
 # Установка и настройка
-composer require obrazmisli/agentio --dev
+composer require alexxosipov/agentio --dev
 php artisan agentio:install                        # URL, токен, MCP-сервер, проект, ветка, политика, каталог worktree, скиллы
 YOUTRACK_TOKEN=perm-... php artisan agentio:install --no-interaction --youtrack-url=https://<instance>.youtrack.cloud --project={{project}} --worktrees=../<проект>-worktrees --setup-youtrack
 php artisan agentio:setup-youtrack --dry-run       # план настройки YouTrack; без --dry-run — применить (безопасно повторять)

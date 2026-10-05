@@ -28,7 +28,7 @@ The project also needs a `test` script in its `composer.json` (the full quality 
 
 ## Quick start
 
-1. Install the package from GitHub as a dev dependency (see [Installation](#installation): add the repository to `composer.json`, then `composer require obrazmisli/agentio:^0.4 --dev`).
+1. Install the package from GitHub as a dev dependency (see [Installation](#installation): add the repository to `composer.json`, then `composer require alexxosipov/agentio:^0.5 --dev`).
 2. Install the cycle into the project (a git repository whose `.env` is git-ignored): `php artisan agentio:install`. It asks for the YouTrack URL and a permanent token (hidden input), checks them through the YouTrack MCP server, adds the `youtrack` MCP server to Claude Code if it has none, asks for the project short name (`ABC`; a missing project can be created), the production and the development branch (`main` and `dev`; the missing one is created locally), the merge policy and **the directory of the epic worktrees**, offers to configure the YouTrack project and installs the skills.
 3. Commit `.claude/skills/agentio-*` and `.agentio.json` to `dev`: epic worktrees are created from it. `.env` (with the token) stays local. Push `dev` and `main` if the project has a remote, and point the develop server at `dev` and production at `main`.
 4. File an idea in YouTrack (Type `Idea` or the `idea` tag, Stage `Backlog`), check what the loop would do with `php artisan agentio:run --dry-run`, then start it: `php artisan agentio:run`.
@@ -53,7 +53,7 @@ composer config repositories.agentio vcs https://github.com/Alexxosipov/agentio
 Then require it:
 
 ```bash
-composer require obrazmisli/agentio:^0.4 --dev
+composer require alexxosipov/agentio:^0.5 --dev
 ```
 
 Install it as a **dev dependency**: the cycle runs on a developer machine (Claude Code, git worktrees, the loop) and nothing of it is needed in production; it also keeps the dashboard, which shows YouTrack data and agent logs, out of production builds. Require it without `--dev` only if you want the dashboard on a shared or staging server. If you call `Agentio::auth()` from a service provider, guard it with `class_exists(Agentio::class)` so that `composer install --no-dev` keeps working.
@@ -63,14 +63,16 @@ Composer reads the tags through the GitHub API. Without a token it is limited to
 ### Updating
 
 ```bash
-composer update obrazmisli/agentio
+composer update alexxosipov/agentio
 php artisan agentio:install           # refreshes the installed skills; your edits are kept
 php artisan agentio:setup-youtrack    # refreshes the automation guide in the knowledge base
 ```
 
-Commit the updated `.claude/skills/agentio-*` and `.agentio.json`. While the version is `0.x`, `^0.4` takes only the `0.4.*` releases: a `0.5.0` may change behaviour (see the [changelog](CHANGELOG.md)), so move to it with `composer require obrazmisli/agentio:^0.5 --dev`; from an older minor version — `composer require obrazmisli/agentio:^0.4 --dev`. To try the latest unreleased code, require `dev-main`.
+Commit the updated `.claude/skills/agentio-*` and `.agentio.json`. While the version is `0.x`, `^0.5` takes only the `0.5.*` releases: a `0.6.0` may change behaviour (see the [changelog](CHANGELOG.md)), so move to it with `composer require alexxosipov/agentio:^0.6 --dev`; from an older minor version — `composer require alexxosipov/agentio:^0.5 --dev`. To try the latest unreleased code, require `dev-main`.
 
-A project that has a copy of the package (a `path` repository such as `packages/agentio`) switches by replacing that repository with the `vcs` one above, running `composer require obrazmisli/agentio:^0.4 --dev` and deleting the copy. Commit the new `composer.json` and `composer.lock` to the development branch (`dev`) too, not only to the branch you work on: epic worktrees start from `dev` and run `composer install` from its lock file, which would still look for `packages/agentio`. `agentio:run` refuses to start while the development branch installs a package from a path it does not have, and `agentio:worktree` explains it for an epic branch made before the fix (merge `dev` into it).
+Up to `v0.4.0` the package was called `obrazmisli/agentio`. Composer no longer finds it under that name, so a project that requires it switches with `composer remove obrazmisli/agentio --dev && composer require alexxosipov/agentio:^0.5 --dev` (the repository entry stays the same), then commits `composer.json` and `composer.lock` to the development branch.
+
+A project that has a copy of the package (a `path` repository such as `packages/agentio`) switches by replacing that repository with the `vcs` one above, running `composer require alexxosipov/agentio:^0.5 --dev` and deleting the copy. Commit the new `composer.json` and `composer.lock` to the development branch (`dev`) too, not only to the branch you work on: epic worktrees start from `dev` and run `composer install` from its lock file, which would still look for `packages/agentio`. `agentio:run` refuses to start while the development branch installs a package from a path it does not have, and `agentio:worktree` explains it for an epic branch made before the fix (merge `dev` into it).
 
 For local development of the package, use a path repository in the host project's `composer.json`:
 
@@ -81,7 +83,7 @@ For local development of the package, use a path repository in the host project'
 ```
 
 ```bash
-composer require obrazmisli/agentio:@dev --dev
+composer require alexxosipov/agentio:@dev --dev
 ```
 
 ## Branches

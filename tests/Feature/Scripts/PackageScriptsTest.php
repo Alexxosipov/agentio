@@ -209,13 +209,13 @@ it('prepares an epic worktree without a frontend toolchain through agentio:workt
 it('explains why it cannot prepare a worktree whose composer.lock installs a package from a missing path', function () {
     $project = projectForLoop();
     file_put_contents($project.'/composer.json', json_encode(['name' => 'acme/app', 'require' => new stdClass]));
-    file_put_contents($project.'/composer.lock', json_encode(['packages' => [['name' => 'obrazmisli/agentio', 'dist' => ['type' => 'path', 'url' => 'packages/agentio']]]]));
+    file_put_contents($project.'/composer.lock', json_encode(['packages' => [['name' => 'alexxosipov/agentio', 'dist' => ['type' => 'path', 'url' => 'packages/agentio']]]]));
     file_put_contents($project.'/.gitignore', "/.env\n/artisan-calls.log\n/worktrees\n/vendor\n/storage\n");
     initRepository($project);
     config(['agentio.base_branch' => 'main']);
 
     expect(Artisan::call('agentio:worktree', ['epic' => 'XY-12']))->toBe(1)
-        ->and(Artisan::output())->toContain('ERROR: composer.lock of the branch XY-12 installs obrazmisli/agentio (packages/agentio) from a path the worktree does not have', 'then merge main into the epic branch');
+        ->and(Artisan::output())->toContain('ERROR: composer.lock of the branch XY-12 installs alexxosipov/agentio (packages/agentio) from a path the worktree does not have', 'then merge main into the epic branch');
 });
 
 it('refuses to prepare a worktree without a configured worktrees directory', function () {

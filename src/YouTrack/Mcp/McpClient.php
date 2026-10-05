@@ -180,7 +180,7 @@ final class McpClient
         $this->request('initialize', [
             'protocolVersion' => self::PROTOCOL_VERSION,
             'capabilities' => (object) [],
-            'clientInfo' => ['name' => 'obrazmisli/agentio', 'version' => '1'],
+            'clientInfo' => ['name' => 'alexxosipov/agentio', 'version' => '1'],
         ]);
         $this->notify('notifications/initialized');
         $this->initialized = true;

@@ -1,10 +1,9 @@
 {
     "$schema": "https://getcomposer.org/schema.json",
-    "name": "obrazmisli/agentio",
+    "name": "alexxosipov/agentio",
     "description": "Autonomous agentic development cycle for Laravel: YouTrack as the source of truth, Claude Code as PM, analyst, architect, developer and reviewer.",
     "keywords": [
         "laravel",
-        "obrazmisli",
         "agentio",
         "youtrack",
         "claude-code",

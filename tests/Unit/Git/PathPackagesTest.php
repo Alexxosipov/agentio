@@ -21,19 +21,19 @@ function composerLock(array $packages, array $dev = []): string
 it('finds the packages installed from a path that is missing', function () {
     $lock = composerLock(
         ['laravel/framework' => ['type' => 'zip', 'url' => 'https://example.com/framework.zip'], 'acme/local' => ['type' => 'path', 'url' => 'packages/local']],
-        ['obrazmisli/agentio' => ['type' => 'path', 'url' => './packages/agentio/']],
+        ['alexxosipov/agentio' => ['type' => 'path', 'url' => './packages/agentio/']],
     );
 
-    expect(PathPackages::missing($lock, fn (string $path): bool => $path === 'packages/local'))->toBe(['obrazmisli/agentio' => './packages/agentio'])
+    expect(PathPackages::missing($lock, fn (string $path): bool => $path === 'packages/local'))->toBe(['alexxosipov/agentio' => './packages/agentio'])
         ->and(PathPackages::missing('not json', fn (): bool => false))->toBe([]);
 });
 
 it('checks the paths of a directory on disk', function () {
     $directory = temporaryDirectory();
     mkdir($directory.'/packages/local', 0777, true);
-    file_put_contents($directory.'/composer.lock', composerLock(['acme/local' => ['type' => 'path', 'url' => 'packages/local'], 'obrazmisli/agentio' => ['type' => 'path', 'url' => 'packages/agentio']]));
+    file_put_contents($directory.'/composer.lock', composerLock(['acme/local' => ['type' => 'path', 'url' => 'packages/local'], 'alexxosipov/agentio' => ['type' => 'path', 'url' => 'packages/agentio']]));
 
-    expect(PathPackages::missingIn($directory))->toBe(['obrazmisli/agentio' => 'packages/agentio'])
+    expect(PathPackages::missingIn($directory))->toBe(['alexxosipov/agentio' => 'packages/agentio'])
         ->and(PathPackages::missingIn($directory.'/packages'))->toBe([]);
 });
 
@@ -43,7 +43,7 @@ it('checks the paths of a branch in the branch itself', function () {
     $git('init', '-q', '-b', 'main');
     mkdir($directory.'/packages/agentio', 0777, true);
     file_put_contents($directory.'/packages/agentio/composer.json', '{}');
-    file_put_contents($directory.'/composer.lock', composerLock(['obrazmisli/agentio' => ['type' => 'path', 'url' => 'packages/agentio']]));
+    file_put_contents($directory.'/composer.lock', composerLock(['alexxosipov/agentio' => ['type' => 'path', 'url' => 'packages/agentio']]));
     $git('add', '-A');
     $git('commit', '-q', '-m', 'path repository');
     $git('branch', 'dev');
@@ -54,6 +54,6 @@ it('checks the paths of a branch in the branch itself', function () {
     mkdir($directory.'/packages/agentio', 0777, true);
 
     expect(PathPackages::missingOnBranch(new Git($directory), 'refs/heads/dev'))->toBe([])
-        ->and(PathPackages::missingOnBranch(new Git($directory), 'refs/heads/main'))->toBe(['obrazmisli/agentio' => 'packages/agentio'])
+        ->and(PathPackages::missingOnBranch(new Git($directory), 'refs/heads/main'))->toBe(['alexxosipov/agentio' => 'packages/agentio'])
         ->and(PathPackages::missingOnBranch(new Git($directory), 'refs/heads/nope'))->toBe([]);
 });

@@ -5,7 +5,7 @@
 # migrations and, when the project has a frontend build, JS dependencies and the build.
 # Prints the worktree path on the last line of stdout.
 #
-# Part of obrazmisli/agentio; run it with:
+# Part of alexxosipov/agentio; run it with:
 #   php artisan agentio:worktree <EPIC-ID>            create or reuse, then prepare
 #   php artisan agentio:worktree <EPIC-ID> --remove   remove the worktree (the branch is kept)
 #

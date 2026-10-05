@@ -1,6 +1,14 @@
 # Release Notes
 
-## [Unreleased](https://github.com/Alexxosipov/agentio/compare/v0.4.0...main)
+## [Unreleased](https://github.com/Alexxosipov/agentio/compare/v0.5.0...main)
+
+## [v0.5.0](https://github.com/Alexxosipov/agentio/releases/tag/v0.5.0) - 2026-10-05
+
+The package is renamed to `alexxosipov/agentio`. Composer no longer finds `obrazmisli/agentio` in the repository, so switch with `composer remove obrazmisli/agentio --dev && composer require alexxosipov/agentio:^0.5 --dev` (the `vcs` repository entry stays the same), then run `php artisan agentio:install` and `php artisan agentio:setup-youtrack` (refreshes the automation guide, which names the new `vendor/alexxosipov/agentio` path) and commit `composer.json` and `composer.lock` to the development branch. The PHP namespace stays `Obrazmisli\Agentio`, so a service provider that calls `Agentio::auth()` needs no change.
+
+### Changed
+
+- The Composer package is `alexxosipov/agentio` instead of `obrazmisli/agentio`: the README, the automation guide (the package now lives in `vendor/alexxosipov/agentio`), the install command and the MCP client name follow it.
 
 ## [v0.4.0](https://github.com/Alexxosipov/agentio/releases/tag/v0.4.0) - 2026-10-05
 
