@@ -124,10 +124,14 @@ final class InstallCommand extends Command
             return self::FAILURE;
         }
 
-        $projectExists = $connection === null ? null : $this->ensureProject($connection, $project);
+        $projectExists = null;
 
-        if ($projectExists === false) {
-            return self::FAILURE;
+        if ($connection !== null) {
+            $projectExists = $this->ensureProject($connection, $project);
+
+            if ($projectExists === false) {
+                return self::FAILURE;
+            }
         }
 
         $git = new Git($basePath);
