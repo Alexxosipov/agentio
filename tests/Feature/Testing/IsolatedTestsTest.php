@@ -51,9 +51,10 @@ it('gives the processes that run at once different slots and frees a slot when i
     $other = new Process([PHP_BINARY, $directory.'/hold-slot.php']);
     $other->setInput($input = new InputStream);
     $other->start();
-    $other->waitUntil(fn (string $type, string $output): bool => str_contains($output, "\n"));
+    // Only the output: PHP may write deprecations of older dependencies to stderr.
+    $other->waitUntil(fn (): bool => str_contains($other->getOutput(), "\n") || ! $other->isRunning());
 
-    expect(trim($other->getOutput()))->toBe('agentio_1')
+    expect(trim($other->getOutput()))->toBe('agentio_1', $other->getErrorOutput())
         ->and(IsolatedTests::token($directory))->toBe('agentio_2');
 
     $input->close();
