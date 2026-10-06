@@ -11,8 +11,10 @@ use SplFileInfo;
 
 /**
  * Installs the skills of the cycle (stubs/skills) into the host project's .claude/skills with the placeholders
- * rendered — the only files agentio adds to the project; the scripts, the session settings and the manual stay
- * in the package. writeEnvironment() records the connection and the machine settings in .env.
+ * rendered and, with $services, the local services of docker compose (stubs/services: compose.yaml with
+ * PostgreSQL and Redis, the script that creates the testing database) — the only files agentio adds to the
+ * project; the scripts, the session settings and the manual stay in the package. writeEnvironment() records the
+ * connection, the machine settings and the database in .env.
  *
  * Idempotent: a file with the expected content is left alone; a file that differs is updated only when it
  * still has the content of the previous install (see Manifest::$files) or with $force, otherwise skipped.
@@ -22,6 +24,12 @@ final class Installer
 {
     /** Stub directory => host directory. */
     public const array ROOTS = ['skills' => '.claude/skills'];
+
+    /** Stub file => host file: the local services (LocalServices). */
+    public const array SERVICES = [
+        'services/compose.yaml' => 'compose.yaml',
+        'services/postgres/initdb/01-create-testing-db.sh' => 'docker/postgres/initdb/01-create-testing-db.sh',
+    ];
 
     /** @var array<string, string> */
     private array $hashes = [];
@@ -36,10 +44,12 @@ final class Installer
         private readonly bool $force = false,
         private readonly bool $dryRun = false,
         private readonly array $previousHashes = [],
+        private readonly bool $services = false,
     ) {}
 
     /**
-     * Install the skills and remove the skill files of a previous install that the package no longer ships.
+     * Install the skills (and the services) and remove the skill files of a previous install that the package no
+     * longer ships. The hashes of the services installed before are kept when they are not installed this time.
      *
      * @return list<FileChange>
      */
@@ -53,6 +63,12 @@ final class Installer
         }
 
         foreach (array_diff_key($this->previousHashes, $stubFiles) as $relative => $hash) {
+            if (in_array($relative, self::SERVICES, true)) {
+                $this->hashes[$relative] = $hash;
+
+                continue;
+            }
+
             $change = $this->removeObsoleteFile($relative, $hash);
 
             if ($change !== null) {
@@ -64,12 +80,12 @@ final class Installer
     }
 
     /**
-     * Set the given keys in .env (replaced on their line or appended); keys without a value are skipped and
-     * values never appear in the notes.
+     * Set the given keys in .env (or another dotenv file: .env.example), replaced on their line or appended; keys
+     * without a value are skipped and values never appear in the notes.
      *
      * @param  array<string, string|null>  $values  E.g. YOUTRACK_URL, YOUTRACK_TOKEN, AGENTIO_WORKTREES_PATH
      */
-    public function writeEnvironment(array $values): ?FileChange
+    public function writeEnvironment(array $values, string $file = '.env'): ?FileChange
     {
         $values = array_filter($values, fn (?string $value): bool => $value !== null && $value !== '');
 
@@ -77,17 +93,17 @@ final class Installer
             return null;
         }
 
-        $env = new EnvFile($this->path('.env'));
+        $env = new EnvFile($this->path($file));
         $exists = $env->exists();
         $updated = $env->contentWith($values);
 
         if ($exists && $updated === $env->content()) {
-            return new FileChange('.env', FileStatus::Unchanged);
+            return new FileChange($file, FileStatus::Unchanged);
         }
 
-        $this->write($this->path('.env'), $updated);
+        $this->write($this->path($file), $updated);
 
-        return new FileChange('.env', $exists ? FileStatus::Updated : FileStatus::Created, 'set '.implode(', ', array_keys($values)));
+        return new FileChange($file, $exists ? FileStatus::Updated : FileStatus::Created, 'set '.implode(', ', array_keys($values)));
     }
 
     /**
@@ -117,7 +133,7 @@ final class Installer
     }
 
     /**
-     * Stub files to install: host path => stub path.
+     * Stub files to install: host path => stub path (the services only with $services).
      *
      * @return array<string, string>
      */
@@ -139,6 +155,12 @@ final class Installer
                 if ($file->isFile()) {
                     $files[$hostRoot.substr($file->getPathname(), strlen($directory))] = $file->getPathname();
                 }
+            }
+        }
+
+        if ($this->services) {
+            foreach (self::SERVICES as $stub => $host) {
+                $files[$host] = $this->stubsPath.'/'.$stub;
             }
         }
 
@@ -239,6 +261,11 @@ final class Installer
         }
 
         file_put_contents($target, $content);
+
+        // A script (the initdb script of PostgreSQL) is run, not sourced.
+        if (str_ends_with($target, '.sh')) {
+            chmod($target, 0755);
+        }
     }
 
     private function path(string $relative): string

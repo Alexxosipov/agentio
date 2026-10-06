@@ -13,20 +13,16 @@ use Obrazmisli\Agentio\Runtime\LoopState;
 use Obrazmisli\Agentio\Tests\TestCase;
 use Obrazmisli\Agentio\YouTrack\Issue;
 use Obrazmisli\Agentio\YouTrack\State;
-use Saloon\Config;
-use Saloon\Http\Faking\MockClient;
-
-// The Telegram Bot API and the transcription APIs are called through Saloon, which Http::fake() does not see:
-// a test that sends a Saloon request without a MockClient fails.
-Config::preventStrayRequests();
 
 uses(TestCase::class)
-    // A process started through the Process facade must be faked: no test runs composer, Claude Code or Horizon.
-    ->beforeEach(fn () => Process::preventStrayProcesses())
-    ->afterEach(function (): void {
-        Agentio::auth(null);
-        MockClient::destroyGlobal();
+    // Every outside system is faked: a request of the HTTP client (YouTrack, the Telegram Bot API, the
+    // transcription APIs) without Http::fake() and a process of the Process facade (composer, Claude Code,
+    // Horizon) without Process::fake() fail the test.
+    ->beforeEach(function (): void {
+        Http::preventStrayRequests();
+        Process::preventStrayProcesses();
     })
+    ->afterEach(fn () => Agentio::auth(null))
     ->in(__DIR__);
 
 /**
@@ -309,6 +305,24 @@ function telegramUpdate(int $updateId, array $message = [], string $chatId = '42
             ...$message,
         ],
     ];
+}
+
+/**
+ * Fake the Telegram Bot API (any token, any API URL): method => its answer, as Http::fake() takes it (an array is
+ * a JSON body with HTTP 200; Http::response() for another status; a closure from the request). "file" fakes the
+ * downloads of the files.
+ *
+ * @param  array<string, mixed>  $methods
+ */
+function fakeTelegram(array $methods): void
+{
+    $stubs = [];
+
+    foreach ($methods as $method => $answer) {
+        $stubs[$method === 'file' ? '*/file/bot*' : '*/bot*/'.$method] = $answer;
+    }
+
+    Http::fake($stubs);
 }
 
 /**

@@ -2,29 +2,34 @@
 
 declare(strict_types=1);
 
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Process;
 use Illuminate\Support\Facades\Queue;
 use Obrazmisli\Agentio\Install\EnvFile;
-use Obrazmisli\Agentio\Telegram\Api\Requests\GetMe;
-use Obrazmisli\Agentio\Telegram\Api\Requests\GetUpdates;
 use Obrazmisli\Agentio\Telegram\Conversation;
 use Obrazmisli\Agentio\Telegram\Jobs\SendTelegramMessage;
-use Saloon\Http\Faking\MockClient;
-use Saloon\Http\Faking\MockResponse;
 
 const BOT_TOKEN = '987654321:AAHdqTcvCH1vGWJxfSeofSAs0K5PALDsaw';
 
 beforeEach(function () {
     Process::fake(['*horizon:status*' => Process::result('Horizon is running.'), '*' => Process::result()]);
     Queue::fake();
-    MockClient::global([
-        GetMe::class => MockResponse::make(['ok' => true, 'result' => ['id' => 9, 'is_bot' => true, 'first_name' => 'Agentio PM', 'username' => 'xy_pm_bot']]),
-        GetUpdates::class => MockResponse::make(['ok' => true, 'result' => []]),
-    ]);
 });
 
-function botProject(string $env = "APP_ENV=local\n"): string
+/**
+ * A host project with .env and Horizon, and the Telegram Bot API of the token faked: the bot @xy_pm_bot without
+ * updates, unless $telegram answers otherwise.
+ *
+ * @param  array<string, mixed>  $telegram
+ */
+function botProject(string $env = "APP_ENV=local\n", array $telegram = []): string
 {
+    fakeTelegram([
+        'getMe' => ['ok' => true, 'result' => ['id' => 9, 'is_bot' => true, 'first_name' => 'Agentio PM', 'username' => 'xy_pm_bot']],
+        'getUpdates' => ['ok' => true, 'result' => []],
+        ...$telegram,
+    ]);
+
     $project = hostProject();
     file_put_contents($project.'/.env', $env);
     mkdir($project.'/vendor/laravel/horizon', 0777, true);
@@ -55,12 +60,9 @@ it('checks the token, writes it to .env and shows the pairing link', function ()
 });
 
 it('rejects what is not a bot token and a token Telegram refuses', function () {
-    botProject();
+    botProject(telegram: ['getMe' => Http::response(['ok' => false, 'error_code' => 401, 'description' => 'Unauthorized'], 401)]);
 
     $this->artisan('agentio:setup-telegram', ['token' => 'abc', '--no-interaction' => true])->expectsOutputToContain('not a Telegram bot token')->assertFailed();
-
-    MockClient::destroyGlobal();
-    MockClient::global([GetMe::class => MockResponse::make(['ok' => false, 'error_code' => 401, 'description' => 'Unauthorized'], 401)]);
 
     $this->artisan('agentio:setup-telegram', ['token' => BOT_TOKEN, '--no-interaction' => true])->expectsOutputToContain('Telegram rejected the token: Telegram: Unauthorized')->assertFailed();
 });
@@ -102,6 +104,7 @@ it('clears the chat of another bot', function () {
 
 it('installs Horizon when the project has none', function () {
     $project = hostProject();
+    fakeTelegram(['getMe' => ['ok' => true, 'result' => ['id' => 9, 'is_bot' => true, 'first_name' => 'Agentio PM', 'username' => 'xy_pm_bot']]]);
     file_put_contents($project.'/.env', "APP_ENV=local\n");
 
     $this->artisan('agentio:setup-telegram', ['token' => BOT_TOKEN, '--transcription' => 'none', '--no-pair' => true, '--no-interaction' => true])
@@ -112,13 +115,8 @@ it('installs Horizon when the project has none', function () {
 });
 
 it('pairs the chat interactively when the developer presses Start', function () {
-    $project = botProject();
-    MockClient::destroyGlobal();
-    MockClient::global([
-        GetMe::class => MockResponse::make(['ok' => true, 'result' => ['id' => 9, 'first_name' => 'PM', 'username' => 'xy_pm_bot']]),
-        GetUpdates::class => function () {
-            return MockResponse::make(['ok' => true, 'result' => [telegramUpdate(30, ['text' => '/start '.app(Conversation::class)->pairingCode()], '777')]]);
-        },
+    $project = botProject(telegram: [
+        'getUpdates' => fn () => Http::response(['ok' => true, 'result' => [telegramUpdate(30, ['text' => '/start '.app(Conversation::class)->pairingCode()], '777')]]),
     ]);
 
     $this->artisan('agentio:setup-telegram', ['token' => BOT_TOKEN, '--transcription' => 'none'])

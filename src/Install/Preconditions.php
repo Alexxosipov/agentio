@@ -36,6 +36,7 @@ final readonly class Preconditions
             new Check('PHP extension posix', extension_loaded('posix'), false, 'used to check whether agent sessions are alive'),
             new Check('setsid', $this->has('setsid'), true, 'agent sessions are started with setsid (util-linux; on macOS: brew install util-linux)'),
             new Check('flock', $this->has('flock'), false, 'agentio:commit falls back to a mkdir lock without it'),
+            new Check('docker compose', $this->has('docker'), false, 'runs the local services of compose.yaml (PostgreSQL, Redis): install Docker with the compose plugin'),
             new Check('bun or npm', $this->has('bun') || $this->has('npm'), false, 'needed only when the project has a frontend build'),
             new Check('laravel-best-practices skill', is_file($this->basePath.'/.claude/skills/laravel-best-practices/SKILL.md'), false, 'the analyst and the architect design by it: composer require laravel/boost --dev, then php artisan boost:install with its skills, and commit .claude/skills'),
         ];

@@ -16,6 +16,7 @@ use Obrazmisli\Agentio\Runtime\MergePolicy;
 use Obrazmisli\Agentio\Runtime\SessionSettings;
 use Obrazmisli\Agentio\Settings;
 use Obrazmisli\Agentio\Telegram\BotSupervisor;
+use Obrazmisli\Agentio\Testing\IsolatedTests;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Process\Process;
 use ValueError;
@@ -159,6 +160,8 @@ final class RunCommand extends Command
             'AGENTIO_SESSION_SETTINGS' => $sessions->toJson(),
             'AGENTIO_PLANNING_SETTINGS' => $sessions->toJson(planning: true),
             'AGENTIO_MCP_CONFIG' => implode("\n", $sessions->mcpConfigs()),
+            // Every test process of the agents gets its own test database (Testing\IsolatedTests).
+            IsolatedTests::ENV => '1',
         ]);
     }
 

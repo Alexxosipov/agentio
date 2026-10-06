@@ -20,7 +20,7 @@ This repository is a Laravel package. Keep the package focused, idiomatic, and e
 - Workbench build: `composer build`
 - Workbench server: `composer serve` (dashboard at http://127.0.0.1:8000/agentio). The served app does not see shell variables: put `YOUTRACK_URL`, `YOUTRACK_TOKEN`, `AGENTIO_PROJECT` and `AGENTIO_LOGS_PATH` into `workbench/.env` (copy of `workbench/.env.example`, git-ignored); `composer clear` removes the copy testbench makes of it.
 - Never put a real YouTrack token into tests (use `Http::fake()`) or committed files.
-- The Telegram Bot API and the transcription APIs go through Saloon: fake them with `MockClient::global([...])` (a second `global()` in one test returns the first one — `MockClient::destroyGlobal()` first), never `Http::fake()`; the suite calls `Saloon\Config::preventStrayRequests()`. Processes started through the `Process` facade (Claude Code, composer, Horizon, whisper, ffmpeg) must be faked with `Process::fake()` — stray ones are refused; a `Process::fake([...])` with patterns needs a `'*'` entry, or the other commands are refused.
+- The Telegram Bot API and the transcription APIs go through the HTTP client of Laravel (the package depends on no SDK and no Saloon): fake them with `Http::fake()` — `fakeTelegram([...])` of `tests/Pest.php` for the Bot API; the suite calls `Http::preventStrayRequests()`. Processes started through the `Process` facade (Claude Code, composer, Horizon, whisper, ffmpeg) must be faked with `Process::fake()` — stray ones are refused; a `Process::fake([...])` with patterns needs a `'*'` entry, or the other commands are refused.
 
 ## Local Skills
 

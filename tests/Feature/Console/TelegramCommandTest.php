@@ -4,13 +4,10 @@ declare(strict_types=1);
 
 use Illuminate\Support\Facades\Process;
 use Illuminate\Support\Facades\Queue;
-use Obrazmisli\Agentio\Telegram\Api\Requests\GetUpdates;
 use Obrazmisli\Agentio\Telegram\Conversation;
 use Obrazmisli\Agentio\Telegram\Jobs\HandleTelegramUpdate;
 use Obrazmisli\Agentio\Telegram\Jobs\NotifyDeveloper;
 use Obrazmisli\Agentio\Telegram\Jobs\SendTelegramMessage;
-use Saloon\Http\Faking\MockClient;
-use Saloon\Http\Faking\MockResponse;
 
 it('queues a report of the loop for the paired bot', function () {
     projectWithBot();
@@ -49,7 +46,7 @@ it('listens for a given number of polls', function () {
     projectWithBot();
     Queue::fake();
     Http::fake(['yt.example.com/api/activities*' => Http::response([])]);
-    MockClient::global([GetUpdates::class => MockResponse::make(['ok' => true, 'result' => [telegramUpdate(3)]])]);
+    fakeTelegram(['getUpdates' => ['ok' => true, 'result' => [telegramUpdate(3)]]]);
 
     $this->artisan('agentio:telegram', ['action' => 'listen', '--passes' => 1, '--poll-timeout' => 0])
         ->expectsOutputToContain('listening for Telegram updates')

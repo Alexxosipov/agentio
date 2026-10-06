@@ -62,7 +62,7 @@ description: Роль архитектора Laravel-приложения про
 2. **Разведка кода.** Что уже есть: конвенция раскладки `app/` (домены или плоские каталоги, `.ai/rules`), скиллы `.claude/skills` (в том числе скиллы внешних платформ), модели, сервисы и Actions, маршруты (`php artisan route:list --except-vendor`), представления и страницы в `resources/`, джобы и очереди (`config/queue.php`, Horizon), схема БД (`mcp__laravel-boost__database-schema`: `summary`, затем `filter`, или миграции).
 3. **Проектирование** по [references/architecture-sections.md](references/architecture-sections.md), [references/code-structure.md](references/code-structure.md) и файлам правил `laravel-best-practices` — для каждой затрагиваемой фичи:
    - полные имена всех классов по правилу раскладки ADR-001, пути зеркальных тестов; новый домен (если ADR-001 выбрал домены) — его неймспейс в «Архитектуре модуля»;
-   - внешние системы и платформы: клиент (SDK или Saloon, external-integrations.md), скилл платформы (раздел «Внешние платформы: скилл проекта»);
+   - внешние системы и платформы: клиент по правилу «есть поддерживаемый SDK — SDK, нет — Saloon» (external-integrations.md, скилл `agentio-saloon`), его классы — в `App\Integrations\<Сервис>` с тестами в `tests/Feature/Integrations/<Сервис>`, скилл платформы (раздел «Внешние платформы: скилл проекта»);
    - модель данных и миграции (таблицы, колонки, типы, индексы, внешние ключи, каскады, уникальные ограничения как защита от дублей);
    - маршруты (имя, метод, URI, middleware, контроллер), Form Request, Action или сервис, Policy;
    - контракт интерфейса в терминах стека: Blade-представления и их данные, страницы SPA и их props с типами, API-ресурсы и формат ответов;

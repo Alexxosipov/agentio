@@ -77,7 +77,7 @@ final class AcmeConnector extends Connector
 
 - Фасад `Saloon\Laravel\Facades\Saloon`: `Saloon::fake([...])`, `Saloon::assertSent(...)`, `assertNotSent`, `assertSentCount`, `assertNothingSent` — то же, что `MockClient::global()`.
 - События `SendingSaloonRequest` / `SentSaloonRequest` (логирование, метрики), интеграция с Telescope, Pulse и Nightwatch.
-- Генераторы `php artisan saloon:connector|request|response|plugin|auth` пишут в `config('saloon.integrations_path')` (по умолчанию `app/Http/Integrations`) — используй, только если это раскладка проекта (ADR-001), иначе создавай классы руками.
+- Генераторы `php artisan saloon:connector|request|response|plugin|auth` пишут в `config('saloon.integrations_path')` (по умолчанию `app/Http/Integrations`): интеграции проекта лежат в `App\Integrations\<Сервис>` (SKILL.md), поэтому задай `'integrations_path' => app_path('Integrations')` в `config/saloon.php` или создавай классы руками.
 
 ## Кэш ответов (`saloonphp/cache-plugin`)
 

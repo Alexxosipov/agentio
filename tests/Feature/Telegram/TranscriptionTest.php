@@ -2,18 +2,17 @@
 
 declare(strict_types=1);
 
+use Illuminate\Http\Client\ConnectionException;
+use Illuminate\Http\Client\Request;
 use Illuminate\Process\PendingProcess;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Process;
-use Obrazmisli\Agentio\Telegram\Transcription\CreateTranscription;
 use Obrazmisli\Agentio\Telegram\Transcription\NullTranscriber;
 use Obrazmisli\Agentio\Telegram\Transcription\OpenAiTranscriber;
 use Obrazmisli\Agentio\Telegram\Transcription\Transcriber;
 use Obrazmisli\Agentio\Telegram\Transcription\TranscriptionException;
 use Obrazmisli\Agentio\Telegram\Transcription\TranscriptionManager;
 use Obrazmisli\Agentio\Telegram\Transcription\WhisperCliTranscriber;
-use Saloon\Data\MultipartValue;
-use Saloon\Http\Faking\MockClient;
-use Saloon\Http\Faking\MockResponse;
 
 it('resolves the transcriber the developer chose', function (?string $driver, string $class) {
     config(['agentio.telegram.transcription.driver' => $driver]);
@@ -52,25 +51,43 @@ it('explains that voice messages are not set up', function () {
 it('sends the voice message to an OpenAI-compatible API', function () {
     config(['agentio.telegram.transcription' => ['driver' => 'openai', 'url' => 'https://stt.test/v1/', 'key' => 'sk-test', 'model' => 'whisper-large-v3', 'language' => 'ru']]);
     app()->forgetInstance(TranscriptionManager::class);
-    $mock = MockClient::global([CreateTranscription::class => MockResponse::make(['text' => ' Принимаю рекомендации. '])]);
+    Http::fake(['stt.test/*' => Http::response(['text' => ' Принимаю рекомендации. '])]);
 
     expect(app(Transcriber::class)->transcribe('OggS', 'voice.oga'))->toBe('Принимаю рекомендации.');
 
-    $pending = $mock->getLastPendingRequest();
-    $parts = collect($pending?->body()->all())->mapWithKeys(fn (MultipartValue $value): array => [$value->name => [$value->value, $value->filename]]);
+    Http::assertSent(function (Request $request): bool {
+        $parts = collect($request->data())->mapWithKeys(fn (array $part): array => [$part['name'] => [$part['contents'], $part['filename'] ?? null]]);
 
-    expect($pending?->getUrl())->toBe('https://stt.test/v1/audio/transcriptions')
-        ->and($pending?->headers()->get('Authorization'))->toBe('Bearer sk-test')
-        ->and($parts->all())->toBe(['file' => ['OggS', 'voice.ogg'], 'model' => ['whisper-large-v3', null], 'response_format' => ['json', null], 'language' => ['ru', null]]);
+        return $request->url() === 'https://stt.test/v1/audio/transcriptions'
+            && $request->header('Authorization') === ['Bearer sk-test']
+            && $parts->sortKeys()->all() === ['file' => ['OggS', 'voice.ogg'], 'language' => ['ru', null], 'model' => ['whisper-large-v3', null], 'response_format' => ['json', null]];
+    });
+});
+
+it('sends no key and no language when none is set', function () {
+    config(['agentio.telegram.transcription' => ['driver' => 'openai', 'url' => 'https://stt.test/v1', 'key' => null, 'language' => null]]);
+    app()->forgetInstance(TranscriptionManager::class);
+    Http::fake(['stt.test/*' => Http::response(['text' => 'Текст'])]);
+
+    expect(app(Transcriber::class)->transcribe('OggS', 'voice.ogg'))->toBe('Текст');
+    Http::assertSent(fn (Request $request): bool => ! $request->hasHeader('Authorization') && $request->hasFile('model', 'whisper-1') && ! $request->hasFile('language'));
 });
 
 it('reports an error of the transcription API', function () {
     config(['agentio.telegram.transcription' => ['driver' => 'openai', 'url' => 'https://stt.test/v1', 'key' => null]]);
     app()->forgetInstance(TranscriptionManager::class);
-    MockClient::global([CreateTranscription::class => MockResponse::make(['error' => ['message' => 'Invalid API key']], 401)]);
+    Http::fake(['stt.test/*' => Http::response(['error' => ['message' => 'Invalid API key']], 401)]);
 
     app(Transcriber::class)->transcribe('OggS', 'voice.oga');
 })->throws(TranscriptionException::class, 'The transcription API answered HTTP 401: Invalid API key');
+
+it('reports an unreachable transcription API', function () {
+    config(['agentio.telegram.transcription' => ['driver' => 'openai', 'url' => 'https://stt.test/v1']]);
+    app()->forgetInstance(TranscriptionManager::class);
+    Http::fake(['stt.test/*' => fn () => throw new ConnectionException('cURL error 28: Operation timed out')]);
+
+    app(Transcriber::class)->transcribe('OggS', 'voice.oga');
+})->throws(TranscriptionException::class, 'The transcription API is unreachable: cURL error 28: Operation timed out');
 
 it('transcribes locally with ffmpeg and whisper-cli', function () {
     $model = temporaryDirectory().'/ggml-small.bin';

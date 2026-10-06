@@ -18,7 +18,7 @@
 
 declare(strict_types=1);
 
-namespace App\Shop\Integrations\Acme;
+namespace App\Integrations\Acme;
 
 use Saloon\Exceptions\Request\FatalRequestException;
 use Saloon\Exceptions\Request\RequestException;

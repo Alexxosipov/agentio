@@ -11,10 +11,7 @@ use Obrazmisli\Agentio\Install\KnowledgeBase;
 use Obrazmisli\Agentio\Install\Manifest;
 use Obrazmisli\Agentio\Install\Placeholders;
 use Obrazmisli\Agentio\Runtime\MergePolicy;
-use Obrazmisli\Agentio\Telegram\Api\Requests\GetMe;
 use Obrazmisli\Agentio\Tests\Fakes\FakeYouTrackMcp;
-use Saloon\Http\Faking\MockClient;
-use Saloon\Http\Faking\MockResponse;
 
 const STUB_SKILLS = [
     'agentio-develop-task', 'agentio-dispatch', 'agentio-laravel-architect', 'agentio-plan', 'agentio-platform-skill', 'agentio-project-manager',
@@ -94,7 +91,7 @@ function offline(string $project, array $options = []): array
 it('installs only the skills into .claude/skills, with the placeholders rendered', function () {
     $project = projectWithFakeClaude();
 
-    $this->artisan('agentio:install', offline($project, ['--base-branch' => 'develop', '--merge-policy' => 'pull-request']))
+    $this->artisan('agentio:install', offline($project, ['--base-branch' => 'develop', '--merge-policy' => 'pull-request', '--skip-services' => true]))
         ->expectsOutputToContain('YouTrack is skipped')
         ->assertSuccessful();
 
@@ -217,6 +214,86 @@ it('removes skill files of a previous install that the package no longer ships u
         ->not->toHaveKey('scripts/yt.php');
 });
 
+it('adds the docker compose services and points .env, .env.example and phpunit.xml at them', function () {
+    $project = projectWithFakeClaude();
+    $phpunit = <<<'XML'
+        <?xml version="1.0" encoding="UTF-8"?>
+        <phpunit bootstrap="vendor/autoload.php" colors="true">
+            <php>
+                <env name="APP_ENV" value="testing"/>
+                <env name="CACHE_STORE" value="array"/>
+                <env name="DB_CONNECTION" value="sqlite"/>
+                <env name="DB_DATABASE" value=":memory:"/>
+                <env name="QUEUE_CONNECTION" value="sync"/>
+            </php>
+        </phpunit>
+
+        XML;
+    file_put_contents($project.'/phpunit.xml', $phpunit);
+    file_put_contents($project.'/.env', "APP_NAME=Laravel\nDB_CONNECTION=sqlite\n# DB_HOST=127.0.0.1\n# DB_PORT=3306\n# DB_DATABASE=laravel\n# DB_USERNAME=root\n# DB_PASSWORD=\n\nREDIS_HOST=127.0.0.1\nREDIS_PASSWORD=null\nREDIS_PORT=6379\n");
+    file_put_contents($project.'/.env.example', "APP_NAME=Laravel\nDB_CONNECTION=sqlite\n");
+
+    $this->artisan('agentio:install', offline($project))
+        ->expectsOutputToContain('docker compose up -d')
+        ->assertSuccessful();
+
+    expect(file_get_contents($project.'/.env'))->toBe("APP_NAME=Laravel\nDB_CONNECTION=pgsql\nDB_HOST=127.0.0.1\nDB_PORT=5432\nDB_DATABASE=laravel\nDB_USERNAME=laravel\nDB_PASSWORD=password\n\nREDIS_HOST=127.0.0.1\nREDIS_PASSWORD=null\nREDIS_PORT=6379\n\n# agentio\nAGENTIO_WORKTREES_PATH={$project}-worktrees\n")
+        ->and(file_get_contents($project.'/.env.example'))->toBe("APP_NAME=Laravel\nDB_CONNECTION=pgsql\n\n# agentio\nDB_HOST=127.0.0.1\nDB_PORT=5432\nDB_DATABASE=laravel\nDB_USERNAME=laravel\nDB_PASSWORD=password\nREDIS_HOST=127.0.0.1\nREDIS_PORT=6379\n")
+        ->and(file_get_contents($project.'/phpunit.xml'))->toBe(str_replace(
+            ['<env name="DB_CONNECTION" value="sqlite"/>', '<env name="DB_DATABASE" value=":memory:"/>', "<env name=\"QUEUE_CONNECTION\" value=\"sync\"/>\n"],
+            ['<env name="DB_CONNECTION" value="pgsql"/>', '<env name="DB_DATABASE" value="testing"/>', "<env name=\"QUEUE_CONNECTION\" value=\"sync\"/>\n        <env name=\"DB_URL\" value=\"\"/>\n"],
+            $phpunit,
+        ))
+        ->and(file_get_contents($project.'/compose.yaml'))->toContain("image: 'postgres:18-alpine'", "image: 'redis:7-alpine'", "POSTGRES_DB: '\${DB_DATABASE}'", './docker/postgres/initdb:/docker-entrypoint-initdb.d')
+        ->and(file_get_contents($project.'/docker/postgres/initdb/01-create-testing-db.sh'))->toContain('CREATE DATABASE testing OWNER "$POSTGRES_USER";')
+        ->and(is_executable($project.'/docker/postgres/initdb/01-create-testing-db.sh'))->toBeTrue()
+        ->and(Manifest::load($project)->files)->toHaveKeys(['compose.yaml', 'docker/postgres/initdb/01-create-testing-db.sh']);
+
+    $before = installedFilesIn($project);
+
+    $this->artisan('agentio:install', offline($project))->doesntExpectOutputToContain('updated')->assertSuccessful();
+
+    expect(installedFilesIn($project))->toBe($before);
+});
+
+it('keeps the database of a project already on PostgreSQL and fills in what is missing', function () {
+    $project = projectWithFakeClaude();
+    file_put_contents($project.'/.env', "DB_CONNECTION=pgsql\nDB_HOST=127.0.0.1\nDB_DATABASE=shop\nDB_USERNAME=shop\nDB_PASSWORD=\n");
+
+    $this->artisan('agentio:install', offline($project))->assertSuccessful();
+
+    $env = new EnvFile($project.'/.env');
+
+    expect($env->get('DB_DATABASE'))->toBe('shop')
+        ->and($env->get('DB_USERNAME'))->toBe('shop')
+        ->and($env->get('DB_PASSWORD'))->toBeNull()
+        ->and($env->get('DB_PORT'))->toBe('5432')
+        ->and($env->get('REDIS_HOST'))->toBe('127.0.0.1');
+});
+
+it('leaves a project on another database alone and keeps a compose.yaml of its own', function () {
+    $project = projectWithFakeClaude();
+    file_put_contents($project.'/.env', "DB_CONNECTION=mysql\n");
+    file_put_contents($project.'/phpunit.xml', "<phpunit>\n</phpunit>\n");
+
+    $this->artisan('agentio:install', offline($project))
+        ->expectsOutputToContain('The project uses the mysql database: the docker compose services (PostgreSQL, Redis) are not added')
+        ->assertSuccessful();
+
+    expect(is_file($project.'/compose.yaml'))->toBeFalse()
+        ->and(file_get_contents($project.'/phpunit.xml'))->toBe("<phpunit>\n</phpunit>\n")
+        ->and((new EnvFile($project.'/.env'))->get('DB_HOST'))->toBeNull();
+
+    $project = projectWithFakeClaude();
+    file_put_contents($project.'/compose.yaml', "services: {}\n");
+
+    $this->artisan('agentio:install', offline($project))
+        ->expectsOutputToContain('compose.yaml: differs from the stub (edited locally?); --force overwrites it')
+        ->assertSuccessful();
+
+    expect(file_get_contents($project.'/compose.yaml'))->toBe("services: {}\n");
+});
+
 it('needs an explicit worktrees directory outside the project', function () {
     $project = projectWithFakeClaude();
 
@@ -264,7 +341,7 @@ it('checks the token through the MCP server, writes .env and adds the youtrack M
     (new FakeYouTrackMcp)->fake();
     file_put_contents($project.'/.env', "APP_NAME=Laravel\nAGENTIO_PROJECT=OLD\n");
 
-    $this->artisan('agentio:install', offline($project, ['--youtrack-url' => 'https://yt.example.com/', '--token' => 'secret-token']))
+    $this->artisan('agentio:install', offline($project, ['--youtrack-url' => 'https://yt.example.com/', '--token' => 'secret-token', '--skip-services' => true]))
         ->expectsOutputToContain('YouTrack https://yt.example.com (MCP): signed in as Agent Smith (agent).')
         ->expectsOutputToContain('Added the youtrack MCP server in Claude Code (https://yt.example.com/mcp, scope local')
         ->doesntExpectOutputToContain('secret-token')
@@ -348,7 +425,7 @@ it('configures the YouTrack project with --setup-youtrack and records the knowle
 
     expect($manifest->kb)->toHaveCount(count(KnowledgeBase::ARTICLES))
         ->and(file_get_contents($project.'/.claude/skills/agentio-youtrack-workflow/SKILL.md'))->toContain('| Обзор продукта | '.$manifest->kb['overview'].' |')
-        ->and($manifest->files)->toHaveCount(count((new Installer($project, dirname(__DIR__, 3).'/stubs', new Placeholders('XY', 'main', MergePolicy::LocalBranch)))->stubFiles()));
+        ->and($manifest->files)->toHaveCount(count((new Installer($project, dirname(__DIR__, 3).'/stubs', new Placeholders('XY', 'main', MergePolicy::LocalBranch), services: true))->stubFiles()));
 });
 
 it('installs the skills but fails when the YouTrack project has no board set up for the cycle', function () {
@@ -432,7 +509,7 @@ it('reports missing preconditions with hints', function () {
 it('sets up the Telegram bot with the token it is given', function () {
     $project = projectWithFakeClaude();
     Process::fake(['*horizon:status*' => Process::result('Horizon is running.'), '*' => Process::result()]);
-    MockClient::global([GetMe::class => MockResponse::make(['ok' => true, 'result' => ['id' => 9, 'first_name' => 'PM', 'username' => 'xy_pm_bot']])]);
+    fakeTelegram(['getMe' => ['ok' => true, 'result' => ['id' => 9, 'first_name' => 'PM', 'username' => 'xy_pm_bot']]]);
     $token = '987654321:AAHdqTcvCH1vGWJxfSeofSAs0K5PALDsaw';
 
     $this->artisan('agentio:install', offline($project, ['--telegram-token' => $token]))

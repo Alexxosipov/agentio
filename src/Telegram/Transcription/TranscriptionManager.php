@@ -33,7 +33,8 @@ final class TranscriptionManager extends Manager
     public function createOpenaiDriver(): Transcriber
     {
         return new OpenAiTranscriber(
-            connector: new TranscriptionConnector($this->option('url') ?? 'https://api.openai.com/v1', $this->option('key')),
+            url: $this->option('url') ?? 'https://api.openai.com/v1',
+            key: $this->option('key'),
             model: $this->option('model') ?? 'whisper-1',
             language: $this->option('language'),
         );

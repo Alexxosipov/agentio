@@ -4,19 +4,16 @@ declare(strict_types=1);
 
 use Illuminate\Contracts\Bus\Dispatcher;
 use Illuminate\Support\Facades\Queue;
-use Obrazmisli\Agentio\Telegram\Api\Requests\SendMessage;
 use Obrazmisli\Agentio\Telegram\Conversation;
 use Obrazmisli\Agentio\Telegram\Jobs\NotifyDeveloper;
 use Obrazmisli\Agentio\Telegram\Jobs\SendTelegramMessage;
 use Obrazmisli\Agentio\Telegram\Messenger;
 use Obrazmisli\Agentio\Telegram\Reports;
 use Obrazmisli\Agentio\Tests\Fakes\FakeYouTrackMcp;
-use Saloon\Http\Faking\MockClient;
-use Saloon\Http\Faking\MockResponse;
 
 it('sends the message and remembers what it is about', function () {
     projectWithBot();
-    MockClient::global([SendMessage::class => MockResponse::make(['ok' => true, 'result' => ['message_id' => 501]])]);
+    fakeTelegram(['sendMessage' => ['ok' => true, 'result' => ['message_id' => 501]]]);
 
     app()->call([new SendTelegramMessage('❓ **Вопросы по XY-1**', 'question', 'XY-1', 'Backlog'), 'handle']);
 
@@ -26,15 +23,15 @@ it('sends the message and remembers what it is about', function () {
 
 it('waits as long as Telegram asks on flood control and drops what Telegram rejects', function () {
     projectWithBot();
-    MockClient::global([SendMessage::class => MockResponse::make(['ok' => false, 'error_code' => 429, 'description' => 'Too Many Requests', 'parameters' => ['retry_after' => 12]], 429)]);
+    fakeTelegram(['sendMessage' => Http::sequence()
+        ->push(['ok' => false, 'error_code' => 429, 'description' => 'Too Many Requests', 'parameters' => ['retry_after' => 12]], 429)
+        ->push(['ok' => false, 'error_code' => 403, 'description' => 'Forbidden: bot was blocked by the user'], 403)]);
     $job = (new SendTelegramMessage('x'))->withFakeQueueInteractions();
 
     app()->call([$job, 'handle']);
 
     $job->assertReleased(13);
 
-    MockClient::destroyGlobal();
-    MockClient::global([SendMessage::class => MockResponse::make(['ok' => false, 'error_code' => 403, 'description' => 'Forbidden: bot was blocked by the user'], 403)]);
     $job = (new SendTelegramMessage('x'))->withFakeQueueInteractions();
 
     app()->call([$job, 'handle']);

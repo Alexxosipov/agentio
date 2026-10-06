@@ -31,6 +31,7 @@ use Obrazmisli\Agentio\Telegram\BotSettings;
 use Obrazmisli\Agentio\Telegram\Conversation;
 use Obrazmisli\Agentio\Telegram\Transcription\Transcriber;
 use Obrazmisli\Agentio\Telegram\Transcription\TranscriptionManager;
+use Obrazmisli\Agentio\Testing\IsolatedTests;
 use Obrazmisli\Agentio\YouTrack\Client;
 use Obrazmisli\Agentio\YouTrack\IssueRepository;
 use Obrazmisli\Agentio\YouTrack\Mcp\McpClient;
@@ -113,6 +114,9 @@ final class AgentioServiceProvider extends ServiceProvider
         if (! $this->app->runningInConsole()) {
             return;
         }
+
+        // The test runs of the agents, each on its own database (AGENTIO_ISOLATED_TESTS of the loop).
+        IsolatedTests::register($this->app);
 
         $this->commands([
             InstallCommand::class,

@@ -26,6 +26,17 @@ it('sets keys in place and appends the new ones', function () {
         ->and((new EnvFile($file.'.missing'))->contentWith(['A' => 'x']))->toBe("# agentio\nA=x\n");
 });
 
+it('sets a commented-out key on its line', function () {
+    $file = temporaryDirectory().'/.env';
+    file_put_contents($file, "DB_CONNECTION=sqlite\n# DB_HOST=127.0.0.1\n#DB_PORT=3306\n");
+    $env = new EnvFile($file);
+
+    expect($env->contentWith(['DB_HOST' => 'localhost', 'DB_PORT' => '5432', 'DB_DATABASE' => 'app']))
+        ->toBe("DB_CONNECTION=sqlite\nDB_HOST=localhost\nDB_PORT=5432\n\n# agentio\nDB_DATABASE=app\n")
+        ->and($env->has('DB_CONNECTION'))->toBeTrue()
+        ->and($env->has('DB_HOST'))->toBeFalse();
+});
+
 it('quotes only values that need it', function (string $value, string $written) {
     expect(EnvFile::quote($value))->toBe($written);
 })->with([

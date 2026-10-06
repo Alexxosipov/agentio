@@ -14,6 +14,7 @@ use Obrazmisli\Agentio\Install\FileChange;
 use Obrazmisli\Agentio\Install\FileStatus;
 use Obrazmisli\Agentio\Install\Installer;
 use Obrazmisli\Agentio\Install\KnowledgeBase;
+use Obrazmisli\Agentio\Install\LocalServices;
 use Obrazmisli\Agentio\Install\Manifest;
 use Obrazmisli\Agentio\Install\Placeholders;
 use Obrazmisli\Agentio\Install\Preconditions;
@@ -41,9 +42,10 @@ use function Laravel\Prompts\text;
  * server, adds the youtrack MCP server to Claude Code when it has none, asks for the YouTrack project, the
  * development and the production branch (creating the missing ones locally), the merge policy and the directory
  * of the epic worktrees, optionally configures the YouTrack project
- * (agentio:setup-youtrack), installs the skills into .claude/skills — the only files it adds to the project
- * besides .agentio.json; the scripts and the manual stay in the package — and offers the developer's Telegram
- * bot (agentio:setup-telegram).
+ * (agentio:setup-youtrack), installs the skills into .claude/skills and the local services of docker compose
+ * (PostgreSQL with the development and the testing database, Redis: compose.yaml, .env, .env.example and
+ * phpunit.xml point at them) — the only files it adds to the project besides .agentio.json; the scripts and the
+ * manual stay in the package — and offers the developer's Telegram bot (agentio:setup-telegram).
  */
 #[AsCommand(name: 'agentio:install')]
 final class InstallCommand extends Command
@@ -65,6 +67,7 @@ final class InstallCommand extends Command
         {--setup-youtrack : Also configure the YouTrack project (agentio:setup-youtrack; asked when interactive)}
         {--telegram-token= : Set up the developer\'s Telegram bot with this token (agentio:setup-telegram; asked when interactive; prefer the prompt: arguments stay in the shell history)}
         {--skip-telegram : Do not ask about the Telegram bot}
+        {--skip-services : Do not add the docker compose services (PostgreSQL, Redis) nor point .env and phpunit.xml at them}
         {--force : Overwrite installed skills that were edited locally}
         {--dry-run : Only show what would be done}';
 
@@ -160,8 +163,20 @@ final class InstallCommand extends Command
             }
         }
 
+        // The local services: PostgreSQL (development and testing database) and Redis in docker compose.
+        $services = new LocalServices($basePath);
+        $withServices = $this->withServices($services);
+
+        if ($withServices) {
+            $environment = [...$environment, ...$services->environment()];
+        }
+
         $installer = new Installer($basePath, dirname(__DIR__, 3).'/stubs', new Placeholders($project, $baseBranch, $policy, productionBranch: $productionBranch), (bool) $this->option('force'), $this->dryRun, $manifest->files);
         $envChange = $installer->writeEnvironment($environment);
+        $serviceChanges = $withServices ? [
+            is_file($basePath.'/.env.example') ? $installer->writeEnvironment($services->environment('.env.example'), '.env.example') : null,
+            $services->configurePhpUnit($this->dryRun),
+        ] : [];
         $this->useSettings($connection, $project, $baseBranch, $productionBranch, $policy, $worktrees);
         $this->renderBranches((new BranchSetup($git))->ensure($baseBranch, $productionBranch, $this->dryRun));
 
@@ -189,9 +204,9 @@ final class InstallCommand extends Command
 
         // 6. The skills.
         $kb = Manifest::load($basePath)->kb;
-        $installer = new Installer($basePath, dirname(__DIR__, 3).'/stubs', new Placeholders($project, $baseBranch, $policy, $kb, $productionBranch), (bool) $this->option('force'), $this->dryRun, Manifest::load($basePath)->files);
+        $installer = new Installer($basePath, dirname(__DIR__, 3).'/stubs', new Placeholders($project, $baseBranch, $policy, $kb, $productionBranch), (bool) $this->option('force'), $this->dryRun, Manifest::load($basePath)->files, $withServices);
         $changes = $installer->install();
-        $this->renderChanges(array_values(array_filter([...$changes, $envChange])));
+        $this->renderChanges(array_values(array_filter([...$changes, $envChange, ...$serviceChanges])));
 
         if (! $this->dryRun) {
             Manifest::load($basePath)->with($project, $baseBranch, $kb, $installer->hashes(), $policy->value, $productionBranch)->save($basePath);
@@ -200,7 +215,7 @@ final class InstallCommand extends Command
         // 7. The developer's Telegram bot (optional).
         $telegram = $this->setUpTelegram();
 
-        $this->renderNextSteps($checks, $baseBranch, $kb, $connection !== null, $setup);
+        $this->renderNextSteps($checks, $baseBranch, $kb, $connection !== null, $setup, $withServices);
 
         if ($telegram === false) {
             $this->components->warn('The Telegram bot is not set up (see above): run php artisan agentio:setup-telegram when it is fixed.');
@@ -530,6 +545,25 @@ final class InstallCommand extends Command
         )));
     }
 
+    /**
+     * Whether to install the local services: not with --skip-services, and only for a project on SQLite or
+     * PostgreSQL (another database is left alone, with a warning).
+     */
+    private function withServices(LocalServices $services): bool
+    {
+        if ($this->option('skip-services')) {
+            return false;
+        }
+
+        if (! $services->supported()) {
+            $this->components->warn("The project uses the {$services->connection()} database: the docker compose services (PostgreSQL, Redis) are not added and .env and phpunit.xml are kept (--skip-services hides this).");
+
+            return false;
+        }
+
+        return true;
+    }
+
     private function shouldSetUpYouTrack(string $project): bool
     {
         if ($this->option('setup-youtrack')) {
@@ -692,7 +726,7 @@ final class InstallCommand extends Command
      * @param  array<string, string>  $kb
      * @param  int|null  $setup  The exit code of agentio:setup-youtrack, null when it did not run
      */
-    private function renderNextSteps(array $checks, string $baseBranch, array $kb, bool $connected, ?int $setup): void
+    private function renderNextSteps(array $checks, string $baseBranch, array $kb, bool $connected, ?int $setup, bool $services): void
     {
         $steps = [];
 
@@ -708,7 +742,11 @@ final class InstallCommand extends Command
             $steps[] = 'Configure the YouTrack project: php artisan agentio:setup-youtrack --dry-run, then without --dry-run.';
         }
 
-        $steps[] = "Commit .claude/skills/agentio-* and .agentio.json to {$baseBranch}: the epic worktrees take the skills from it (.env stays local). Point the develop server at {$baseBranch} and production at the production branch.";
+        if ($services) {
+            $steps[] = 'Start the local services: docker compose up -d (PostgreSQL with the database of .env and the '.LocalServices::TEST_DATABASE.' database of the tests, Redis), then php artisan migrate.';
+        }
+
+        $steps[] = 'Commit .claude/skills/agentio-*'.($services ? ', compose.yaml, docker/, phpunit.xml, .env.example' : '')." and .agentio.json to {$baseBranch}: the epic worktrees take the skills from it (.env stays local). Point the develop server at {$baseBranch} and production at the production branch.";
 
         if ($setup === SetupYouTrackCommand::INCOMPLETE) {
             $steps[] = 'Fix the YouTrack board agentio:setup-youtrack reported: '.YouTrackSetup::BOARD_HINT.'.';

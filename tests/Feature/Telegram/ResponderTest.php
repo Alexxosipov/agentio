@@ -5,16 +5,12 @@ declare(strict_types=1);
 use Illuminate\Process\PendingProcess;
 use Illuminate\Support\Facades\Process;
 use Illuminate\Support\Facades\Queue;
-use Obrazmisli\Agentio\Telegram\Api\Requests\DownloadFile;
-use Obrazmisli\Agentio\Telegram\Api\Requests\GetFile;
 use Obrazmisli\Agentio\Telegram\Conversation;
 use Obrazmisli\Agentio\Telegram\IncomingMessage;
 use Obrazmisli\Agentio\Telegram\Jobs\SendTelegramMessage;
 use Obrazmisli\Agentio\Telegram\Responder;
 use Obrazmisli\Agentio\Telegram\Transcription\Transcriber;
 use Obrazmisli\Agentio\Tests\Fakes\FakeYouTrackMcp;
-use Saloon\Http\Faking\MockClient;
-use Saloon\Http\Faking\MockResponse;
 
 const BLOCKED_QUESTIONS = "[AGENT:BLOCKED]\n**Что остановлено:** планирование идеи XY-1.\n**Нужен ответ:** 2 вопроса (В1–В2) — комментарием в этой задаче, затем Stage → Backlog.\n\n**В1. Оплата частями?**\n- **Рекомендация: б**";
 
@@ -125,9 +121,9 @@ it('creates an idea the developer described', function () {
 
 it('transcribes a voice message before the assistant reads it', function () {
     $mcp = respondingProject(['reply' => 'Принято.', 'actions' => [['type' => 'answer', 'issue' => 'XY-1', 'comment' => 'Принимаю рекомендации', 'resume' => true]]]);
-    MockClient::global([
-        GetFile::class => MockResponse::make(['ok' => true, 'result' => ['file_path' => 'voice/1.oga']]),
-        DownloadFile::class => MockResponse::make('OggS'),
+    fakeTelegram([
+        'getFile' => ['ok' => true, 'result' => ['file_path' => 'voice/1.oga']],
+        'file' => Http::response('OggS'),
     ]);
     app()->instance(Transcriber::class, new class implements Transcriber
     {
@@ -146,7 +142,7 @@ it('transcribes a voice message before the assistant reads it', function () {
 
 it('asks for text when a voice message cannot be transcribed', function () {
     respondingProject(['reply' => 'x']);
-    MockClient::global([GetFile::class => MockResponse::make(['ok' => true, 'result' => ['file_path' => 'voice/1.oga']]), DownloadFile::class => MockResponse::make('OggS')]);
+    fakeTelegram(['getFile' => ['ok' => true, 'result' => ['file_path' => 'voice/1.oga']], 'file' => Http::response('OggS')]);
     config(['agentio.telegram.transcription.driver' => null]);
 
     app(Responder::class)->answer(waitingReply('', ['voiceFileId' => 'voice-1']));

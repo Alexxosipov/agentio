@@ -16,7 +16,7 @@
 |---|---|
 | Модель | `App\Users\Models\User` |
 | Action | `App\Users\Actions\UpdateUserAvatar` |
-| Сервис, адаптер внешней системы | `App\Users\Services\AvatarStorage`, `App\Billing\Integrations\Stripe\Client` |
+| Сервис | `App\Users\Services\AvatarStorage` |
 | Контроллер | `App\Users\Http\Controllers\AvatarController` |
 | Form Request | `App\Users\Http\Requests\UpdateUserAvatarRequest` |
 | API Resource | `App\Users\Http\Resources\UserResource` |
@@ -27,6 +27,8 @@
 | Уведомление, письмо | `App\Users\Notifications\…`, `App\Users\Mail\…` |
 | Консольная команда | `App\Users\Console\Commands\PruneUnverifiedUsers` |
 | Enum, DTO, исключение | `App\Users\Enums\…`, `App\Users\Data\…`, `App\Users\Exceptions\…` |
+
+Интеграции с внешними API — не часть домена: они всегда лежат в `App\Integrations\<Сервис>\…` (`App\Integrations\Stripe\StripeClient`, `App\Integrations\Cdek\Requests\CreateOrder`), тесты — `tests/Feature/Integrations/<Сервис>/…` (скилл `agentio-saloon`, «Где лежит код»). Это правило действует и в проекте с собственной раскладкой.
 
 Представления и страницы фронтенда тоже группируются по домену: `resources/views/users/…`, `resources/js/pages/users/…`. Регистр и разделитель берутся из конвенции проекта.
 

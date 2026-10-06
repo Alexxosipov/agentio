@@ -175,11 +175,14 @@ EPIC берётся, когда он в `Ready`, его зависимости-�
 | bun или npm — если у проекта есть фронтенд-сборка | `bun -v` / `npm -v` |
 | Claude Code, вход выполнен | `claude --version`, `claude -p "ok"` |
 | Скрипт `test` в `composer.json` проекта — полный гейт (тесты, линтеры, анализ, покрытие) | `composer test` |
-| Всё, что нужно самому проекту для тестов (БД, Redis, браузеры для браузерных тестов и т. п.) | — |
+| Docker с плагином compose — для локальных сервисов (PostgreSQL с базами разработки и `testing`, Redis), которые добавляет `agentio:install` | `docker compose version`, `docker compose ps` |
+| Всё остальное, что нужно самому проекту для тестов (браузеры для браузерных тестов и т. п.) | — |
 
 `php artisan agentio:install` проверяет эти предусловия и печатает, чего не хватает. `php artisan agentio:run` не стартует без установленных скиллов, без `AGENTIO_WORKTREES_PATH`, без Claude Code и без `YOUTRACK_URL` / `YOUTRACK_TOKEN`; сам цикл при старте проверяет `php`, `git`, `composer`, `setsid` и `claude` (или то, что задано в `AGENTIO_CLAUDE_BIN`). Менеджер JS-пакетов `php artisan agentio:worktree` выбирает по lock-файлу (`bun.lock` → bun, `package-lock.json` → npm); без lock-файла или без скрипта `build` в `package.json` фронтенд-шаги пропускаются.
 
-Агенты запускают тесты только так: `composer test` в конце каждой задачи (полный гейт проекта) и `vendor/bin/pest <файлы> [--filter=…]` для конкретных тестов по ходу работы. Многие системные php.ini выключают `assert()` (`zend.assertions=-1`), и строгий гейт покрытия падает на строках с `assert()`: включите `zend.assertions = 1` в php.ini или в скрипте `test` (`php -d zend.assertions=1 vendor/bin/pest …`).
+`php artisan agentio:install` добавляет в проект локальные сервисы: `compose.yaml` (PostgreSQL 18 и Redis 7), скрипт `docker/postgres/initdb/01-create-testing-db.sh` (создаёт базу тестов `testing` при создании тома), переключает `.env` и `.env.example` проекта с SQLite на PostgreSQL (`DB_*`, `REDIS_*`) и `phpunit.xml` — на базу `testing` (`DB_CONNECTION=pgsql`, `DB_DATABASE=testing`, пустой `DB_URL`). Проект на MySQL и других СУБД не трогается, `--skip-services` пропускает этот шаг. После установки: `docker compose up -d && php artisan migrate`.
+
+Агенты запускают тесты только так: `composer test` в конце каждой задачи (полный гейт проекта) и `vendor/bin/pest <файлы> [--filter=…]` для конкретных тестов по ходу работы. Тесты разных эпиков и параллельных задач не мешают друг другу: в сессиях цикла (`AGENTIO_ISOLATED_TESTS=1`) каждый процесс тестов получает свою базу `testing_test_agentio_<слот>` (параллельное тестирование Laravel со своим токеном), ваш `composer test` работает с `testing`. Многие системные php.ini выключают `assert()` (`zend.assertions=-1`), и строгий гейт покрытия падает на строках с `assert()`: включите `zend.assertions = 1` в php.ini или в скрипте `test` (`php -d zend.assertions=1 vendor/bin/pest …`).
 
 ### 2.2. Токен и установка
 
@@ -291,6 +294,8 @@ agentio рассчитан на Laravel-проекты с [Laravel Boost](https:
 Правила проекта для агентов удобно держать в `.ai/rules` (их пишет человек или скилл Boost `infer-conventions` — запустите его до первого `/agentio-plan` в существующем проекте). Агенты их читают, но не меняют: `CLAUDE.md`, `AGENTS.md`, `boost.json`, `.mcp.json`, `.ai/guidelines`, `.ai/rules` и скиллы Boost регенерирует Boost, правка им запрещена, как и `php artisan boost:*`, `tinker`, `record-rule` и `config:show`.
 
 **Зависимости.** Новые пакеты — ваше решение: агент предлагает их в `[AGENT:BLOCKED]`. Заранее разрешён только [Saloon](https://docs.saloon.dev) (`saloonphp/*`) — HTTP-клиент для интеграций с сервисами без готового SDK: архитектор записывает его в ADR, первая задача эпика ставит его `composer require saloonphp/saloon` (другие пакеты защита сессии не пропустит). Правила работы с ним — скилл `agentio-saloon`.
+
+**Интеграции с внешними API.** Есть готовый поддерживаемый SDK сервиса — агенты оборачивают SDK (его установка — ваше решение), SDK нет — пишут интеграцию на Saloon; не голый `Http::`, Guzzle или curl. Весь код интеграции лежит в `App\Integrations\<Сервис>` (тесты — `tests/Feature/Integrations/<Сервис>`), остальной код зовёт её адаптер и не видит HTTP.
 
 **Внешние платформы.** Если идея затрагивает платформу со своей спецификой (Telegram-бот, Telegram Mini App, VK Mini App, MAX, PWA и т. п.), а скилла под неё в `.claude/skills` нет, первой задачей эпика агент пишет скилл `.claude/skills/<платформа>-development` по официальной документации (скилл `agentio-platform-skill`); остальные задачи по платформе опираются на него. Сессиям разрешён `WebFetch` только к доменам официальной документации (core.telegram.org, docs.telegram-mini-apps.com, dev.vk.com, web.dev, developer.mozilla.org, docs.saloon.dev, laravel.com, github.com, raw.githubusercontent.com) и `WebSearch`. Скилл платформы закоммитится в ветку эпика и попадёт в `{{base_branch}}` при приёмке — проверьте его, как код.
 

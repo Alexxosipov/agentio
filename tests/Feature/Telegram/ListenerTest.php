@@ -6,15 +6,12 @@ use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Sleep;
-use Obrazmisli\Agentio\Telegram\Api\Requests\GetUpdates;
 use Obrazmisli\Agentio\Telegram\Conversation;
 use Obrazmisli\Agentio\Telegram\Jobs\HandleTelegramUpdate;
 use Obrazmisli\Agentio\Telegram\Jobs\SendTelegramMessage;
 use Obrazmisli\Agentio\Telegram\Listener;
 use Obrazmisli\Agentio\Telegram\QuestionWatcher;
 use Obrazmisli\Agentio\YouTrack\Comment;
-use Saloon\Http\Faking\MockClient;
-use Saloon\Http\Faking\MockResponse;
 
 /**
  * The comment activities of the YouTrack REST API, newest first.
@@ -46,7 +43,7 @@ it('queues every update and confirms it only after', function () {
     Queue::fake();
     Sleep::fake();
     fakeCommentActivities([]);
-    $mock = MockClient::global([GetUpdates::class => MockResponse::make(['ok' => true, 'result' => [telegramUpdate(10), telegramUpdate(11)]])]);
+    fakeTelegram(['getUpdates' => ['ok' => true, 'result' => [telegramUpdate(10), telegramUpdate(11)]]]);
     $log = [];
 
     app(Listener::class)->run(fn (): bool => false, function (string $line) use (&$log): void {
@@ -56,7 +53,7 @@ it('queues every update and confirms it only after', function () {
     Queue::assertPushed(HandleTelegramUpdate::class, 2);
     Queue::assertPushed(HandleTelegramUpdate::class, fn (HandleTelegramUpdate $job): bool => $job->update['update_id'] === 11);
     expect(app(Conversation::class)->offset())->toBe(12)->and($log)->toBe([]);
-    $mock->assertSent(fn ($request): bool => $request instanceof GetUpdates && $request->body()->get('offset') === null);
+    Http::assertSent(fn (Request $request): bool => str_ends_with($request->url(), '/getUpdates') && ! isset($request['offset']));
 });
 
 it('waits after a conflict with another listener', function () {
@@ -64,7 +61,7 @@ it('waits after a conflict with another listener', function () {
     Queue::fake();
     Sleep::fake();
     fakeCommentActivities([]);
-    MockClient::global([GetUpdates::class => MockResponse::make(['ok' => false, 'error_code' => 409, 'description' => 'Conflict: terminated by other getUpdates request'], 409)]);
+    fakeTelegram(['getUpdates' => Http::response(['ok' => false, 'error_code' => 409, 'description' => 'Conflict: terminated by other getUpdates request'], 409)]);
     $log = [];
 
     app(Listener::class)->run(fn (): bool => false, function (string $line) use (&$log): void {
@@ -113,7 +110,7 @@ it('queues the questions it finds as messages tied to their issue', function () 
     Queue::fake();
     app(Conversation::class)->setWatermark(1_791_000_000_000);
     fakeCommentActivities([['XY-1', "[AGENT:BLOCKED]\n**Нужен ответ:** комментарием, затем Stage → Backlog.", 1_791_000_001_000]]);
-    MockClient::global([GetUpdates::class => MockResponse::make(['ok' => true, 'result' => []])]);
+    fakeTelegram(['getUpdates' => ['ok' => true, 'result' => []]]);
 
     app(Listener::class)->run(fn (): bool => false, fn (string $line) => null, passes: 1, pollTimeout: 0);
 

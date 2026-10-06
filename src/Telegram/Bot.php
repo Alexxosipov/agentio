@@ -4,37 +4,38 @@ declare(strict_types=1);
 
 namespace Obrazmisli\Agentio\Telegram;
 
-use JsonException;
-use Obrazmisli\Agentio\Telegram\Api\Requests\DownloadFile;
-use Obrazmisli\Agentio\Telegram\Api\Requests\GetFile;
-use Obrazmisli\Agentio\Telegram\Api\Requests\GetMe;
-use Obrazmisli\Agentio\Telegram\Api\Requests\GetUpdates;
-use Obrazmisli\Agentio\Telegram\Api\Requests\SendChatAction;
-use Obrazmisli\Agentio\Telegram\Api\Requests\SendMessage;
-use Obrazmisli\Agentio\Telegram\Api\TelegramConnector;
-use Obrazmisli\Agentio\Telegram\Api\TelegramFileConnector;
-use Saloon\Exceptions\Request\FatalRequestException;
-use Saloon\Http\Connector;
-use Saloon\Http\Request;
-use Saloon\Http\Response;
+use Closure;
+use Illuminate\Http\Client\ConnectionException;
+use Illuminate\Http\Client\PendingRequest;
+use Illuminate\Http\Client\Response;
+use Illuminate\Support\Facades\Http;
 
 /**
- * The calls of the Telegram Bot API agentio makes, over the Saloon connectors: the answer's "result", or a
- * TelegramException with Telegram's error code and description.
+ * The calls of the Telegram Bot API (https://core.telegram.org/bots/api) agentio makes, over the HTTP client of
+ * Laravel: the answer's "result", or a TelegramException with Telegram's error code and description.
+ *
+ * Every method is <api>/bot<token>/<method>, a file is <api>/file/bot<token>/<file_path>. The token is part of
+ * the URL, so it never appears in an exception message of agentio.
  */
 final readonly class Bot
 {
     /** The largest file the Bot API lets a bot download. */
     public const int MAX_DOWNLOAD = 20 * 1024 * 1024;
 
+    private const int CONNECT_TIMEOUT = 10;
+
+    private const int TIMEOUT = 30;
+
+    private const int DOWNLOAD_TIMEOUT = 120;
+
     public function __construct(
-        private TelegramConnector $connector,
-        private TelegramFileConnector $files,
+        private string $token,
+        private string $apiUrl = 'https://api.telegram.org',
     ) {}
 
     public static function make(string $token, string $apiUrl = 'https://api.telegram.org'): self
     {
-        return new self(new TelegramConnector($token, $apiUrl), new TelegramFileConnector($token, $apiUrl));
+        return new self($token, $apiUrl);
     }
 
     /**
@@ -46,7 +47,7 @@ final readonly class Bot
      */
     public function me(): array
     {
-        $me = $this->result(new GetMe);
+        $me = $this->result(fn (PendingRequest $request): Response => $request->get('getMe'));
         $me = is_array($me) ? $me : [];
 
         return [
@@ -57,7 +58,8 @@ final readonly class Bot
     }
 
     /**
-     * The updates after the offset, waiting up to $timeout seconds for one (long polling).
+     * The updates after the offset, waiting up to $timeout seconds for one (long polling: an offset confirms
+     * every update before it, so Telegram never sends them again).
      *
      * @return list<array<array-key, mixed>>
      *
@@ -65,15 +67,19 @@ final readonly class Bot
      */
     public function updates(?int $offset, int $timeout = 25): array
     {
-        $updates = $this->result(new GetUpdates($offset, $timeout));
+        $updates = $this->call('getUpdates', array_filter([
+            'offset' => $offset,
+            'timeout' => $timeout,
+            'allowed_updates' => ['message'],
+        ], fn (mixed $value): bool => $value !== null), $timeout + 15);
 
         return array_values(array_filter(is_array($updates) ? $updates : [], is_array(...)));
     }
 
     /**
-     * Send a text (Markdown of the agents, see TelegramText), split into as many messages as it needs; the first
-     * one replies to $replyTo. A message Telegram cannot parse as HTML is sent as plain text. Returns the ids
-     * of the sent messages.
+     * Send a text (Markdown of the agents, see TelegramText), split into as many messages as it needs (at most
+     * 4096 characters each); the first one replies to $replyTo. A message Telegram cannot parse as HTML is sent
+     * as plain text. Returns the ids of the sent messages.
      *
      * @return list<int>
      *
@@ -85,13 +91,13 @@ final readonly class Bot
 
         foreach (TelegramText::chunks($text) as $chunk) {
             try {
-                $message = $this->result(new SendMessage($chatId, TelegramText::html($chunk), 'HTML', $replyTo));
+                $message = $this->call('sendMessage', self::message($chatId, TelegramText::html($chunk), 'HTML', $replyTo));
             } catch (TelegramException $exception) {
                 if ($exception->errorCode !== 400 || ! str_contains(strtolower($exception->getMessage()), 'parse')) {
                     throw $exception;
                 }
 
-                $message = $this->result(new SendMessage($chatId, TelegramText::plain($chunk), null, $replyTo));
+                $message = $this->call('sendMessage', self::message($chatId, TelegramText::plain($chunk), null, $replyTo));
             }
 
             if (is_array($message) && is_int($message['message_id'] ?? null)) {
@@ -105,13 +111,13 @@ final readonly class Bot
     }
 
     /**
-     * Show "typing…" in the chat.
+     * Show "typing…" in the chat (for about five seconds).
      *
      * @throws TelegramException
      */
     public function typing(string $chatId): void
     {
-        $this->result(new SendChatAction($chatId));
+        $this->call('sendChatAction', ['chat_id' => $chatId, 'action' => 'typing']);
     }
 
     /**
@@ -121,14 +127,17 @@ final readonly class Bot
      */
     public function download(string $fileId): string
     {
-        $file = $this->result(new GetFile($fileId));
+        $file = $this->call('getFile', ['file_id' => $fileId]);
         $path = is_array($file) && is_string($file['file_path'] ?? null) ? $file['file_path'] : null;
 
         if ($path === null) {
             throw new TelegramException('Telegram returned no path for the file (larger than '.(self::MAX_DOWNLOAD / 1024 / 1024).' MB?).');
         }
 
-        $response = $this->sendTo($this->files, new DownloadFile($path));
+        $response = $this->reach(fn (): Response => Http::baseUrl($this->baseUrl('file/bot'))
+            ->connectTimeout(self::CONNECT_TIMEOUT)
+            ->timeout(self::DOWNLOAD_TIMEOUT)
+            ->get(implode('/', array_map(rawurlencode(...), explode('/', ltrim($path, '/'))))));
 
         if ($response->failed()) {
             throw new TelegramException('Cannot download the file from Telegram (HTTP '.$response->status().').', $response->status());
@@ -138,15 +147,31 @@ final readonly class Bot
     }
 
     /**
+     * @param  array<string, mixed>  $payload
+     *
      * @throws TelegramException
      */
-    private function result(Request $request): mixed
+    private function call(string $method, array $payload, int $timeout = self::TIMEOUT): mixed
     {
-        $response = $this->sendTo($this->connector, $request);
+        return $this->result(fn (PendingRequest $request): Response => $request->timeout($timeout)->post($method, $payload));
+    }
 
-        try {
-            $data = $response->json();
-        } catch (JsonException) {
+    /**
+     * @param  Closure(PendingRequest): Response  $send
+     *
+     * @throws TelegramException
+     */
+    private function result(Closure $send): mixed
+    {
+        $response = $this->reach(fn (): Response => $send(Http::baseUrl($this->baseUrl('bot'))
+            ->acceptJson()
+            ->asJson()
+            ->connectTimeout(self::CONNECT_TIMEOUT)
+            ->timeout(self::TIMEOUT)));
+
+        $data = $response->json();
+
+        if (! is_array($data)) {
             throw new TelegramException('Telegram answered HTTP '.$response->status().' without JSON.', $response->status());
         }
 
@@ -164,16 +189,40 @@ final readonly class Bot
     }
 
     /**
+     * @param  Closure(): Response  $send
+     *
      * @throws TelegramException
      */
-    private function sendTo(Connector $connector, Request $request): Response
+    private function reach(Closure $send): Response
     {
         try {
-            return $connector->send($request);
-        } catch (FatalRequestException $exception) {
-            // The message of Guzzle names the URL, which holds the token.
+            return $send();
+        } catch (ConnectionException $exception) {
+            // The message of the HTTP client names the URL, which holds the token.
             throw new TelegramException('Cannot reach Telegram: '.self::withoutUrls($exception->getMessage()));
         }
+    }
+
+    /**
+     * The URL of the methods ("bot") or of the files ("file/bot") of this bot, with a trailing slash.
+     */
+    private function baseUrl(string $prefix): string
+    {
+        return rtrim($this->apiUrl, '/').'/'.$prefix.$this->token.'/';
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private static function message(string $chatId, string $text, ?string $parseMode, ?int $replyTo): array
+    {
+        return array_filter([
+            'chat_id' => $chatId,
+            'text' => $text,
+            'parse_mode' => $parseMode,
+            'link_preview_options' => ['is_disabled' => true],
+            'reply_parameters' => $replyTo === null ? null : ['message_id' => $replyTo, 'allow_sending_without_reply' => true],
+        ], fn (mixed $value): bool => $value !== null);
     }
 
     private static function withoutUrls(string $message): string

@@ -1,6 +1,24 @@
 # Release Notes
 
-## [Unreleased](https://github.com/Alexxosipov/agentio/compare/v0.6.0...main)
+## [Unreleased](https://github.com/Alexxosipov/agentio/compare/v0.7.0...main)
+
+## [v0.7.0](https://github.com/Alexxosipov/agentio/releases/tag/v0.7.0) - 2026-10-06
+
+Update with `composer require alexxosipov/agentio:^0.7 --dev`, then run `php artisan agentio:install` (refreshes the skills and adds the local services: a project on SQLite is switched to PostgreSQL in `.env`, `.env.example` and `phpunit.xml`; pass `--skip-services` to keep your database setup), start the services with `docker compose up -d`, run `php artisan migrate`, and commit `.claude/skills/agentio-*`, `.agentio.json`, `compose.yaml`, `docker/`, `phpunit.xml` and `.env.example` to the development branch together with `composer.json` and `composer.lock`. Restart `agentio:run` so that the agents' tests run on their own databases. ADR-001 of an existing knowledge base is not rewritten: the architect adds the «Интеграции» rule to it on the next epic.
+
+### Added
+
+- **Local services.** `agentio:install` adds `compose.yaml` (PostgreSQL 18 and Redis 7 with volumes and health checks, credentials from `.env`) and `docker/postgres/initdb/01-create-testing-db.sh` (creates the `testing` database of the tests), switches `.env` and `.env.example` of a project on SQLite to PostgreSQL (`DB_*`; `REDIS_HOST`/`REDIS_PORT` when missing; the commented-out keys of a new Laravel project are set in place) and points `phpunit.xml` (or `phpunit.xml.dist`) at the `testing` database (`DB_CONNECTION=pgsql`, `DB_DATABASE=testing`, `DB_URL=`). A project already on PostgreSQL keeps its values, a project on another database is left alone with a warning, an existing `compose.yaml` is kept unless `--force`; `--skip-services` skips the step. The preconditions check Docker.
+- **Isolated test runs of the agents.** The loop sets `AGENTIO_ISOLATED_TESTS=1` for its sessions, and the service provider of agentio then makes every test process a parallel-testing process of Laravel with a token of its own (`agentio_<slot>`, a slot of the machine locked while the process runs): parallel epics and the tasks of a wave each get their own test database (`testing_test_agentio_<slot>`, created and migrated by Laravel), cache and compiled views instead of recreating the tables under each other. Tests on an in-memory SQLite database are not affected.
+
+### Changed
+
+- The integration rule of the skills is spelled out: an external API is called through the service's maintained SDK when it has one (installing it is the human's decision) and through a client written on Saloon when it has none — never raw `Http::`, Guzzle or curl — and **every integration lives in `App\Integrations\<Service>`** (`app/Integrations/<Service>`, tests in `tests/Feature/Integrations/<Service>`) whatever the layout of the rest of the code. `agentio-saloon`, the architect's `external-integrations.md` and `code-structure.md`, the reviewer, the platform skill, the ADR-001 template, the Boost guideline and the manual say so.
+- The Telegram bot and the speech-to-text driver of the package call the Telegram Bot API and the OpenAI-compatible API with the HTTP client of Laravel. `EnvFile` sets a commented-out key on its line instead of appending it.
+
+### Removed
+
+- The dependency on `saloonphp/saloon` (the package depends on no SDK and no HTTP client library of its own) and the Saloon classes of the bot: `Telegram\Api\TelegramConnector`, `TelegramFileConnector`, the `Telegram\Api\Requests\*` requests, `Telegram\Transcription\TranscriptionConnector` and `CreateTranscription`. `Bot::make($token, $apiUrl)` and `OpenAiTranscriber` keep working; `new OpenAiTranscriber(...)` now takes the URL and the key instead of a connector. Tests of an application that faked the bot with Saloon's `MockClient` fake it with `Http::fake()`.
 
 ## [v0.6.0](https://github.com/Alexxosipov/agentio/releases/tag/v0.6.0) - 2026-10-06
 

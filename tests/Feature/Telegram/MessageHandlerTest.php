@@ -6,19 +6,16 @@ use Illuminate\Process\PendingProcess;
 use Illuminate\Support\Facades\Process;
 use Illuminate\Support\Facades\Queue;
 use Obrazmisli\Agentio\Install\EnvFile;
-use Obrazmisli\Agentio\Telegram\Api\Requests\SendChatAction;
 use Obrazmisli\Agentio\Telegram\Conversation;
 use Obrazmisli\Agentio\Telegram\IncomingMessage;
 use Obrazmisli\Agentio\Telegram\Jobs\HandleTelegramUpdate;
 use Obrazmisli\Agentio\Telegram\Jobs\SendTelegramMessage;
 use Obrazmisli\Agentio\Telegram\MessageHandler;
-use Saloon\Http\Faking\MockClient;
-use Saloon\Http\Faking\MockResponse;
 
 beforeEach(function () {
     Queue::fake();
     Process::fake();
-    MockClient::global([SendChatAction::class => MockResponse::make(['ok' => true, 'result' => true])]);
+    fakeTelegram(['sendChatAction' => ['ok' => true, 'result' => true]]);
 });
 
 function receive(array $message = [], string $chatId = '42'): void
