@@ -352,6 +352,11 @@
             if (loop.stopRequested && loop.status !== 'stopping') {
                 pills.push('<span class="pill warn" title="Стоп-флаг (php artisan agentio:run --stop): цикл не продолжит работу"><span class="dot"></span>стоп-флаг</span>');
             }
+            if (loop.usageLimit) {
+                const resumesAt = loop.usageLimit.resumesAt ? new Date(loop.usageLimit.resumesAt) : null;
+                const time = resumesAt ? resumesAt.toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : '';
+                pills.push(`<span class="pill warn" title="Claude Code упёрся в ${esc(loop.usageLimit.label)}: цикл не запускает сессии, задачи остаются в своих статусах и продолжатся после сброса"><span class="dot"></span>Пауза: лимит Claude Code${time ? ` до <b>${esc(time)}</b>` : ''}</span>`);
+            }
             pills.push(`<span class="pill" title="Живые сессии Claude Code"><span>Сессий: <b>${esc(st.sessions.alive)}</b></span></span>`);
             pills.push(`<span class="pill" title="MERGE_POLICY"><span>Слияние: <b>${esc(st.mergePolicy)}</b></span></span>`);
             const yt = st.youtrack;

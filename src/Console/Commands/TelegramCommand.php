@@ -29,9 +29,11 @@ final class TelegramCommand extends Command
      */
     protected $signature = 'agentio:telegram
         {action=status : listen, notify, assist, send or status}
-        {argument? : notify: the event (planned, review, merged, blocked); assist: the message key; send: the text}
-        {id? : notify: the issue id}
+        {argument? : notify: the event (planned, review, merged, blocked, limit, resumed); assist: the message key; send: the text}
+        {id? : notify: the issue id (optional for limit and resumed)}
         {--name= : notify blocked: the name of the session (its log)}
+        {--until= : notify limit: when the loop resumes (Unix time)}
+        {--window= : notify limit: the limit hit (five_hour, seven_day, ...)}
         {--passes= : listen: stop after this many polls}
         {--poll-timeout=25 : listen: seconds a poll waits for updates}';
 
@@ -89,12 +91,21 @@ final class TelegramCommand extends Command
         $event = (string) $this->argument('argument');
         $id = (string) $this->argument('id');
 
-        if (! $settings->isPaired() || ! in_array($event, Reports::EVENTS, true) || $id === '') {
+        if (! $settings->isPaired() || ! in_array($event, Reports::EVENTS, true) || ($id === '' && ! in_array($event, Reports::LOOP_EVENTS, true))) {
             return self::SUCCESS;
         }
 
+        $until = $this->stringOption('until');
+        $window = $this->stringOption('window');
+
         try {
-            $this->laravel->make(Dispatcher::class)->dispatch(new NotifyDeveloper($event, $id, $this->stringOption('name')));
+            $this->laravel->make(Dispatcher::class)->dispatch(new NotifyDeveloper(
+                $event,
+                $id,
+                $this->stringOption('name'),
+                $until !== null && ctype_digit($until) ? (int) $until : null,
+                $window === '-' ? null : $window,
+            ));
         } catch (Throwable $exception) {
             $this->components->warn('The Telegram report was not queued: '.$exception->getMessage());
         }

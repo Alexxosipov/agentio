@@ -18,16 +18,30 @@ it('queues a report of the loop for the paired bot', function () {
     Queue::assertPushed(NotifyDeveloper::class, fn (NotifyDeveloper $job): bool => $job->event === 'blocked' && $job->issue === 'XY-2' && $job->name === 'XY-2' && $job->connection === 'redis' && $job->queue === 'default');
 });
 
-it('never fails the loop: without a bot, with an unknown event or a broken queue', function (?string $chat, string $event) {
+it('queues the reports of the usage limit without an issue', function () {
+    projectWithBot();
+    Queue::fake();
+
+    $this->artisan('agentio:telegram', ['action' => 'notify', 'argument' => 'limit', 'id' => 'XY-2', '--until' => '1791196860', '--window' => 'five_hour'])->assertSuccessful();
+    $this->artisan('agentio:telegram', ['action' => 'notify', 'argument' => 'limit', '--until' => 'soon', '--window' => '-'])->assertSuccessful();
+    $this->artisan('agentio:telegram', ['action' => 'notify', 'argument' => 'resumed'])->assertSuccessful();
+
+    Queue::assertPushed(NotifyDeveloper::class, fn (NotifyDeveloper $job): bool => $job->event === 'limit' && $job->issue === 'XY-2' && $job->until === 1791196860 && $job->window === 'five_hour');
+    Queue::assertPushed(NotifyDeveloper::class, fn (NotifyDeveloper $job): bool => $job->event === 'limit' && $job->issue === '' && $job->until === null && $job->window === null);
+    Queue::assertPushed(NotifyDeveloper::class, fn (NotifyDeveloper $job): bool => $job->event === 'resumed' && $job->issue === '');
+});
+
+it('never fails the loop: without a bot, with an unknown event or a broken queue', function (?string $chat, string $event, string $id = 'XY-2') {
     projectWithBot($chat);
     Queue::fake();
 
-    $this->artisan('agentio:telegram', ['action' => 'notify', 'argument' => $event, 'id' => 'XY-2'])->assertSuccessful();
+    $this->artisan('agentio:telegram', ['action' => 'notify', 'argument' => $event, 'id' => $id])->assertSuccessful();
 
     Queue::assertNothingPushed();
 })->with([
     'not paired' => [null, 'review'],
     'unknown event' => ['42', 'deleted'],
+    'an issue event without the issue' => ['42', 'review', ''],
 ]);
 
 it('sends a text through the queue', function () {

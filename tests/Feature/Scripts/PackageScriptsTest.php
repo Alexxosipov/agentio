@@ -149,6 +149,85 @@ it('counts an unfinished planning and resumes it later', function () {
         ->and(file_get_contents($project.'/storage/logs/agents/plan-XY-1.restarts'))->toBe("1 \n");
 });
 
+/**
+ * Make the fake artisan of the project say that every session ended at the usage limit, to be resumed at $until.
+ */
+function sessionsEndAtLimit(string $project, int $until): void
+{
+    file_put_contents($project.'/artisan', str_replace(
+        "if ((\$argv[1] ?? '') === 'agentio:yt') {",
+        "if ((\$argv[1] ?? '') === 'agentio:limit') {\n    echo \"{$until} five_hour\\n\";\n    exit(0);\n}\n\nif ((\$argv[1] ?? '') === 'agentio:yt') {",
+        (string) file_get_contents($project.'/artisan'),
+    ));
+}
+
+/**
+ * Wait a little for a background artisan call of the loop (the reports to the bot).
+ */
+function waitForArtisanCall(string $project, string $call): string
+{
+    for ($waited = 0; $waited < 30 && ! str_contains((string) @file_get_contents($project.'/artisan-calls.log'), $call); $waited++) {
+        usleep(100_000);
+    }
+
+    return (string) file_get_contents($project.'/artisan-calls.log');
+}
+
+it('pauses at the usage limit of Claude Code instead of marking the issue Blocked', function () {
+    $project = projectForLoop(['XY-1']);
+    file_put_contents($project.'/artisan', str_replace('\'state\' => "Review\\n"', '\'state\' => "Analysis\\n"', (string) file_get_contents($project.'/artisan')));
+    $until = time() + 3600;
+    sessionsEndAtLimit($project, $until);
+    mkdir($project.'/storage/logs/agents', 0777, true);
+    // Without the limit, this session would be the one too many and the idea would go to Blocked.
+    file_put_contents($project.'/storage/logs/agents/plan-XY-1.restarts', "3 \n");
+
+    $process = runPackageLoop($project, '--once');
+    $log = (string) file_get_contents($project.'/storage/logs/agents/loop.log');
+
+    expect($process->getExitCode())->toBe(0, $process->getErrorOutput())
+        ->and($log)->toContain('Claude Code usage limit reached (five_hour): no new sessions until', 'plan-XY-1: stopped at the Claude Code usage limit; the issue keeps its state')
+        ->and($log)->not->toContain('marked Blocked')
+        ->and(file_get_contents($project.'/storage/logs/agents/limit'))->toBe("{$until} five_hour\n")
+        ->and(file_get_contents($project.'/storage/logs/agents/plan-XY-1.restarts'))->toBe("3 \n")
+        ->and(waitForArtisanCall($project, 'agentio:telegram notify limit'))->toContain("agentio:limit plan-XY-1\n", "agentio:telegram notify limit XY-1 --until={$until} --window=five_hour")
+        ->and(file_get_contents($project.'/artisan-calls.log'))->not->toContain('agentio:yt release');
+});
+
+it('starts no session while paused at the usage limit and resumes the work after the reset', function () {
+    $project = projectForLoop(['XY-1']);
+    mkdir($project.'/storage/logs/agents', 0777, true);
+    file_put_contents($project.'/storage/logs/agents/limit', (time() + 3600)." five_hour\n");
+
+    $process = runPackageLoop($project, '--once');
+
+    expect($process->getExitCode())->toBe(0, $process->getErrorOutput())
+        ->and(file_get_contents($project.'/storage/logs/agents/loop.log'))->toContain('paused at the Claude Code usage limit until')
+        ->and($project.'/storage/logs/agents/plan-XY-1.log')->not->toBeFile()
+        // Not even YouTrack is asked what to do next.
+        ->and($project.'/artisan-calls.log')->not->toBeFile();
+
+    file_put_contents($project.'/storage/logs/agents/limit', (time() - 1)." five_hour\n");
+
+    $process = runPackageLoop($project, '--once');
+
+    expect($process->getExitCode())->toBe(0, $process->getErrorOutput())
+        ->and(file_get_contents($project.'/storage/logs/agents/loop.log'))->toContain('the Claude Code usage limit has reset, resuming the work', 'XY-1: planning finished')
+        ->and($project.'/storage/logs/agents/limit')->not->toBeFile()
+        ->and(waitForArtisanCall($project, 'agentio:telegram notify resumed'))->toContain('agentio:telegram notify resumed');
+});
+
+it('shows the pause at the usage limit in a dry run', function () {
+    $project = projectForLoop();
+    mkdir($project.'/storage/logs/agents', 0777, true);
+    file_put_contents($project.'/storage/logs/agents/limit', (time() + 3600)." five_hour\n");
+
+    $process = runPackageLoop($project, '--dry-run');
+
+    expect($process->getExitCode())->toBe(0, $process->getErrorOutput())
+        ->and($process->getOutput())->toContain('Paused at the Claude Code usage limit until');
+});
+
 it('refuses to start a second loop in the same checkout', function () {
     $project = projectForLoop();
     mkdir($project.'/storage/logs/agents', 0777, true);

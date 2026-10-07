@@ -4,8 +4,11 @@ declare(strict_types=1);
 
 namespace Obrazmisli\Agentio\Telegram;
 
+use Carbon\CarbonImmutable;
 use Obrazmisli\Agentio\Process\AgentCommentKind;
 use Obrazmisli\Agentio\Process\AgentComments;
+use Obrazmisli\Agentio\Runtime\SystemTimezone;
+use Obrazmisli\Agentio\Runtime\UsageLimit;
 use Obrazmisli\Agentio\Settings;
 use Obrazmisli\Agentio\YouTrack\Comment;
 use Obrazmisli\Agentio\YouTrack\Issue;
@@ -15,12 +18,15 @@ use Throwable;
 /**
  * The messages of the bot, in Russian and short, like a project manager reporting to the developer: the questions
  * of the agents and the events of the loop (an idea planned, an epic ready for review or merged, a session that
- * gave up).
+ * gave up, the loop paused at the usage limit of Claude Code and resumed after it).
  */
 final readonly class Reports
 {
     /** The events of the loop the bot reports (agentio:telegram notify <event> <id>). */
-    public const array EVENTS = ['planned', 'review', 'merged', 'blocked'];
+    public const array EVENTS = ['planned', 'review', 'merged', 'blocked', 'limit', 'resumed'];
+
+    /** The events about the loop as a whole: the id (the session that ran into the limit) is optional. */
+    public const array LOOP_EVENTS = ['limit', 'resumed'];
 
     public function __construct(
         private Tools $tools,
@@ -41,10 +47,19 @@ final readonly class Reports
     }
 
     /**
-     * The report of an event of the loop.
+     * The report of an event of the loop; $until (a Unix time) and $window (five_hour, seven_day, ...) belong to
+     * the limit event: when the loop resumes and which limit was hit.
      */
-    public function event(string $event, string $id, ?string $name = null): string
+    public function event(string $event, string $id, ?string $name = null, ?int $until = null, ?string $window = null): string
     {
+        if ($event === 'limit') {
+            return $this->limit($id, $until, $window);
+        }
+
+        if ($event === 'resumed') {
+            return '▶️ Лимит Claude Code сброшен: продолжаю работу с того места, где остановился.';
+        }
+
         $issue = $this->issue($id);
         $title = $id.($issue === null ? '' : ' «'.self::summary($issue).'»');
         $base = $this->settings->baseBranch();
@@ -56,6 +71,22 @@ final readonly class Reports
             'blocked' => '⛔ '.$title.': сессия '.($name !== null && str_starts_with($name, 'plan-') ? 'планирования' : 'эпика').' несколько раз подряд оборвалась без результата, задача в Blocked. Лог: php artisan agentio:log '.($name ?? $id).'.',
             default => 'ℹ️ '.$title.': '.$event.'.',
         };
+    }
+
+    private function limit(string $id, ?int $until, ?string $window): string
+    {
+        $text = '⏸ Claude Code упёрся в '.UsageLimit::windowLabel($window).($id === '' ? '' : ' (сессия '.$id.')').': новые сессии не запускаю. Задачи остаются в своих статусах, в Blocked ничего не перевожу.';
+
+        if ($until === null) {
+            return $text.' Продолжу автоматически, когда лимит сбросится.';
+        }
+
+        $timezone = Settings::string('agentio.timezone') ?? SystemTimezone::detect() ?? (string) config('app.timezone', 'UTC');
+        $resumesAt = CarbonImmutable::createFromTimestampUTC($until)->setTimezone($timezone);
+        $today = CarbonImmutable::now($timezone);
+        $date = $resumesAt->isSameDay($today) ? '' : ' '.$resumesAt->format('d.m');
+
+        return $text.' Продолжу автоматически в '.$resumesAt->format('H:i').$date.' ('.$timezone.').';
     }
 
     private function issue(string $id): ?Issue

@@ -52,7 +52,7 @@ git rev-parse --show-toplevel # путь worktree
    BRANCH=<ветка>
    WORKTREE=<путь>
    ```
-5. **Разбор результатов.** `DONE` — ок. `LOST` — задачу взял кто-то другой, пропусти. `BLOCKED` — задача в Blocked, продолжай остальные. Субагент вернулся без итоговой строки или с ошибкой — проверь задачу (`get_issue`). Если она не `Done` и не `Blocked`, перезапусти её **один раз**; при повторном сбое — `[AGENT:BLOCKED]` в задаче и `php artisan agentio:yt release <ID> --state=Blocked`.
+5. **Разбор результатов.** `DONE` — ок. `LOST` — задачу взял кто-то другой, пропусти. `BLOCKED` — задача в Blocked, продолжай остальные. Субагент оборвался на лимите Claude Code (`rate_limit`, «hit your … limit», «usage limit reached», HTTP 429) — это не сбой задачи: не перезапускай её, не пиши `[AGENT:BLOCKED]` и не меняй статусы, а заверши сессию; цикл дождётся сброса лимита и возобновит эпик. Субагент вернулся без итоговой строки или с другой ошибкой — проверь задачу (`get_issue`). Если она не `Done` и не `Blocked`, перезапусти её **один раз**; при повторном сбое — `[AGENT:BLOCKED]` в задаче и `php artisan agentio:yt release <ID> --state=Blocked`.
 6. **Ревью историй.** Для каждой STORY, у которой все TASK в `Done` и нет `APPROVED` после последней TASK, — `Agent` с `subagent_type: "general-purpose"` и промптом:
    ```
    Загрузи скилл agentio-review-story (инструмент Skill) и выполни его.

@@ -144,7 +144,17 @@ it('reports a stop request and a stopped loop', function () {
 
     unlink($logs.'/loop.pid');
 
-    $this->getJson('/agentio/api/status')->assertJsonPath('loop.label', 'остановлен');
+    $this->getJson('/agentio/api/status')->assertJsonPath('loop.label', 'остановлен')->assertJsonPath('loop.usageLimit', null);
+});
+
+it('reports the pause of the loop at the usage limit of Claude Code', function () {
+    $logs = dashboardEnvironment(configured: false);
+    file_put_contents($logs.'/limit', "4102444800 five_hour\n");
+
+    $this->getJson('/agentio/api/status')->assertOk()->assertJsonPath('loop.usageLimit', [
+        'resumesAt' => '2100-01-01T00:00:00+00:00',
+        'label' => '5-часовой лимит',
+    ]);
 });
 
 it('shows the live sessions with their issue, claim, stage, current tasks and latest events', function () {

@@ -55,11 +55,12 @@ final class StatusCommand extends Command
     }
 
     /**
-     * @return array{status: string, pid: int|null, stopRequested: bool, stopFile: string, logsPath: string, lastLog: array{time: string|null, message: string, issueId: string|null}|null}
+     * @return array{status: string, pid: int|null, stopRequested: bool, stopFile: string, logsPath: string, usageLimit: array{resumesAt: string|null, window: string|null}|null, lastLog: array{time: string|null, message: string, issueId: string|null}|null}
      */
     private function loop(LoopState $loop): array
     {
         $log = $loop->loopLog(1);
+        $limit = $loop->usageLimit();
 
         return [
             'status' => $loop->status()->value,
@@ -67,6 +68,7 @@ final class StatusCommand extends Command
             'stopRequested' => $loop->isStopRequested(),
             'stopFile' => $loop->stopFile(),
             'logsPath' => $loop->logsPath(),
+            'usageLimit' => $limit === null ? null : ['resumesAt' => $limit->resetsAt?->toIso8601String(), 'window' => $limit->window],
             'lastLog' => $log === [] ? null : $log[0]->toArray(),
         ];
     }
@@ -166,6 +168,10 @@ final class StatusCommand extends Command
         $this->line('<options=bold>Agent loop</>');
         $this->components->twoColumnDetail('Status', (string) $loop['status'].($loop['pid'] === null ? '' : ' (pid '.$loop['pid'].')'));
         $this->components->twoColumnDetail('Stop flag', $loop['stopRequested'] ? '<fg=yellow>set</> '.$loop['stopFile'] : 'no');
+
+        if (is_array($loop['usageLimit'])) {
+            $this->components->twoColumnDetail('Claude Code usage limit', '<fg=yellow>paused</> until '.$loop['usageLimit']['resumesAt'].($loop['usageLimit']['window'] === null ? '' : ' ('.$loop['usageLimit']['window'].')'));
+        }
 
         if (is_array($loop['lastLog'])) {
             $this->components->twoColumnDetail('Last loop.log entry', trim(($loop['lastLog']['time'] ?? '').' '.$loop['lastLog']['message']));

@@ -154,6 +154,66 @@ final readonly class SessionLog
     }
 
     /**
+     * The usage limit the latest run in the log ended at, scanning at most $maxBytes from the end; null when it did
+     * not. The run hit the limit when its latest rate_limit_event is "rejected" (the reset time comes from it) or
+     * when Claude Code ended it with a rate_limit API error after its latest allowed rate_limit_event (the reset
+     * time is read from the error text).
+     */
+    public function usageLimit(int $maxBytes = self::DEFAULT_MAX_BYTES, ?CarbonImmutable $now = null): ?UsageLimit
+    {
+        $error = null;
+
+        foreach (ReverseLineReader::lines($this->path, $maxBytes) as $line) {
+            if (str_starts_with($line, '===== ')) {
+                break;
+            }
+
+            if (str_contains($line, '"type":"rate_limit_event"')) {
+                $event = json_decode(trim($line), true);
+                $info = is_array($event) && is_array($event['rate_limit_info'] ?? null) ? $event['rate_limit_info'] : null;
+
+                if ($info === null) {
+                    continue;
+                }
+
+                if (($info['status'] ?? null) === 'rejected') {
+                    $limit = UsageLimit::fromRateLimitInfo($info, $error ?? '');
+
+                    return $limit->resetsAt === null && $error !== null ? UsageLimit::fromMessage($error, $now, $this->timezone) : $limit;
+                }
+
+                break;
+            }
+
+            if ($error === null && str_contains($line, '"error":"rate_limit"')) {
+                $error = self::rateLimitError($line);
+            }
+        }
+
+        return $error === null ? null : UsageLimit::fromMessage($error, $now, $this->timezone);
+    }
+
+    /**
+     * The text of the synthetic assistant message with which Claude Code ends a session on a rate_limit API error.
+     */
+    private static function rateLimitError(string $line): ?string
+    {
+        $event = json_decode(trim($line), true);
+
+        if (! is_array($event) || ($event['type'] ?? null) !== 'assistant' || ($event['error'] ?? null) !== 'rate_limit' || ($event['parent_tool_use_id'] ?? null) !== null) {
+            return null;
+        }
+
+        $text = '';
+
+        foreach (self::blocks($event) as $block) {
+            $text .= self::string($block['text'] ?? null) ?? '';
+        }
+
+        return trim($text);
+    }
+
+    /**
      * The events of one log line (an assistant message may hold several text / tool blocks).
      *
      * @return list<SessionEvent>

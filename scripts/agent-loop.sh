@@ -15,9 +15,11 @@
 #   WORKTREES_DIR, MERGE_POLICY, MAX_PARALLEL, MAX_PARALLEL_TASKS, AGENT_LOOP_INTERVAL, CLAUDE_BIN, CLAUDE_MODEL,
 #   AGENT_LOG_DIR, AGENTIO_STOP_FILE, AGENTIO_SESSION_SETTINGS and AGENTIO_PLANNING_SETTINGS (settings of the epic
 #   and of the planning sessions, JSON), AGENTIO_MCP_CONFIG (MCP configs of the sessions, one per line),
-#   MAX_RESTARTS=3 (sessions that end without finishing, in a row and without new commits, before Blocked).
+#   MAX_RESTARTS=3 (sessions that end without finishing, in a row and without new commits, before Blocked; a session
+#   that ends at the usage limit of Claude Code does not count).
 # Files in AGENT_LOG_DIR: loop.log, loop.pid and loop.lock (this loop), <EPIC>.pid/.log (epic sessions),
-#   plan-<IDEA>.pid/.log (planning sessions), <NAME>.restarts ("<count> <branch head>").
+#   plan-<IDEA>.pid/.log (planning sessions), <NAME>.restarts ("<count> <branch head>"), limit ("<resume time>
+#   <limit>" while the loop pauses at the usage limit).
 set -uo pipefail
 
 if [[ -z "${AGENTIO_ROOT:-}" || ! -f "${AGENTIO_ROOT}/artisan" ]]; then
@@ -29,6 +31,7 @@ ROOT="$(cd "$AGENTIO_ROOT" && pwd -P)"
 LOG_DIR="${AGENT_LOG_DIR:-$ROOT/storage/logs/agents}"
 STOP_FILE="${AGENTIO_STOP_FILE:-$LOG_DIR/stop}"
 LOOP_PID_FILE="$LOG_DIR/loop.pid"
+LIMIT_FILE="$LOG_DIR/limit"
 INTERVAL="${AGENT_LOOP_INTERVAL:-300}"
 MAX_PARALLEL="${MAX_PARALLEL:-2}"
 MAX_PARALLEL_TASKS="${MAX_PARALLEL_TASKS:-2}"
@@ -91,6 +94,37 @@ session_pid() { cat "$LOG_DIR/$1.pid" 2>/dev/null; }
 # A short report to the developer's Telegram bot (agentio:telegram notify queues it; without a bot it does
 # nothing). In the background and silent: the loop never waits for the bot and never fails because of it.
 notify() { ( artisan agentio:telegram notify "$@" </dev/null >/dev/null 2>&1 & ) ; }
+
+# Local time of a Unix time (GNU date, then BSD date).
+local_time() { date -d "@$1" '+%F %T' 2>/dev/null || date -r "$1" '+%F %T'; }
+
+# The usage limit of Claude Code. A session that ends at it has not failed: no restart is counted, nothing goes
+# to Blocked, its issue keeps its state and claim. The loop pauses — starts no sessions — until the limit resets
+# (LIMIT_FILE: "<resume time> <limit>"), then resumes the work; the developer's bot is told about both.
+limit_until() { local until=""; read -r until _ <"$LIMIT_FILE" 2>/dev/null; [[ "$until" =~ ^[0-9]+$ ]] && echo "$until" || echo 0; }
+
+paused() { [[ -f "$LIMIT_FILE" ]] && (( $(limit_until) > $(date +%s) )); }
+
+# Whether the latest run of session $2 (of issue $1) ended at the usage limit; if so, pause the loop until it resets.
+hit_limit() {
+    local id="$1" name="$2" until="" window=""
+    read -r until window < <(artisan agentio:limit "$name" 2>/dev/null) || return 1
+    [[ "$until" =~ ^[0-9]+$ ]] || return 1
+    if ! paused; then
+        log "Claude Code usage limit reached (${window:--}): no new sessions until $(local_time "$until")"
+        notify limit "$id" --until="$until" --window="${window:--}"
+    fi
+    (( until > $(limit_until) )) && echo "$until ${window:--}" >"$LIMIT_FILE"
+    log "$name: stopped at the Claude Code usage limit; the issue keeps its state and is resumed after the reset"
+}
+
+# The pause at the usage limit is over: work again.
+resume_after_limit() {
+    [[ -f "$LIMIT_FILE" ]] && ! paused || return 0
+    rm -f "$LIMIT_FILE"
+    log "the Claude Code usage limit has reset, resuming the work"
+    notify resumed
+}
 
 if [[ -z "${YOUTRACK_URL:-}" || -z "${YOUTRACK_TOKEN:-}" ]]; then
     echo "YOUTRACK_URL and YOUTRACK_TOKEN must be set (run php artisan agentio:install)" >&2
@@ -223,6 +257,7 @@ finish_epic() {
         "") log "$epic: YouTrack did not answer, the session is judged on the next pass" ;;
         *)
             # In Progress: the session broke off; Ready or Backlog: it ended before it could claim the epic.
+            hit_limit "$epic" "$epic" && return 0
             restarts="$(count_failure "$epic" "$(git -C "$ROOT" rev-parse --verify -q "refs/heads/$branch" 2>/dev/null)")"
             if (( restarts > MAX_RESTARTS )); then
                 give_up "$epic" "$epic" "/agentio-work-epic"
@@ -242,6 +277,7 @@ finish_plan() {
         Blocked) rm -f "$LOG_DIR/plan-$idea.restarts"; log "$idea: planning finished, idea state: $state" ;;
         "") log "$idea: planning finished, YouTrack did not answer" ;;
         Backlog|Analysis|"In Progress")
+            hit_limit "$idea" "plan-$idea" && return 0
             restarts="$(count_failure "plan-$idea")"
             if (( restarts > MAX_RESTARTS )); then
                 give_up "$idea" "plan-$idea" "/agentio-plan"
@@ -285,13 +321,15 @@ ready_epics() { yt ready-epics --json | ids; }
 
 dispatch_epics() {
     local free epic
+    paused && return 0
     free=$(( MAX_PARALLEL - $(running_count) ))
     (( free > 0 )) || return 0
     for epic in $( { resumable epic; ready_epics; } | awk '!seen[$0]++'); do
         (( free > 0 )) || break
         stopping && break
         [[ -n "$ONLY_EPIC" && "$epic" != "$ONLY_EPIC" ]] && continue
-        session_alive "$(session_pid "$epic")" && continue
+        # A session that ended since the last reap is judged by the next reap before it is started again.
+        [[ -e "$LOG_DIR/$epic.pid" ]] && continue
         launch_epic "$epic" && free=$(( free - 1 ))
     done
 }
@@ -311,7 +349,7 @@ plan_ideas() {
     local idea candidate planned=" "
     (( PLAN_IDEAS == 1 )) || return 0
     [[ -n "$ONLY_EPIC" ]] && return 0
-    while ! stopping && [[ -z "$(running plan)" ]]; do
+    while ! stopping && ! paused && [[ -z "$(running plan)" ]]; do
         idea=""
         for candidate in $( { resumable idea; yt ideas --json | ids; } | awk '!seen[$0]++'); do
             [[ "$planned" == *" $candidate "* ]] && continue
@@ -332,6 +370,7 @@ dry_run() {
     echo "== Agent loop dry run ($(date '+%F %T')) =="
     echo "PROJECT=${AGENTIO_PROJECT:-?} MERGE_POLICY=$MERGE_POLICY MAX_PARALLEL=$MAX_PARALLEL MAX_PARALLEL_TASKS=$MAX_PARALLEL_TASKS BASE_BRANCH=$BASE_BRANCH WORKTREES_DIR=$WORKTREES_DIR"
     echo "Running sessions: $(running_epics | tr '\n' ' ') $(running plan | sed 's/^/plan-/' | tr '\n' ' ')"
+    paused && echo "Paused at the Claude Code usage limit until $(local_time "$(limit_until)"): nothing would be started before"
     echo
     echo "Ideas whose planning would be resumed:"
     resumable idea | sed 's/^/  /'
@@ -390,6 +429,7 @@ echo "$$" >"$LOOP_PID_FILE"
 trap '[[ "$(cat "$LOOP_PID_FILE" 2>/dev/null)" == "$$" ]] && rm -f "$LOOP_PID_FILE"' EXIT
 
 log "agent loop started: mode=$MODE policy=$MERGE_POLICY max_parallel=$MAX_PARALLEL interval=${INTERVAL}s${ONLY_EPIC:+ epic=$ONLY_EPIC}"
+paused && log "paused at the Claude Code usage limit until $(local_time "$(limit_until)")"
 
 while true; do
     if stopping; then
@@ -398,6 +438,7 @@ while true; do
     fi
 
     REAPED=0
+    resume_after_limit
     reap
     dispatch_epics
     plan_ideas
@@ -419,6 +460,7 @@ while true; do
         sleep 5
         reap
         (( REAPED == 1 )) && break
+        [[ -f "$LIMIT_FILE" ]] && ! paused && break
     done
 done
 

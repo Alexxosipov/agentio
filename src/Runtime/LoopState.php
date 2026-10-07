@@ -14,7 +14,9 @@ use Carbon\CarbonImmutable;
  * - <ID>.pid / <ID>.log epic sessions (/agentio-work-epic), <ID>.restarts their restart counter
  *                       ("<count> <branch head>": unfinished sessions in a row without new commits);
  * - plan-<ID>.pid / plan-<ID>.log planning sessions (/agentio-plan);
- * - stop               the stop flag: the loop exits after the current step.
+ * - stop               the stop flag: the loop exits after the current step;
+ * - limit              "<resume time> <limit>" while the loop pauses at the usage limit of Claude Code (a Unix
+ *                      time and the limit hit: five_hour, seven_day, ...; "-" when unknown).
  */
 final readonly class LoopState
 {
@@ -23,6 +25,8 @@ final readonly class LoopState
     public const string LOOP_PID = 'loop.pid';
 
     public const string STOP_FILE = 'stop';
+
+    public const string LIMIT_FILE = 'limit';
 
     /**
      * @param  string|null  $timezone  Timezone of the loop's local timestamps (defaults to PHP's timezone)
@@ -65,6 +69,27 @@ final readonly class LoopState
         if (is_file($this->stopFile)) {
             unlink($this->stopFile);
         }
+    }
+
+    /**
+     * The usage limit of Claude Code the loop pauses at, its resetsAt being when the loop resumes the work; null
+     * when the loop is not paused (or the pause is over).
+     */
+    public function usageLimit(?CarbonImmutable $now = null): ?UsageLimit
+    {
+        $file = $this->path(self::LIMIT_FILE);
+        $parts = is_file($file) ? preg_split('/\s+/', trim((string) file_get_contents($file))) : false;
+
+        if ($parts === false || ! ctype_digit($parts[0])) {
+            return null;
+        }
+
+        $resumesAt = CarbonImmutable::createFromTimestampUTC((int) $parts[0]);
+        $window = $parts[1] ?? '-';
+
+        return $resumesAt->greaterThan($now ?? CarbonImmutable::now())
+            ? new UsageLimit($resumesAt, $window === '-' ? null : $window)
+            : null;
     }
 
     /**

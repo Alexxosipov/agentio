@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use Carbon\CarbonImmutable;
 use Illuminate\Contracts\Bus\Dispatcher;
 use Illuminate\Support\Facades\Queue;
 use Obrazmisli\Agentio\Telegram\Conversation;
@@ -72,4 +73,27 @@ it('reports the events of the loop briefly', function () {
     app()->call([new NotifyDeveloper('merged', 'XY-2'), 'handle']);
 
     Queue::assertPushed(SendTelegramMessage::class, fn (SendTelegramMessage $job): bool => $job->kind === 'report' && $job->issue === 'XY-2' && str_starts_with($job->text, '🚀'));
+});
+
+it('reports the pause at the usage limit and the resumed work', function () {
+    projectWithBot();
+    Queue::fake();
+    config(['agentio.timezone' => 'Asia/Makassar']);
+    CarbonImmutable::setTestNow('2026-10-05T07:23:00Z');
+
+    try {
+        $reports = app(Reports::class);
+
+        expect($reports->event('limit', 'XY-2', until: 1791196860, window: 'five_hour'))
+            ->toBe('⏸ Claude Code упёрся в 5-часовой лимит (сессия XY-2): новые сессии не запускаю. Задачи остаются в своих статусах, в Blocked ничего не перевожу. Продолжу автоматически в 18:41 (Asia/Makassar).')
+            ->and($reports->event('limit', '', until: 1791241260, window: 'seven_day'))->toContain('упёрся в недельный лимит:', 'в 07:01 06.10 (Asia/Makassar)')
+            ->and($reports->event('limit', ''))->toEndWith('Продолжу автоматически, когда лимит сбросится.')
+            ->and($reports->event('resumed', ''))->toBe('▶️ Лимит Claude Code сброшен: продолжаю работу с того места, где остановился.');
+
+        app()->call([new NotifyDeveloper('resumed', ''), 'handle']);
+
+        Queue::assertPushed(SendTelegramMessage::class, fn (SendTelegramMessage $job): bool => $job->kind === 'report' && $job->issue === null && str_starts_with($job->text, '▶️'));
+    } finally {
+        CarbonImmutable::setTestNow();
+    }
 });

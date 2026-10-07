@@ -44,6 +44,8 @@ return [
     | .env (it has no default: the loop refuses to start without it).
     | "worktree_setup" is an optional shell command run last in every new epic
     | worktree with the epic id as $1 (seeders, extra services, ...).
+    | "limit_retry" is how many seconds the loop pauses when a session runs
+    | into the usage limit of Claude Code without saying when it resets.
     |
     */
 
@@ -58,6 +60,8 @@ return [
     'max_parallel_tasks' => (int) env('AGENTIO_MAX_PARALLEL_TASKS', 2),
 
     'interval' => (int) env('AGENTIO_INTERVAL', 300),
+
+    'limit_retry' => (int) env('AGENTIO_LIMIT_RETRY', 900),
 
     'worktrees_path' => env('AGENTIO_WORKTREES_PATH'),
 

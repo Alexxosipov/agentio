@@ -8,11 +8,13 @@ use Carbon\CarbonImmutable;
 use Obrazmisli\Agentio\Runtime\LoopState;
 use Obrazmisli\Agentio\Runtime\LoopStatus;
 use Obrazmisli\Agentio\Runtime\Session;
+use Obrazmisli\Agentio\Runtime\UsageLimit;
 use Obrazmisli\Agentio\Settings;
 use ValueError;
 
 /**
- * The dashboard header: project, loop status, live sessions, merge policy and the YouTrack connection.
+ * The dashboard header: project, loop status (and its pause at the usage limit of Claude Code), live sessions, merge
+ * policy and the YouTrack connection.
  */
 final readonly class StatusPresenter
 {
@@ -26,6 +28,7 @@ final readonly class StatusPresenter
         $this->source->attempt(fn (): array => $this->source->issues(), []);
         $status = $this->loop->status();
         $sessions = $this->loop->sessions();
+        $limit = $this->loop->usageLimit();
 
         return [
             'project' => ['key' => $this->source->project(), 'url' => $this->source->projectUrl()],
@@ -39,6 +42,11 @@ final readonly class StatusPresenter
                 },
                 'pid' => $this->loop->loopPid(),
                 'stopRequested' => $this->loop->isStopRequested(),
+                // The pause at the usage limit of Claude Code: when the loop resumes the work.
+                'usageLimit' => $limit === null ? null : [
+                    'resumesAt' => $limit->resetsAt?->toIso8601String(),
+                    'label' => UsageLimit::windowLabel($limit->window),
+                ],
             ],
             'sessions' => [
                 'alive' => count(array_filter($sessions, fn (Session $session): bool => $session->alive)),

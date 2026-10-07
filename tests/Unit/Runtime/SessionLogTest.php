@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use Carbon\CarbonImmutable;
 use Obrazmisli\Agentio\Runtime\SessionEvent;
 use Obrazmisli\Agentio\Runtime\SessionEventType;
 use Obrazmisli\Agentio\Runtime\SessionLog;
@@ -274,4 +275,64 @@ it('shortens long texts', function () {
 
     expect(mb_strlen($event->text))->toBeLessThanOrEqual(301)
         ->and($event->text)->toEndWith('…');
+});
+
+/**
+ * A rate_limit_event of the stream-json log.
+ */
+function rateLimitEvent(string $status, int $resetsAt = 1791196800, string $window = 'five_hour'): string
+{
+    return (string) json_encode(['type' => 'rate_limit_event', 'rate_limit_info' => ['status' => $status, 'resetsAt' => $resetsAt, 'rateLimitType' => $window], 'session_id' => 's']);
+}
+
+/**
+ * The synthetic assistant message with which Claude Code ends a session at the limit.
+ */
+function rateLimitError(string $text = "You've hit your session limit · resets 6:40pm (Asia/Makassar)", ?string $parent = null): string
+{
+    return (string) json_encode(['type' => 'assistant', 'message' => ['model' => '<synthetic>', 'role' => 'assistant', 'content' => [['type' => 'text', 'text' => $text]]], 'parent_tool_use_id' => $parent, 'session_id' => 's', 'error' => 'rate_limit', 'is_api_error_message' => true], JSON_UNESCAPED_UNICODE);
+}
+
+it('finds the usage limit the latest run ended at', function () {
+    $path = temporaryDirectory().'/TP-9.log';
+    file_put_contents($path, implode("\n", [
+        '===== 2026-10-05 15:16:16 /agentio-work-epic TP-9 in /srv =====',
+        rateLimitEvent('allowed_warning'),
+        rateLimitEvent('rejected', 1791196800, 'seven_day'),
+        rateLimitError(),
+        '{"type":"result","subtype":"success","is_error":true,"result":"You\'ve hit your session limit · resets 6:40pm (Asia/Makassar)","terminal_reason":"api_error"}',
+        '',
+    ]));
+
+    $limit = (new SessionLog($path))->usageLimit();
+
+    expect($limit?->resetsAt?->getTimestamp())->toBe(1791196800)
+        ->and($limit?->window)->toBe('seven_day')
+        ->and($limit?->message)->toBe("You've hit your session limit · resets 6:40pm (Asia/Makassar)");
+});
+
+it('reads the reset time from the error when the run has no rejected rate_limit_event', function () {
+    $path = temporaryDirectory().'/TP-9.log';
+    file_put_contents($path, rateLimitEvent('allowed')."\n".rateLimitError()."\n");
+
+    $limit = (new SessionLog($path))->usageLimit(now: CarbonImmutable::parse('2026-10-05T07:22:50Z'));
+
+    expect($limit?->resetsAt?->toIso8601String())->toBe('2026-10-05T10:40:00+00:00')
+        ->and($limit?->window)->toBeNull();
+});
+
+it('does not see a usage limit the latest run did not end at', function (array $lines) {
+    $path = temporaryDirectory().'/TP-9.log';
+    file_put_contents($path, implode("\n", $lines)."\n");
+
+    expect((new SessionLog($path))->usageLimit())->toBeNull();
+})->with([
+    'no limit' => [[rateLimitEvent('allowed'), '{"type":"result","subtype":"success","result":"Готово"}']],
+    'the limit of an earlier run' => [[rateLimitEvent('rejected'), rateLimitError(), '===== 2026-10-05 20:00:00 /agentio-work-epic TP-9 in /srv =====', '{"type":"result","subtype":"error_during_execution","is_error":true}']],
+    'allowed again after the error' => [[rateLimitError(), rateLimitEvent('allowed')]],
+    'an error inside a subagent' => [[rateLimitEvent('allowed'), rateLimitError(parent: 'toolu_1')]],
+]);
+
+it('does not see a usage limit in a session that finished its work', function () {
+    expect(sessionLog()->usageLimit())->toBeNull();
 });

@@ -72,10 +72,21 @@ it('prints the summary as JSON', function () {
 
     $status = json_decode(trim(Artisan::output()), true);
 
-    expect($status['loop'])->toMatchArray(['status' => 'stopped', 'pid' => null, 'stopRequested' => true, 'lastLog' => null])
+    expect($status['loop'])->toMatchArray(['status' => 'stopped', 'pid' => null, 'stopRequested' => true, 'usageLimit' => null, 'lastLog' => null])
         ->and($status['sessions'])->toHaveCount(1)
         ->and($status['sessions'][0])->toMatchArray(['name' => 'plan-XY-1', 'kind' => 'plan', 'issueId' => 'XY-1', 'lastEvent' => null])
         ->and($status['youtrack'])->toBeNull();
+});
+
+it('shows the pause of the loop at the usage limit of Claude Code', function () {
+    file_put_contents($this->logs.'/limit', "4102444800 seven_day\n");
+
+    $this->artisan('agentio:status', ['--local' => true])
+        ->expectsOutputToContain('paused until 2100-01-01T00:00:00+00:00 (seven_day)')
+        ->assertSuccessful();
+
+    expect(Artisan::call('agentio:status', ['--json' => true, '--local' => true]))->toBe(0)
+        ->and(json_decode(trim(Artisan::output()), true)['loop']['usageLimit'])->toBe(['resumesAt' => '2100-01-01T00:00:00+00:00', 'window' => 'seven_day']);
 });
 
 it('summarises the YouTrack project', function () {

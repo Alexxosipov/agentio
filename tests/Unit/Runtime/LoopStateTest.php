@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use Carbon\CarbonImmutable;
 use Obrazmisli\Agentio\Runtime\LoopLogEntry;
 use Obrazmisli\Agentio\Runtime\LoopState;
 use Obrazmisli\Agentio\Runtime\LoopStatus;
@@ -157,4 +158,25 @@ it('locates session logs', function () {
         ->and($state->sessionLog('TP-2')->tail())->toHaveCount(1)
         ->and($state->sessionLog('TP-2')->tail()[0]->time?->toIso8601String())->toBe('2026-10-03T14:57:38+08:00')
         ->and($state->restarts('TP-2'))->toBe(0);
+});
+
+it('reads the pause of the loop at the usage limit', function () {
+    [$loop, $directory] = loopState();
+    $now = CarbonImmutable::parse('2026-10-05T07:30:00Z');
+
+    expect($loop->usageLimit($now))->toBeNull();
+
+    file_put_contents($directory.'/limit', "1791196860 five_hour\n");
+
+    expect($loop->usageLimit($now)?->resetsAt?->getTimestamp())->toBe(1791196860)
+        ->and($loop->usageLimit($now)?->window)->toBe('five_hour')
+        ->and($loop->usageLimit(CarbonImmutable::createFromTimestampUTC(1791196860)))->toBeNull();
+
+    file_put_contents($directory.'/limit', "1791196860 -\n");
+
+    expect($loop->usageLimit($now)?->window)->toBeNull();
+
+    file_put_contents($directory.'/limit', "soon\n");
+
+    expect($loop->usageLimit($now))->toBeNull();
 });

@@ -1,6 +1,24 @@
 # Release Notes
 
-## [Unreleased](https://github.com/Alexxosipov/agentio/compare/v0.7.0...main)
+## [Unreleased](https://github.com/Alexxosipov/agentio/compare/v0.8.0...main)
+
+## [v0.8.0](https://github.com/Alexxosipov/agentio/releases/tag/v0.8.0) - 2026-10-07
+
+Update with `composer require alexxosipov/agentio:^0.8 --dev`, then run `php artisan agentio:install` (refreshes the skills: the orchestrator no longer blocks a task whose subagent ran into the usage limit) and commit `.claude/skills/agentio-*` to the development branch together with `composer.json` and `composer.lock`, then restart `agentio:run`. An epic or idea that an earlier version moved to `Blocked` because of the limit («сессия … 3 раза подряд завершилась…») is returned by hand: set its Stage back to `Ready` (an idea to `Backlog`).
+
+### Added
+
+- **The loop waits out the usage limit of Claude Code.** A session that ends at the five-hour or weekly limit of the subscription (a `rejected` `rate_limit_event` or a `rate_limit` error in its log) is no longer a failure: it is not counted in `<NAME>.restarts`, nothing gets `[AGENT:BLOCKED]`, the issue keeps its state and claim. The loop pauses — starts no epic or planning session and does not call YouTrack — until a minute after the reset Claude Code reports (`AGENTIO_LIMIT_RETRY` seconds, 900 by default, when it reports none), then resumes the issues it claimed. The pause is kept in `storage/logs/agents/limit` (it survives a restart of `agentio:run`; delete the file to resume earlier) and shown by `agentio:status`, `agentio:run --dry-run` and the dashboard header.
+- The Telegram bot reports the pause («⏸ Claude Code упёрся в 5-часовой лимит … Продолжу автоматически в 18:41») and the resumed work (`agentio:telegram notify limit|resumed`; the issue id is optional for these events, `--until=` and `--window=` describe the limit).
+- `php artisan agentio:limit <ID>`: whether the latest run of a session ended at the usage limit, and when the loop resumes.
+
+### Changed
+
+- `agentio-work-epic`: a subagent cut off by the usage limit is neither restarted nor blocked; the orchestrator ends the session and the loop resumes the epic after the reset.
+
+### Fixed
+
+- The loop no longer starts a session again in the same pass when it ended before the loop reaped it (the next reap judges it first): at the limit, such restarts used up the attempts within seconds.
 
 ## [v0.7.0](https://github.com/Alexxosipov/agentio/releases/tag/v0.7.0) - 2026-10-06
 

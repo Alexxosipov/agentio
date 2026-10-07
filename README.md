@@ -30,7 +30,7 @@ The project also needs a `test` script in its `composer.json` (the full quality 
 
 ## Quick start
 
-1. Install the package from GitHub as a dev dependency (see [Installation](#installation): add the repository to `composer.json`, then `composer require alexxosipov/agentio:^0.7 --dev`).
+1. Install the package from GitHub as a dev dependency (see [Installation](#installation): add the repository to `composer.json`, then `composer require alexxosipov/agentio:^0.8 --dev`).
 2. Install the cycle into the project (a git repository whose `.env` is git-ignored): `php artisan agentio:install`. It asks for the YouTrack URL and a permanent token (hidden input), checks them through the YouTrack MCP server, adds the `youtrack` MCP server to Claude Code if it has none, asks for the project short name (`ABC`; a missing project can be created), the production and the development branch (`main` and `dev`; the missing one is created locally), the merge policy and **the directory of the epic worktrees**, offers to configure the YouTrack project, installs the skills and the [local services](#local-services) (`compose.yaml` with PostgreSQL and Redis; `.env` and `phpunit.xml` point at them) and offers to connect your own [Telegram bot](#telegram-bot).
 3. Start the services and migrate: `docker compose up -d && php artisan migrate`. Commit `.claude/skills/agentio-*`, `.agentio.json`, `compose.yaml`, `docker/`, `phpunit.xml` and `.env.example` to `dev`: epic worktrees are created from it. `.env` (with the token) stays local. Push `dev` and `main` if the project has a remote, and point the develop server at `dev` and production at `main`.
 4. File an idea in YouTrack (Type `Idea` or the `idea` tag, Stage `Backlog`), check what the loop would do with `php artisan agentio:run --dry-run`, then start it: `php artisan agentio:run`.
@@ -55,7 +55,7 @@ composer config repositories.agentio vcs https://github.com/Alexxosipov/agentio
 Then require it:
 
 ```bash
-composer require alexxosipov/agentio:^0.7 --dev
+composer require alexxosipov/agentio:^0.8 --dev
 ```
 
 Install it as a **dev dependency**: the cycle runs on a developer machine (Claude Code, git worktrees, the loop) and nothing of it is needed in production; it also keeps the dashboard, which shows YouTrack data and agent logs, out of production builds. Require it without `--dev` only if you want the dashboard on a shared or staging server. If you call `Agentio::auth()` from a service provider, guard it with `class_exists(Agentio::class)` so that `composer install --no-dev` keeps working.
@@ -70,11 +70,11 @@ php artisan agentio:install           # refreshes the installed skills; your edi
 php artisan agentio:setup-youtrack    # refreshes the automation guide in the knowledge base
 ```
 
-Commit the updated `.claude/skills/agentio-*` and `.agentio.json`. While the version is `0.x`, `^0.7` takes only the `0.7.*` releases: a `0.8.0` may change behaviour (see the [changelog](CHANGELOG.md)), so move to it with `composer require alexxosipov/agentio:^0.8 --dev` when it is out; from an older minor version — `composer require alexxosipov/agentio:^0.7 --dev`. To try the latest unreleased code, require `dev-main`.
+Commit the updated `.claude/skills/agentio-*` and `.agentio.json`. While the version is `0.x`, `^0.8` takes only the `0.8.*` releases: a `0.9.0` may change behaviour (see the [changelog](CHANGELOG.md)), so move to it with `composer require alexxosipov/agentio:^0.9 --dev` when it is out; from an older minor version — `composer require alexxosipov/agentio:^0.8 --dev`. To try the latest unreleased code, require `dev-main`.
 
-Up to `v0.4.0` the package was called `obrazmisli/agentio`. Composer no longer finds it under that name, so a project that requires it switches with `composer remove obrazmisli/agentio --dev && composer require alexxosipov/agentio:^0.7 --dev` (the repository entry stays the same), then commits `composer.json` and `composer.lock` to the development branch.
+Up to `v0.4.0` the package was called `obrazmisli/agentio`. Composer no longer finds it under that name, so a project that requires it switches with `composer remove obrazmisli/agentio --dev && composer require alexxosipov/agentio:^0.8 --dev` (the repository entry stays the same), then commits `composer.json` and `composer.lock` to the development branch.
 
-A project that has a copy of the package (a `path` repository such as `packages/agentio`) switches by replacing that repository with the `vcs` one above, running `composer require alexxosipov/agentio:^0.7 --dev` and deleting the copy. Commit the new `composer.json` and `composer.lock` to the development branch (`dev`) too, not only to the branch you work on: epic worktrees start from `dev` and run `composer install` from its lock file, which would still look for `packages/agentio`. `agentio:run` refuses to start while the development branch installs a package from a path it does not have, and `agentio:worktree` explains it for an epic branch made before the fix (merge `dev` into it).
+A project that has a copy of the package (a `path` repository such as `packages/agentio`) switches by replacing that repository with the `vcs` one above, running `composer require alexxosipov/agentio:^0.8 --dev` and deleting the copy. Commit the new `composer.json` and `composer.lock` to the development branch (`dev`) too, not only to the branch you work on: epic worktrees start from `dev` and run `composer install` from its lock file, which would still look for `packages/agentio`. `agentio:run` refuses to start while the development branch installs a package from a path it does not have, and `agentio:worktree` explains it for an epic branch made before the fix (merge `dev` into it).
 
 For local development of the package, use a path repository in the host project's `composer.json`:
 
@@ -273,7 +273,7 @@ php artisan agentio:run --no-telegram   # without the Telegram bot
 
 Each pass starts the epics that can go on (claimed by this machine and interrupted, or ready) — preparing the worktree with `agentio:worktree` and starting `/agentio-work-epic <EPIC>` in it — and plans the ideas one at a time with `/agentio-plan <IDEA>` (an interrupted planning first). What this machine left unfinished is computed by `agentio:yt resumable`. The loop does not wait for a planning session, and when any session finishes it starts the next pass right away instead of waiting for the interval. Before starting an epic it checks that the skills are committed to the development branch.
 
-A session that ends without finishing its work (an epic not in `Review`, `Blocked` or `Done`, an idea not planned) is counted in `<NAME>.restarts`; new commits on the epic branch reset the count. After `MAX_RESTARTS` (3) such sessions in a row the issue gets an `[AGENT:BLOCKED]` comment and goes to `Blocked`. A session counts as alive only while its pid is still a Claude Code process, so a pid reused after a reboot does not hold a slot, and `loop.lock` (`flock`) keeps a second loop from starting in the same checkout.
+A session that ends without finishing its work (an epic not in `Review`, `Blocked` or `Done`, an idea not planned) is counted in `<NAME>.restarts`; new commits on the epic branch reset the count. After `MAX_RESTARTS` (3) such sessions in a row the issue gets an `[AGENT:BLOCKED]` comment and goes to `Blocked`. A session that ends at the usage limit of Claude Code (the five-hour or weekly limit of the subscription) is not counted: its issue keeps its state and claim, the loop starts no sessions until the limit resets (the reset time comes from Claude Code's `rate_limit_event`, plus a minute; `AGENTIO_LIMIT_RETRY` seconds, 900 by default, when it is unknown; kept in `storage/logs/agents/limit` and shown by `agentio:status` and the dashboard), then resumes the work by itself; the Telegram bot reports the pause and the resumption. A session counts as alive only while its pid is still a Claude Code process, so a pid reused after a reboot does not hold a slot, and `loop.lock` (`flock`) keeps a second loop from starting in the same checkout.
 
 Headless sessions run `claude -p … --permission-mode dontAsk` with everything from the package: `--settings` (the package's session settings merged with the allow/deny rules of the project's own `.claude/settings.json`, if any — Claude Code ignores the allow rules of a directory whose workspace trust was never accepted, and every new epic worktree is such a directory), and `--strict-mcp-config --mcp-config` with the `youtrack` server (and `laravel-boost` when the project uses Boost), whose `${YOUTRACK_URL}` and `${YOUTRACK_TOKEN}` come from the loop's environment.
 
@@ -285,6 +285,7 @@ Headless sessions run `claude -p … --permission-mode dontAsk` with everything 
 | `php artisan agentio:commit <TASK> "<message>" <files…>` | Commit only the given files with the `<TASK>: ` prefix, under a repository lock |
 | `php artisan agentio:worktree <EPIC> [--remove]` | Create and prepare the worktree of an epic (used by the loop) |
 | `php artisan agentio:log <ID>` | Print a session log in a readable form (`--lines`, `--follow`) |
+| `php artisan agentio:limit <ID>` | Whether the latest run of a session ended at the usage limit of Claude Code: prints when the loop resumes (Unix time) and the limit, exits 1 otherwise (the loop uses it) |
 
 The agents run tests the project's own way: `composer test` (the full quality gate) at the end of every task, and `vendor/bin/pest <files> [--filter=…]` for single tests while they work. There is no other way to run them.
 
@@ -304,7 +305,7 @@ The YouTrack part shows counts by Type × Stage, ideas waiting for planning, rea
 
 An optional bot of your own, a project manager in a chat. It never holds up the cycle: the agents neither wait for it nor write to it, YouTrack stays the source of truth, and a failure of Telegram, Redis or the assistant never stops the loop.
 
-- **It sends** the questions of the agents (every new `[AGENT:BLOCKED]`, in Russian) and short reports: an idea was planned (its epics), an epic is ready for review (what was done) or was merged, a session gave up.
+- **It sends** the questions of the agents (every new `[AGENT:BLOCKED]`, in Russian) and short reports: an idea was planned (its epics), an epic is ready for review (what was done) or was merged, a session gave up, the loop paused at the usage limit of Claude Code (with the time it resumes) and resumed after it.
 - **It understands** text and voice messages. Reply to a question (`В1: б`, «принимаю рекомендации», or in your own words, by voice too): the answer becomes a comment of the issue («Ответ разработчика (Telegram)…») and, when it answers every question, the issue returns to the Stage its `[AGENT:BLOCKED]` names, so the loop resumes the work. Describe a new feature and it becomes an idea (`[IDEA]`, tag `idea`) for the loop to plan; ask anything about the project (what is in progress, what is blocked, what was done) and it answers from YouTrack, the loop and the code.
 - **How**: an assistant — a read-only headless Claude Code session with the `agentio-telegram-assistant` skill — reads the message with its context (the message it replies to and the issue behind it, the recent conversation) and answers with a decision; agentio makes the YouTrack changes itself, through the MCP server, and tells you what it did.
 
@@ -329,7 +330,7 @@ The process dashboard is served at `/agentio` (`AGENTIO_UI_PATH`, `AGENTIO_UI_DO
 
 Screens:
 
-- **Overview** (`#/`): the loop status in the header (running / stopping / stopped, live sessions, merge policy, YouTrack connection); *who works now* — every live Claude Code session with its issue, pipeline stage, the tasks being worked on, its latest tool calls, subagents and messages, plus the issues claimed by agents and the last finished sessions with their cost and duration; the *pipeline* of every idea and epic through the stages Idea → Requirements and analysis → Architecture → Decomposition → Development → Story review → Acceptance → Done, with task progress and the reason of a blocked item (its last `[AGENT:BLOCKED]`); the `[AGENT:*]` *event feed*; the tail of `loop.log`.
+- **Overview** (`#/`): the loop status in the header (running / stopping / stopped, the pause at the usage limit of Claude Code, live sessions, merge policy, YouTrack connection); *who works now* — every live Claude Code session with its issue, pipeline stage, the tasks being worked on, its latest tool calls, subagents and messages, plus the issues claimed by agents and the last finished sessions with their cost and duration; the *pipeline* of every idea and epic through the stages Idea → Requirements and analysis → Architecture → Decomposition → Development → Story review → Acceptance → Done, with task progress and the reason of a blocked item (its last `[AGENT:BLOCKED]`); the `[AGENT:*]` *event feed*; the tail of `loop.log`.
 - **Kanban** (`#/board`): every issue of the project in a column per Stage, filtered by epic, type or text, with claims and unmet dependencies.
 - **Loop log** (`#/log`): the last lines of `loop.log`.
 - **Epic** (`#/epic/<ID>`): the stage and progress of an epic (or an idea), its STORY → TASK tree with readiness and dependencies, the progress of each story, the tasks ready to be taken, the tasks waiting for dependencies and the `[AGENT:*]` feed of the whole tree. While the epic has a branch, the *branch and acceptance* panel shows its commits and changed files relative to the base branch (click a file for its diff), the orchestrator's final `[AGENT:DONE]`, the review verdict of every story, the epic worktree with its `APP_URL`, and the checks a merge has to pass.
@@ -396,8 +397,9 @@ Everything can be set from `.env`; publish the config with `php artisan vendor:p
 | `AGENTIO_WORKTREE_SETUP` | `worktree_setup` | — | Shell command run last in every new epic worktree with the epic id as `$1` |
 | `AGENTIO_MAX_PARALLEL`, `AGENTIO_MAX_PARALLEL_TASKS` | `max_parallel`, `max_parallel_tasks` | 2, 2 | Epics at the same time; task subagents per epic |
 | `AGENTIO_INTERVAL` | `interval` | 300 | Seconds between passes of the loop |
+| `AGENTIO_LIMIT_RETRY` | `limit_retry` | 900 | Seconds the loop pauses at the usage limit of Claude Code when the reset time is unknown |
 | `AGENTIO_CLAUDE_BIN`, `AGENTIO_CLAUDE_MODEL` | `claude_binary`, `claude_model` | `claude`, — | Claude Code executable; model of the headless sessions |
-| `AGENTIO_LOGS_PATH` | `logs_path` | `storage/logs/agents` | Where the loop writes `loop.log`, `loop.pid`, `<ID>.pid`/`<ID>.log` (epic sessions), `plan-<ID>.pid`/`plan-<ID>.log` (planning sessions) and the `stop` flag; the dashboard, `agentio:status` and `agentio:log` read it |
+| `AGENTIO_LOGS_PATH` | `logs_path` | `storage/logs/agents` | Where the loop writes `loop.log`, `loop.pid`, `<ID>.pid`/`<ID>.log` (epic sessions), `plan-<ID>.pid`/`plan-<ID>.log` (planning sessions), the `stop` flag and `limit` (the pause at the usage limit of Claude Code); the dashboard, `agentio:status` and `agentio:log` read it |
 | `AGENTIO_TIMEZONE` | `timezone` | the machine's time zone | Time zone of the local timestamps the loop writes (`loop.log`, session headers); detected from `$TZ`, `/etc/timezone` or `/etc/localtime` when empty |
 | `AGENTIO_UI_ENABLED` | `ui.enabled` | `true` | Register the dashboard routes |
 | `AGENTIO_UI_PATH`, `AGENTIO_UI_DOMAIN` | `ui.path`, `ui.domain` | `agentio`, — | Where the dashboard is mounted |

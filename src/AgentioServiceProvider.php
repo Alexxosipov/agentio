@@ -14,6 +14,7 @@ use Illuminate\Support\ServiceProvider;
 use Obrazmisli\Agentio\Console\Commands\AcceptCommand;
 use Obrazmisli\Agentio\Console\Commands\CommitCommand;
 use Obrazmisli\Agentio\Console\Commands\InstallCommand;
+use Obrazmisli\Agentio\Console\Commands\LimitCommand;
 use Obrazmisli\Agentio\Console\Commands\LogCommand;
 use Obrazmisli\Agentio\Console\Commands\RunCommand;
 use Obrazmisli\Agentio\Console\Commands\SetupTelegramCommand;
@@ -130,6 +131,7 @@ final class AgentioServiceProvider extends ServiceProvider
             AcceptCommand::class,
             CommitCommand::class,
             LogCommand::class,
+            LimitCommand::class,
         ]);
 
         if (class_exists(AboutCommand::class)) {
