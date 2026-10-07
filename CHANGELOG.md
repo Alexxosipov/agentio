@@ -1,6 +1,29 @@
 # Release Notes
 
-## [Unreleased](https://github.com/Alexxosipov/agentio/compare/v0.9.0...main)
+## [Unreleased](https://github.com/Alexxosipov/agentio/compare/v0.10.0...main)
+
+## [v0.10.0](https://github.com/Alexxosipov/agentio/releases/tag/v0.10.0) - 2026-10-08
+
+Update with `composer require alexxosipov/agentio:^0.10 --dev`, run `php artisan agentio:install` (refreshes the skills), commit `.claude/skills/agentio-*` to the development branch together with `composer.json` and `composer.lock`, and restart `agentio:run`. Drop `AGENTIO_INTERVAL` from `.env` if it pins the old 300 seconds. The «Модель данных» article under «Архитектура» is no longer maintained: the analyst moves its entities into the data model article of each module as the modules are touched, and the article stays as an archive. Code already laid out as `app/<Domain>/…` is not moved: new classes go into the Laravel directories, and moving the old ones is your decision.
+
+### Added
+
+- **A data model per module.** Every module of «Системная аналитика» gets a child article «Модель данных: <Модуль>»: the entities of the module (attributes, relations, lifecycle, personal data), owned by the analyst, and their tables in the «Таблицы» section (columns, types, indexes, keys), owned by the architect. Each entity is described once, in the data model of its module; a feature article says what the feature does with it in its «Данные» section; the module article, the module map and «Архитектура: обзор» link the data model. A large schema no longer grows into one article.
+- **The execution log of an issue on the Kanban board.** A click on a card (or Enter) opens a dialog with the log of the issue and a link to it in YouTrack (in a new tab), refreshed while it is open: an idea shows its planning session, an epic its epic session, a story or a task the events of its epic session that mention it or its subtasks (`GET /agentio/api/issues/{id}/log`, the token redacted as in the other endpoints).
+
+### Changed
+
+- **The code follows the Laravel structure, grouped by domain inside it.** The default layout of the architect, developer and reviewer skills and of ADR-001 is `App\<Kind directory>\<Domain>\<Class>` — `App\Actions\Listings\PublishListing`, `App\Http\Controllers\Auth\LoginController`, `App\Models\Articles\Article`, `App\Services\Listings\…` — with mirrored tests (`tests/Feature/Actions/Listings/PublishListingTest.php`), instead of top-level domain namespaces (`App\Users\Actions\…`, `App\Shared\…`). Factories and policies follow the subdirectory of their model and are discovered by Laravel without attributes; `App\Models\User` stays where Laravel puts it. A layout written down by the project (`CLAUDE.md`/`AGENTS.md`, `.ai/guidelines`, `.ai/rules`) still comes first.
+- The loop makes a pass every 60 seconds by default instead of 300 (`AGENTIO_INTERVAL`), so a new idea or a ready epic is picked up within a minute.
+
+### Fixed
+
+- An idea created through the Telegram bot ended its reply with «⚠️ Не удалось записать в YouTrack: YouTrack MCP create_issue returned no issue id.», and the idea got no `idea` tag: the id of the created issue is now read from the `createdIssue` object the YouTrack MCP server answers with (the same for `createdArticle`). Reworking an epic from the dashboard had the same failure.
+- The Kanban board stayed empty when the browser kept an epic filter of another project served on the same origin: board filters are now stored per project, and a filter for an epic the project does not have is dropped.
+
+### Removed
+
+- The «Модель данных» article under «Архитектура» from the knowledge base `agentio:setup-youtrack` creates, and the `{{kb.architecture.data_model}}` placeholder.
 
 ## [v0.9.0](https://github.com/Alexxosipov/agentio/releases/tag/v0.9.0) - 2026-10-08
 

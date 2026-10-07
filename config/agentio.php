@@ -57,7 +57,7 @@ return [
 
     'max_parallel_tasks' => (int) env('AGENTIO_MAX_PARALLEL_TASKS', 2),
 
-    'interval' => (int) env('AGENTIO_INTERVAL', 300),
+    'interval' => (int) env('AGENTIO_INTERVAL', 60),
 
     'limit_retry' => (int) env('AGENTIO_LIMIT_RETRY', 900),
 

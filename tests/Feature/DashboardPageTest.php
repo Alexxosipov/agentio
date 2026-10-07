@@ -29,6 +29,7 @@ it('renders the dashboard shell with its assets and endpoints', function () {
         ->assertSee('"loopLog":"http://localhost/agentio/api/loop-log"', false)
         ->assertSee('"accept":"http://localhost/agentio/api/epics/__ID__/accept"', false)
         ->assertSee('"rework":"http://localhost/agentio/api/epics/__ID__/rework"', false)
+        ->assertSee('"issueLog":"http://localhost/agentio/api/issues/__ID__/log"', false)
         ->assertSee('"actions":true', false)
         ->assertDontSee('secret');
 

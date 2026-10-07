@@ -200,9 +200,12 @@ final readonly class Tools
             'customFields' => $fields === [] ? null : (object) $fields,
         ], fn (mixed $value): bool => $value !== null));
 
-        foreach (['idReadable', 'id', 'issueId'] as $key) {
-            if (is_string($issue[$key] ?? null) && preg_match('/^[A-Z][A-Z0-9_]*-\d+$/', $issue[$key]) === 1) {
-                return $issue[$key];
+        // YouTrack answers {"createdIssue": {"id": "TP-12", "url": …}, "updatedFields": […], …}.
+        foreach ([$issue['createdIssue'] ?? null, $issue] as $candidate) {
+            foreach (is_array($candidate) ? ['idReadable', 'id', 'issueId'] : [] as $key) {
+                if (is_string($candidate[$key] ?? null) && preg_match('/^[A-Z][A-Z0-9_]*-\d+$/', $candidate[$key]) === 1) {
+                    return $candidate[$key];
+                }
             }
         }
 
@@ -299,9 +302,11 @@ final readonly class Tools
             'parentArticle' => $parentArticle,
         ], fn (?string $value): bool => $value !== null));
 
-        foreach (['id', 'idReadable', 'articleId'] as $key) {
-            if (is_string($article[$key] ?? null) && $article[$key] !== '') {
-                return $article[$key];
+        foreach ([$article['createdArticle'] ?? null, $article] as $candidate) {
+            foreach (is_array($candidate) ? ['id', 'idReadable', 'articleId'] : [] as $key) {
+                if (is_string($candidate[$key] ?? null) && $candidate[$key] !== '') {
+                    return $candidate[$key];
+                }
             }
         }
 

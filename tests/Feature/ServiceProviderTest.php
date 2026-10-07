@@ -21,7 +21,7 @@ it('merges the package config with the documented defaults', function () {
         ->and(config('agentio.base_branch'))->toBeNull()
         ->and(config('agentio.max_parallel'))->toBe(2)
         ->and(config('agentio.max_parallel_tasks'))->toBe(2)
-        ->and(config('agentio.interval'))->toBe(300)
+        ->and(config('agentio.interval'))->toBe(60)
         ->and(config('agentio.worktrees_path'))->toBeNull()
         ->and(config('agentio.worktree_setup'))->toBeNull()
         ->and(config('agentio.claude_binary'))->toBe('claude')

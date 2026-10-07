@@ -108,7 +108,8 @@ it('creates an idea the developer described', function () {
         $mcp->issue('XY-30', 'Idea', 'Backlog', summary: (string) $arguments['summary']);
         $mcp->issues['XY-30']['description'] = (string) $arguments['description'];
 
-        return ['id' => 'XY-30', 'url' => FakeYouTrackMcp::URL.'/issue/XY-30'];
+        // The answer of YouTrack's MCP server: the readable id under "createdIssue".
+        return ['createdIssue' => ['id' => 'XY-30', 'url' => FakeYouTrackMcp::URL.'/issue/XY-30'], 'updatedFields' => ['Type', 'Stage'], 'failedToUpdateFields' => []];
     });
 
     app(Responder::class)->answer(app(Conversation::class)->putInbox(new IncomingMessage(8, 1008, '42', 'Сделай оплату через СБП')));

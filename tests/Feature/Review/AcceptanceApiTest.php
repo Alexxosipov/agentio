@@ -397,7 +397,7 @@ it('leaves an epic that conflicts with the base branch to the human', function (
 it('sends the epic back with a task in the story', function () {
     $project = reviewRepository();
     $mcp = acceptanceEnvironment($project);
-    $mcp->on('create_issue', fn (array $arguments): array => ['id' => '2-77', 'idReadable' => 'XY-20']);
+    $mcp->on('create_issue', fn (array $arguments): array => ['createdIssue' => ['id' => 'XY-20', 'url' => FakeYouTrackMcp::URL.'/issue/XY-20'], 'updatedFields' => ['Type', 'Stage'], 'failedToUpdateFields' => [], 'parentIssue' => ['id' => 'XY-4', 'url' => FakeYouTrackMcp::URL.'/issue/XY-4']]);
 
     $this->postJson('/agentio/api/epics/XY-2/rework', ['story' => 'XY-4', 'remark' => "Аватар не обрезается до квадрата.\nСм. ProfileController."])
         ->assertOk()

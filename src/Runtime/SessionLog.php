@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Obrazmisli\Agentio\Runtime;
 
 use Carbon\CarbonImmutable;
+use Closure;
 use Illuminate\Support\Str;
 use Throwable;
 
@@ -97,11 +98,13 @@ final readonly class SessionLog
     }
 
     /**
-     * The last $limit events, oldest first, scanning at most $maxBytes from the end.
+     * The last $limit events, oldest first, scanning at most $maxBytes from the end; with a filter, the last $limit
+     * events it accepts.
      *
+     * @param  (Closure(SessionEvent): bool)|null  $filter
      * @return list<SessionEvent>
      */
-    public function tail(int $limit = 50, int $maxBytes = self::DEFAULT_MAX_BYTES): array
+    public function tail(int $limit = 50, int $maxBytes = self::DEFAULT_MAX_BYTES, ?Closure $filter = null): array
     {
         if ($limit <= 0) {
             return [];
@@ -112,6 +115,7 @@ final readonly class SessionLog
 
         foreach (ReverseLineReader::lines($this->path, $maxBytes) as $offset => $line) {
             $events = self::parseLine($line, $offset, $this->timezone);
+            $events = $filter === null ? $events : array_values(array_filter($events, $filter));
 
             if ($events !== []) {
                 $groups[] = $events;

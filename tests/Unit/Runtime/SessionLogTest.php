@@ -180,6 +180,14 @@ it('returns the last events oldest first', function () {
         ->and(sessionLog()->tail(1000))->toHaveCount(14);
 });
 
+it('returns the last events a filter accepts', function () {
+    $inside = sessionLog()->tail(2, filter: fn (SessionEvent $event): bool => $event->inSubagent);
+
+    expect($inside)->toHaveCount(2)
+        ->and(collect($inside)->every(fn (SessionEvent $event): bool => $event->inSubagent))->toBeTrue()
+        ->and(sessionLog()->tail(5, filter: fn (SessionEvent $event): bool => false))->toBe([]);
+});
+
 it('handles missing and empty logs', function () {
     $directory = temporaryDirectory();
     touch($directory.'/empty.log');

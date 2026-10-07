@@ -26,8 +26,8 @@ worktree: `/abs/path/to/worktree`
 2. ...
 
 **Затрагиваемые файлы:**
-- `app/Users/Actions/UpdateUserAvatar.php` (новый)
-- `tests/Feature/Users/Actions/UpdateUserAvatarTest.php` (новый)
+- `app/Actions/Users/UpdateUserAvatar.php` (новый)
+- `tests/Feature/Actions/Users/UpdateUserAvatarTest.php` (новый)
 - `routes/web.php`
 
 **Допущения:**
@@ -43,7 +43,7 @@ worktree: `/abs/path/to/worktree`
 **Отвергнуто:**
 - Spatie Media Library — новая зависимость ради одного поля.
 - Хранение в БД (blob) — нагрузка на БД, нет CDN.
-**Влияние:** миграция `add_avatar_path_to_users_table`, статьи «Модель данных» и фичи «Профиль и аватар» ({{project}}-A-…) обновлены.
+**Влияние:** миграция `add_avatar_path_to_users_table`, статьи «Модель данных: Пользователи» и фичи «Профиль и аватар» ({{project}}-A-…) обновлены.
 ```
 
 ## [AGENT:BLOCKED]

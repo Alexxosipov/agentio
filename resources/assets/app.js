@@ -23,7 +23,9 @@
         open: new Set(),
         expanded: new Set(),
         showDone: load('showDone', false),
-        filters: load('filters', { epic: '', type: '', q: '' }),
+        // Per project: dashboards of several projects on one origin (localhost:8000) share localStorage.
+        filters: load('filters.' + cfg.project, { epic: '', type: '', q: '' }),
+        modal: null,
         timer: null,
         seq: 0,
         forms: {},
@@ -628,6 +630,11 @@
             return empty('Доска строится по задачам YouTrack — <strong>YouTrack не настроен</strong>.');
         }
         const f = S.filters;
+        if (f.epic && f.epic !== '-' && d.youtrack.ok && !d.epics.some((e) => e.id === f.epic)) {
+            // An epic that is gone (or of another project) would hide every card while the select shows "Все эпики".
+            f.epic = '';
+            save('filters.' + cfg.project, f);
+        }
         const q = f.q.trim().toLowerCase();
         const match = (card) => (!f.type || card.type === f.type)
             && (!f.epic || (f.epic === '-' ? !card.epicId : card.epicId === f.epic))
@@ -637,7 +644,7 @@
             const cards = column.issues.filter(match);
             shown += cards.length;
             const limit = column.state === 'Done' && !q ? 60 : Infinity;
-            const body = cards.slice(0, limit).map((c) => `<article class="card${c.claimed ? ' claimed' : ''}">`
+            const body = cards.slice(0, limit).map((c) => `<article class="card${c.claimed ? ' claimed' : ''}" data-issue="${esc(c.id)}" tabindex="0" role="button" aria-haspopup="dialog" title="Лог выполнения ${esc(c.id)}">`
                 + `<div class="card-top">${typeBadge(c.type)}${idLink(c.id, c.url)}${c.epicId && c.epicId !== c.id ? `<a class="epic" href="#/epic/${encodeURIComponent(c.epicId)}" title="Эпик">${esc(c.epicId)}</a>` : ''}</div>`
                 + `<div class="card-title">${['Epic', 'Story', 'Idea'].includes(c.type) ? `<a href="#/epic/${encodeURIComponent(c.id)}" style="color:inherit">${esc(c.summary)}</a>` : esc(c.summary)}</div>`
                 + (c.owner ? ownerChip(c.owner, c.since) : c.claimed ? '<span class="owner"><span>захвачена</span></span>' : '')
@@ -943,6 +950,101 @@
         tick();
     }
 
+    /* ---------- issue log modal ---------- */
+
+    const modalSlot = document.createElement('div');
+    modalSlot.className = 'modal-root';
+    document.body.appendChild(modalSlot);
+
+    function findCard(id) {
+        const board = S.data.board;
+        for (const column of (board && board.columns) || []) {
+            const card = column.issues.find((c) => c.id === id);
+            if (card) {
+                return card;
+            }
+        }
+        return null;
+    }
+
+    function issueLogBody(d) {
+        if (!d) {
+            return S.errors['issueLog:' + S.modal.id] ? empty('Не удалось загрузить лог.') : skeleton();
+        }
+        if (!d.session) {
+            return empty('Лога выполнения нет: задачу ещё не брали в работу (или её сессия шла на другой машине).');
+        }
+        if (!d.events.length) {
+            return empty(d.filtered
+                ? `В логе сессии <code>${esc(d.session.logPath)}</code> событий по задаче нет.`
+                : `Событий в <code>${esc(d.session.logPath)}</code> пока нет.`);
+        }
+        return `<ul class="events">${d.events.map(eventRow).join('')}</ul>`;
+    }
+
+    function renderModal() {
+        if (!S.modal) {
+            patch(modalSlot, '');
+            return;
+        }
+        const id = S.modal.id;
+        const d = S.data['issueLog:' + id];
+        const issue = (d && d.issue) || S.modal.card || { id, summary: '', type: null, state: null };
+        const href = safeUrl(d && d.url) || safeUrl(issue.url) || safeUrl(issueHref(id));
+        const session = d && d.session;
+        const facts = session ? [
+            `<span>${session.kind === 'plan' ? 'Планирование' : 'Сессия эпика'} <b class="mono">${esc(session.logPath)}</b></span>`,
+            session.alive ? '<span class="ok-text">идёт сейчас</span>' : '',
+            session.updatedAt ? `<span>лог обновлён ${esc(ago(session.updatedAt))}</span>` : '',
+            d.filtered ? `<span class="faint">только события ${esc(id)} и её подзадач</span>` : '',
+        ].filter(Boolean).join('') : '';
+
+        const scroller = modalSlot.querySelector('[data-modal-log]');
+        const stick = !scroller || scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 24;
+        const changed = patch(modalSlot, '<div class="modal-backdrop" data-action="close-modal">'
+            + `<section class="modal" role="dialog" aria-modal="true" aria-label="Лог выполнения ${esc(id)}">`
+            + '<div class="modal-head">'
+            + `<div class="line">${typeBadge(issue.type)}<span class="id">${esc(id)}</span><span class="summary" title="${esc(issue.summary)}">${esc(issue.summary)}</span>${stateBadge(issue.state)}</div>`
+            + '<button type="button" class="modal-close" data-action="close-modal" aria-label="Закрыть">×</button></div>'
+            + '<div class="modal-links">'
+            + (href ? `<a href="${esc(href)}" target="_blank" rel="noopener">Открыть в YouTrack ↗</a>` : '')
+            + (['Epic', 'Story', 'Idea'].includes(issue.type) ? `<a href="#/epic/${encodeURIComponent(id)}">Страница ${issue.type === 'Idea' ? 'идеи' : issue.type === 'Story' ? 'истории' : 'эпика'} →</a>` : '')
+            + (issue.epicId && issue.epicId !== id ? `<a href="#/epic/${encodeURIComponent(issue.epicId)}">Эпик ${esc(issue.epicId)} →</a>` : '')
+            + '</div>'
+            + (facts ? `<div class="session-facts modal-facts">${facts}</div>` : '')
+            + `<div class="modal-body scroll" data-modal-log>${issueLogBody(d)}</div>`
+            + (d && d.lastResult ? resultFoot(d.lastResult) : '')
+            + '</section></div>');
+        const log = modalSlot.querySelector('[data-modal-log]');
+        if (changed && log && stick) {
+            log.scrollTop = log.scrollHeight;
+        }
+    }
+
+    function openModal(id) {
+        S.modal = { id, card: findCard(id), opener: document.activeElement };
+        document.body.classList.add('modal-open');
+        renderModal();
+        const close = modalSlot.querySelector('.modal-close');
+        if (close) {
+            close.focus();
+        }
+        tick();
+    }
+
+    function closeModal() {
+        if (!S.modal) {
+            return;
+        }
+        const opener = S.modal.opener;
+        S.modal = null;
+        document.body.classList.remove('modal-open');
+        renderModal();
+        if (opener && document.contains(opener)) {
+            opener.focus();
+        }
+    }
+
     /* ---------- layout ---------- */
 
     const LAYOUTS = {
@@ -1032,6 +1134,7 @@
             renderEpic();
             renderReview();
         }
+        renderModal();
     }
 
     /* ---------- data ---------- */
@@ -1080,6 +1183,9 @@
                 urls.pipeline = e.pipeline;
             }
         }
+        if (S.modal) {
+            urls['issueLog:' + S.modal.id] = e.issueLog.replace('__ID__', encodeURIComponent(S.modal.id));
+        }
         return Object.entries(urls);
     }
 
@@ -1125,6 +1231,7 @@
     }
 
     function route() {
+        closeModal();
         S.route = parseRoute();
         viewSlot.innerHTML = LAYOUTS[S.route.view]();
         const type = viewSlot.querySelector('[data-filter="type"]');
@@ -1137,6 +1244,16 @@
     }
 
     document.addEventListener('click', (event) => {
+        const closer = event.target.closest('[data-action="close-modal"]');
+        if (closer && (closer.classList.contains('modal-close') || event.target === closer)) {
+            closeModal();
+            return;
+        }
+        const card = event.target.closest('.card[data-issue]');
+        if (card && !event.target.closest('a, button, select, input')) {
+            openModal(card.dataset.issue);
+            return;
+        }
         const button = event.target.closest('[data-action="expand"]');
         if (button) {
             const key = button.dataset.key;
@@ -1159,7 +1276,7 @@
             reviewForm(target.closest('[data-form]').dataset.form)[target.dataset.field] = target.type === 'checkbox' ? target.checked : target.value;
         } else if (target.matches('[data-filter]')) {
             S.filters[target.dataset.filter] = target.value;
-            save('filters', S.filters);
+            save('filters.' + cfg.project, S.filters);
             render();
         }
     });
@@ -1167,7 +1284,7 @@
     document.addEventListener('input', (event) => {
         if (event.target.matches('[data-filter="q"]')) {
             S.filters.q = event.target.value;
-            save('filters', S.filters);
+            save('filters.' + cfg.project, S.filters);
             render();
         } else if (event.target.matches('[data-form] textarea[data-field]')) {
             reviewForm(event.target.closest('[data-form]').dataset.form)[event.target.dataset.field] = event.target.value;
@@ -1189,6 +1306,15 @@
             }
         }
     }, true);
+
+    document.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape' && S.modal) {
+            closeModal();
+        } else if ((event.key === 'Enter' || event.key === ' ') && event.target.matches && event.target.matches('.card[data-issue]')) {
+            event.preventDefault();
+            openModal(event.target.dataset.issue);
+        }
+    });
 
     document.addEventListener('visibilitychange', () => {
         if (!document.hidden) {

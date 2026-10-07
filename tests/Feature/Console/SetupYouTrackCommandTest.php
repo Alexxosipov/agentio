@@ -79,7 +79,7 @@ function existingKnowledgeBase(FakeYouTrackMcp $mcp): void
         $kb[$key] = 'XY-A-'.($index + 1);
     }
 
-    $mcp->articles['XY-A-10']['content'] = KnowledgeBase::ofPackage()->content('guide', new Placeholders('XY', 'dev', $kb));
+    $mcp->articles[$kb[KnowledgeBase::GUIDE]]['content'] = KnowledgeBase::ofPackage()->content(KnowledgeBase::GUIDE, new Placeholders('XY', 'dev', $kb));
 }
 
 it('sets up an empty project: Stage and Type values, tags, saved searches and the knowledge base', function () {
@@ -110,6 +110,7 @@ it('sets up an empty project: Stage and Type values, tags, saved searches and th
     $expected = array_values(array_diff(array_column(KnowledgeBase::ARTICLES, 0), ['Руководство по автоматизации']));
 
     expect($titles)->toBe([...$expected, 'Руководство по автоматизации'])
+        ->not->toContain('Модель данных')
         ->and($mcp->callsOf('update_article'))->toHaveCount(1)
         ->and($mcp->articles[$kb['guide']]['content'])->toContain('статья **'.$kb['guide'].' «Руководство по автоматизации»**')
         ->and($created[0])->not->toHaveKey('parentArticle')

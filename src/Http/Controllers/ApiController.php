@@ -10,6 +10,7 @@ use Obrazmisli\Agentio\Agentio;
 use Obrazmisli\Agentio\Dashboard\ActivityPresenter;
 use Obrazmisli\Agentio\Dashboard\BoardPresenter;
 use Obrazmisli\Agentio\Dashboard\EpicPresenter;
+use Obrazmisli\Agentio\Dashboard\IssueLogPresenter;
 use Obrazmisli\Agentio\Dashboard\PipelinePresenter;
 use Obrazmisli\Agentio\Dashboard\ReviewPresenter;
 use Obrazmisli\Agentio\Dashboard\SessionsPresenter;
@@ -60,6 +61,11 @@ final class ApiController
     public function board(BoardPresenter $presenter): JsonResponse
     {
         return self::json($presenter->present());
+    }
+
+    public function issueLog(IssueLogPresenter $presenter, string $id): JsonResponse
+    {
+        return self::json($presenter->present($id));
     }
 
     public function events(ActivityPresenter $presenter): JsonResponse

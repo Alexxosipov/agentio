@@ -276,6 +276,76 @@ it('builds the Kanban board', function () {
         ->and($response->json('types'))->toBe(['Idea', 'Epic', 'Story', 'Task']);
 });
 
+it('shows the log of a task: the events of its epic session that mention it', function () {
+    runningLoopLogs(dashboardEnvironment());
+    fakeYouTrack();
+
+    $response = $this->getJson('/agentio/api/issues/TP-6/log')->assertOk();
+    $texts = collect($response->json('events'))->map(fn (array $event): string => $event['subagent'].' '.$event['text'].' '.$event['detail']);
+
+    expect($response->json())->toMatchArray(['id' => 'TP-6', 'url' => 'https://yt.example.com/issue/TP-6', 'filtered' => true, 'lastResult' => null])
+        ->and($response->json('issue'))->toMatchArray(['id' => 'TP-6', 'summary' => 'Обработка', 'type' => 'Task', 'state' => 'In Progress', 'epicId' => 'TP-2', 'parentId' => 'TP-3', 'owner' => 'host:/w/TP-2#TP-6'])
+        ->and($response->json('session'))->toMatchArray(['name' => 'TP-2', 'kind' => 'epic', 'alive' => true, 'logPath' => 'TP-2.log', 'exists' => true])
+        ->and($texts)->not->toBeEmpty()
+        ->and($texts->every(fn (string $text): bool => str_contains($text, 'TP-6')))->toBeTrue()
+        ->and(collect($response->json('events'))->pluck('type')->all())->toContain('subagent', 'tool_use')
+        ->and(collect($response->json('events'))->pluck('text')->all())->not->toContain('GD с WebP доступен. Захватываю задачу.');
+});
+
+it('shows the log of a story with the events of its tasks', function () {
+    runningLoopLogs(dashboardEnvironment());
+    fakeYouTrack();
+
+    $texts = collect($this->getJson('/agentio/api/issues/TP-3/log')->assertOk()->json('events'))->pluck('text');
+
+    expect($texts)->toContain('GD с WebP доступен. Захватываю задачу.', 'Read task context from YouTrack');
+});
+
+it('shows the whole session log of an epic and of an idea', function () {
+    runningLoopLogs(dashboardEnvironment());
+    fakeYouTrack();
+
+    $epic = $this->getJson('/agentio/api/issues/TP-2/log')->assertOk();
+    $idea = $this->getJson('/agentio/api/issues/TP-1/log')->assertOk();
+
+    expect($epic->json('filtered'))->toBeFalse()
+        ->and($epic->json('session.name'))->toBe('TP-2')
+        ->and($epic->json('events.0.type'))->toBe('session_start')
+        ->and($epic->json('lastResult.costUsd'))->toBe(4.450337399999998)
+        ->and($idea->json('session'))->toMatchArray(['name' => 'plan-TP-1', 'kind' => 'plan', 'alive' => false, 'logPath' => 'plan-TP-1.log'])
+        ->and($idea->json('events'))->toHaveCount(1)
+        ->and($idea->json('events.0.text'))->toBe('/agentio-plan TP-1 in /srv/app')
+        ->and($idea->json('url'))->toBe('https://yt.example.com/issue/TP-1');
+});
+
+it('shows no log for an issue no session has worked on', function () {
+    runningLoopLogs(dashboardEnvironment());
+    fakeYouTrack();
+
+    $this->getJson('/agentio/api/issues/TP-9/log')->assertOk()->assertJson([
+        'id' => 'TP-9',
+        'url' => 'https://yt.example.com/issue/TP-9',
+        'issue' => ['id' => 'TP-9', 'type' => 'Epic'],
+        'session' => null,
+        'events' => [],
+    ]);
+    $this->getJson('/agentio/api/issues/not-an-id/log')->assertNotFound();
+});
+
+it('shows the own session log of an issue without YouTrack', function () {
+    runningLoopLogs(dashboardEnvironment(configured: false));
+
+    $this->getJson('/agentio/api/issues/TP-2/log')->assertOk()
+        ->assertJsonPath('url', null)
+        ->assertJsonPath('issue', null)
+        ->assertJsonPath('session.name', 'TP-2')
+        ->assertJsonPath('filtered', false)
+        ->assertJsonPath('events.0.type', 'session_start');
+    $this->getJson('/agentio/api/issues/TP-6/log')->assertOk()->assertJsonPath('session', null)->assertJsonPath('events', []);
+
+    Http::assertNothingSent();
+});
+
 it('shows an epic in detail', function () {
     dashboardEnvironment();
     fakeYouTrack();
@@ -369,4 +439,5 @@ it('requires authorization for the API', function () {
     $this->getJson('/agentio/api/status')->assertForbidden();
     $this->getJson('/agentio/api/sessions')->assertForbidden();
     $this->getJson('/agentio/api/epics/TP-2')->assertForbidden();
+    $this->getJson('/agentio/api/issues/TP-2/log')->assertForbidden();
 });

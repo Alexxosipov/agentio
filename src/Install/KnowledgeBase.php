@@ -9,8 +9,8 @@ namespace Obrazmisli\Agentio\Install;
  *
  * Article templates live in stubs/youtrack/articles/<key>.md; the "guide" article is a copy of the manual of
  * the package (resources/docs/AUTONOMOUS_WORKFLOW.md). Under "Системная аналитика" only the common
- * requirements are created: the agentio-system-analyst skill adds module articles and their feature articles
- * as the product grows.
+ * requirements are created: the agentio-system-analyst skill adds module articles, with the data model article
+ * and the feature articles of each module, as the product grows.
  */
 final readonly class KnowledgeBase
 {
@@ -25,7 +25,6 @@ final readonly class KnowledgeBase
         'analysis.common' => ['Общие требования', 'analysis'],
         'architecture' => ['Архитектура', null],
         'architecture.overview' => ['Архитектура: обзор', 'architecture'],
-        'architecture.data_model' => ['Модель данных', 'architecture'],
         'adr' => ['ADR', 'architecture'],
         'adr.001' => ['ADR-001: Базовые архитектурные решения', 'adr'],
         'process' => ['Процесс разработки', null],
