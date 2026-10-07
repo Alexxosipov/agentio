@@ -5,9 +5,9 @@ declare(strict_types=1);
 use Illuminate\Support\Facades\Route;
 use Obrazmisli\Agentio\Console\Commands\RunCommand;
 use Obrazmisli\Agentio\Runtime\LoopState;
-use Obrazmisli\Agentio\Runtime\MergePolicy;
 use Obrazmisli\Agentio\Runtime\SessionSettings;
 use Obrazmisli\Agentio\Settings;
+use Obrazmisli\Agentio\Tests\Fakes\FakeGitHub;
 use Symfony\Component\Process\Process;
 
 it('passes the settings, the session settings and the MCP configs of the package to the loop', function () {
@@ -16,7 +16,7 @@ it('passes the settings, the session settings and the MCP configs of the package
     $command = app(RunCommand::class);
     $package = dirname(__DIR__, 3);
 
-    $environment = $command->environment(app(Settings::class), MergePolicy::PullRequest, app(LoopState::class));
+    $environment = $command->environment(app(Settings::class), app(LoopState::class));
 
     expect($environment)->toMatchArray([
         'AGENTIO_ROOT' => $project,
@@ -29,7 +29,6 @@ it('passes the settings, the session settings and the MCP configs of the package
         'MAX_PARALLEL_TASKS' => '4',
         'AGENT_LOOP_INTERVAL' => '60',
         'CLAUDE_BIN' => $project.'/bin/claude',
-        'MERGE_POLICY' => 'pull-request',
         'AGENT_LOG_DIR' => $project.'/storage/logs/agents',
         'AGENTIO_STOP_FILE' => $project.'/storage/logs/agents/stop',
         'AGENTIO_SESSION_SETTINGS' => (new SessionSettings(app(Settings::class)))->toJson(),
@@ -39,11 +38,11 @@ it('passes the settings, the session settings and the MCP configs of the package
         // The variables Laravel loaded from the project .env stay out of the loop and of the agents' sessions.
         'APP_ENV' => false,
         'DB_DATABASE' => false,
-    ])->not->toHaveKey('AGENTIO_TIMEZONE');
+    ])->not->toHaveKeys(['AGENTIO_TIMEZONE', 'MERGE_POLICY']);
 
     mkdir($project.'/vendor/laravel/boost', 0777, true);
 
-    expect($command->environment(app(Settings::class), MergePolicy::LocalBranch, app(LoopState::class))['AGENTIO_MCP_CONFIG'])
+    expect($command->environment(app(Settings::class), app(LoopState::class))['AGENTIO_MCP_CONFIG'])
         ->toBe($package."/resources/claude/mcp/youtrack.json\n".$package.'/resources/claude/mcp/laravel-boost.json');
 });
 
@@ -51,7 +50,7 @@ it('lets the artisan commands of the loop read the bot settings from .env afresh
     $project = projectForLoop();
     file_put_contents($project.'/.env', "AGENTIO_TELEGRAM_BOT_TOKEN=1:old\nAGENTIO_TRANSCRIPTION_DRIVER=openai\nAGENTIO_PROJECT=XY\n");
 
-    $environment = app(RunCommand::class)->environment(app(Settings::class), MergePolicy::LocalBranch, app(LoopState::class));
+    $environment = app(RunCommand::class)->environment(app(Settings::class), app(LoopState::class));
 
     // The bot keys are unset, so the children read .env; the other agentio keys are passed as configured.
     expect($environment)->toMatchArray(['AGENTIO_TELEGRAM_BOT_TOKEN' => false, 'AGENTIO_TRANSCRIPTION_DRIVER' => false, 'AGENTIO_PROJECT' => 'XY']);
@@ -61,27 +60,35 @@ it('runs the loop of the package in the project and streams its output', functio
     projectForLoop(['XY-1']);
 
     $this->artisan('agentio:run', ['--dry-run' => true])
-        ->expectsOutputToContain('PROJECT=XY MERGE_POLICY=local-branch MAX_PARALLEL=3 MAX_PARALLEL_TASKS=4 BASE_BRANCH=develop')
+        ->expectsOutputToContain('PROJECT=XY MAX_PARALLEL=3 MAX_PARALLEL_TASKS=4 BASE_BRANCH=develop')
         ->expectsOutputToContain('XY-1 Idea')
         ->assertSuccessful();
 });
 
-it('takes the project, the base branch and the merge policy from .agentio.json when the config has none', function () {
+it('takes the project and the base branch from .agentio.json when the config has none', function () {
     $project = projectForLoop();
-    file_put_contents($project.'/.agentio.json', json_encode(['project' => 'AB', 'base_branch' => 'trunk', 'merge_policy' => 'auto-merge']));
+    // The merge policy of an earlier agentio version is ignored: epics are accepted only through pull requests.
+    file_put_contents($project.'/.agentio.json', json_encode(['project' => 'AB', 'base_branch' => 'trunk', 'merge_policy' => 'local-branch']));
     config(['agentio.youtrack.project' => null, 'agentio.base_branch' => null]);
 
     $this->artisan('agentio:run', ['--dry-run' => true])
-        ->expectsOutputToContain('PROJECT=AB MERGE_POLICY=auto-merge MAX_PARALLEL=3 MAX_PARALLEL_TASKS=4 BASE_BRANCH=trunk')
+        ->expectsOutputToContain('PROJECT=AB MAX_PARALLEL=3 MAX_PARALLEL_TASKS=4 BASE_BRANCH=trunk')
         ->assertSuccessful();
+});
 
-    config(['agentio.merge_policy' => 'whenever']);
+it('does not start the loop without a GitHub CLI that is logged in', function () {
+    projectForLoop();
+    $github = (new FakeGitHub(''))->fake();
+    $github->authenticated = false;
 
-    $this->artisan('agentio:run')->expectsOutputToContain('Invalid merge policy')->assertFailed();
+    $this->artisan('agentio:run', ['--once' => true])
+        ->expectsOutputToContain('GitHub CLI (gh): not logged in: run gh auth login')
+        ->assertFailed();
 });
 
 it('returns the exit code of the loop', function () {
     $project = projectForLoop();
+    (new FakeGitHub(''))->fake();
     mkdir($project.'/storage/logs/agents', 0777, true);
     file_put_contents($project.'/storage/logs/agents/loop.pid', (string) getmypid());
 
@@ -113,6 +120,7 @@ it('warns about a leftover stop flag and removes it with --fresh', function () {
     $project = projectForLoop();
     mkdir($project.'/storage/logs/agents', 0777, true);
     touch($project.'/storage/logs/agents/stop');
+    (new FakeGitHub(''))->fake();
 
     $this->artisan('agentio:run', ['--once' => true])
         ->expectsOutputToContain('Use --fresh to remove it.')
@@ -134,11 +142,13 @@ it('explains what is missing before starting', function () {
     $project = projectForLoop();
     unlink($project.'/.claude/skills/agentio-work-epic/SKILL.md');
     config(['agentio.youtrack.token' => null, 'agentio.claude_binary' => 'claude-that-does-not-exist', 'agentio.worktrees_path' => null]);
+    (new FakeGitHub(''))->fake()->installed = false;
 
     $this->artisan('agentio:run')
         ->expectsOutputToContain('The agentio skills are not installed (.claude/skills/agentio-*): run php artisan agentio:install')
         ->expectsOutputToContain('The worktrees directory is not configured (AGENTIO_WORKTREES_PATH)')
         ->expectsOutputToContain('Claude Code CLI not found (claude-that-does-not-exist)')
+        ->expectsOutputToContain('GitHub CLI (gh): install it (https://cli.github.com)')
         ->expectsOutputToContain('YOUTRACK_TOKEN is not set')
         ->assertFailed();
 
@@ -182,6 +192,7 @@ it('forwards SIGTERM to the loop, which finishes its step and exits', function (
         require %s;
         $app = Orchestra\Testbench\Foundation\Application::create(options: ['extra' => ['providers' => [Obrazmisli\Agentio\AgentioServiceProvider::class]]]);
         $app->setBasePath(__DIR__);
+        Illuminate\Support\Facades\Process::fake(["'gh' *" => Illuminate\Support\Facades\Process::result()]);
         config(['agentio.youtrack.url' => 'https://yt.example.com', 'agentio.youtrack.token' => 'secret', 'agentio.claude_binary' => __DIR__.'/bin/claude', 'agentio.logs_path' => __DIR__.'/logs', 'agentio.worktrees_path' => __DIR__.'/worktrees']);
         exit($app->make(Illuminate\Contracts\Console\Kernel::class)->handle(new Symfony\Component\Console\Input\ArgvInput(['artisan', 'agentio:run', '--interval=60']), new Symfony\Component\Console\Output\ConsoleOutput));
         PHP, var_export(dirname(__DIR__, 3).'/vendor/autoload.php', true)));

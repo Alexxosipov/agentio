@@ -29,11 +29,12 @@ final class TelegramCommand extends Command
      */
     protected $signature = 'agentio:telegram
         {action=status : listen, notify, assist, send or status}
-        {argument? : notify: the event (planned, review, merged, blocked, limit, resumed); assist: the message key; send: the text}
+        {argument? : notify: the event (planned, review, blocked, limit, resumed); assist: the message key; send: the text}
         {id? : notify: the issue id (optional for limit and resumed)}
         {--name= : notify blocked: the name of the session (its log)}
         {--until= : notify limit: when the loop resumes (Unix time)}
         {--window= : notify limit: the limit hit (five_hour, seven_day, ...)}
+        {--url= : notify review: the pull request of the epic}
         {--passes= : listen: stop after this many polls}
         {--poll-timeout=25 : listen: seconds a poll waits for updates}';
 
@@ -105,6 +106,7 @@ final class TelegramCommand extends Command
                 $this->stringOption('name'),
                 $until !== null && ctype_digit($until) ? (int) $until : null,
                 $window === '-' ? null : $window,
+                $this->stringOption('url'),
             ));
         } catch (Throwable $exception) {
             $this->components->warn('The Telegram report was not queued: '.$exception->getMessage());

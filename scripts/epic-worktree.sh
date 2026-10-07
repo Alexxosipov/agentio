@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Creates (or reuses) the git worktree of an epic on its branch (EPIC_BRANCH, named after the epic id and started
-# from the development branch BASE_BRANCH) and prepares an isolated environment in it:
+# from the development branch BASE_BRANCH — from the one of origin when it is ahead: epics are merged there through
+# pull requests) and prepares an isolated environment in it:
 # composer dependencies, its own .env (own APP_KEY, SQLite database, cache/queue prefixes, port),
 # migrations and, when the project has a frontend build, JS dependencies and the build.
 # Prints the worktree path on the last line of stdout.
@@ -63,7 +64,13 @@ if [[ -d "$dir/.git" || -f "$dir/.git" ]]; then
 elif git -C "$root" show-ref --verify --quiet "refs/heads/$branch"; then
     git -C "$root" worktree add "$dir" "$branch" >&2
 else
-    git -C "$root" worktree add -b "$branch" "$dir" "$base" >&2
+    start="refs/heads/$base"
+    if git -C "$root" remote get-url origin >/dev/null 2>&1 \
+        && git -C "$root" fetch --quiet origin "+refs/heads/$base:refs/remotes/origin/$base" 2>/dev/null \
+        && git -C "$root" merge-base --is-ancestor "refs/heads/$base" "refs/remotes/origin/$base" 2>/dev/null; then
+        start="refs/remotes/origin/$base"
+    fi
+    git -C "$root" worktree add --no-track -b "$branch" "$dir" "$start" >&2
 fi
 
 # The JS package manager follows the lock file; without one the frontend steps are skipped.

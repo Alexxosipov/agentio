@@ -1,16 +1,18 @@
 ---
 name: agentio-work-epic
-description: Оркестратор эпика проекта {{project}} — захватывает EPIC, идёт по готовым TASK согласно зависимостям, отдаёт каждую задачу субагенту со скиллом agentio-develop-task (независимые — параллельно), после каждой STORY запускает субагента со скиллом agentio-review-story, в конце оформляет результат по политике слияния и переводит эпик в Review. Повторный запуск продолжает с места остановки по данным YouTrack. Запускается циклом агентов в worktree эпика.
+description: Оркестратор эпика проекта {{project}} — захватывает EPIC, идёт по готовым TASK согласно зависимостям, отдаёт каждую задачу субагенту со скиллом agentio-develop-task (независимые — параллельно), после каждой STORY запускает субагента со скиллом agentio-review-story, в конце публикует ветку эпика pull request'ом в {{base_branch}} (php artisan agentio:pr) и переводит эпик в Review. Повторный запуск продолжает с места остановки по данным YouTrack. Запускается циклом агентов в worktree эпика.
 argument-hint: <ID эпика {{project}}-N>
 disable-model-invocation: true
-allowed-tools: Skill Agent Bash(php artisan agentio:yt *) Bash(composer test*) Bash(vendor/bin/pest *) Bash(git *) mcp__youtrack__*
+allowed-tools: Skill Agent Bash(php artisan agentio:yt *) Bash(php artisan agentio:pr *) Bash(composer test*) Bash(vendor/bin/pest *) Bash(git *) mcp__youtrack__*
 ---
 
 # /agentio-work-epic $ARGUMENTS
 
 Ты — оркестратор эпика `$ARGUMENTS`. Сам код не пишешь: каждую TASK выполняет субагент со скиллом agentio-develop-task, каждую STORY проверяет субагент со скиллом agentio-review-story. Правила процесса — скилл agentio-youtrack-workflow (загрузи его через Skill первым делом). Работаешь автономно.
 
-Параметры (из окружения, иначе значения по умолчанию): `MAX_PARALLEL_TASKS` (2), `BASE_BRANCH` ({{base_branch}}), `MERGE_POLICY` ({{merge_policy}}).
+Параметры (из окружения, иначе значения по умолчанию): `MAX_PARALLEL_TASKS` (2), `BASE_BRANCH` ({{base_branch}}).
+
+**Ветки и слияния.** Все TASK всех STORY эпика коммитятся прямо в ветку эпика в этом worktree — работа историй сливается в эпик автоматически и локально, без push и без pull request'ов. На GitHub уходит только ветка эпика, одним pull request'ом в `{{base_branch}}` (шаг 4). Сливает этот pull request только человек (панель `/agentio`, `php artisan agentio:accept`, Telegram-бот agentio) — ни ты, ни субагенты не сливаете ничего в `{{base_branch}}` и `{{production_branch}}`.
 
 ## 0. Предусловия
 
@@ -68,17 +70,12 @@ git rev-parse --show-toplevel # путь worktree
 ## 4. Завершение
 
 - **Все STORY в `Review` или `Done`:**
-  0. **Синхронизация с `{{base_branch}}`** — ветка эпика получает то, что приняли в `{{base_branch}}` после её создания (другие эпики), и полный прогон проверяет уже объединённый код:
-     - политика `local-branch`: `git merge --no-edit {{base_branch}}`;
-     - `pull-request` / `auto-merge`: `git fetch origin {{base_branch}}`, затем `git merge --no-edit origin/{{base_branch}}`.
+  0. **Синхронизация с `{{base_branch}}`** — ветка эпика получает то, что приняли в `{{base_branch}}` на GitHub после её создания (pull request'ы других эпиков), и полный прогон проверяет уже объединённый код: `git fetch origin {{base_branch}}`, затем `git merge --no-edit origin/{{base_branch}}`.
 
      При конфликте выполни `git diff --name-only --diff-filter=U` (список файлов), затем `git merge --abort`. Сам конфликты не разрешай: перечисли файлы в `[AGENT:DONE]` эпика в разделе «что осталось» — их разрешит человек при приёмке.
   1. `composer test` — полный прогон на ветке (единственный способ полного прогона; вывод не передавай в `| tail`/`| head`). Если красный — создай TASK-исправление в соответствующей STORY (Ready) и вернись в цикл (не более 2 раз, потом `[AGENT:BLOCKED]`).
-  2. Действуй по политике слияния `MERGE_POLICY` (в этом проекте — `{{merge_policy}}`):
-     - `local-branch` — ничего не пушить. Ветка остаётся в worktree.
-     - `pull-request` — `git push -u origin <ветка>` и `gh pr create --base <BASE_BRANCH> --head <ветка> --title "<EPIC>: <название>" --body <сводка>`.
-     - `auto-merge` — как `pull-request`, плюс `gh pr merge --auto --merge`. Без remote слияние делает цикл агентов после завершения сессии.
-  3. `[AGENT:DONE]` в эпик: STORY и их вердикты, список коммитов (`git log --oneline <BASE_BRANCH>..HEAD`), результат полного прогона, PR или ветка, как принять (команды), созданная смежная работа.
+  2. **Pull request эпика:** `php artisan agentio:pr $ARGUMENTS` — пушит ветку эпика в `origin` и открывает pull request в `{{base_branch}}` (или обновляет открытый, если эпик возвращался на доработку); последняя строка вывода — ссылка на PR. Сам не выполняй `git push` и `gh pr …`. Команда завершилась ошибкой — запиши её текст в «что осталось» `[AGENT:DONE]`: цикл повторит публикацию, когда эпик будет в Review.
+  3. `[AGENT:DONE]` в эпик: STORY и их вердикты, список коммитов (`git log --oneline origin/{{base_branch}}..HEAD`), результат полного прогона, ссылка на pull request, как принять (слить PR: панель `/agentio`, `php artisan agentio:accept $ARGUMENTS` или «смержи $ARGUMENTS» в Telegram-боте), созданная смежная работа.
   4. `php artisan agentio:yt release $ARGUMENTS --state=Review`.
 - **Работа встала** (остались только Blocked или ожидающие зависимостей вне эпика): `[AGENT:BLOCKED]` в эпик со списком причин (`php artisan agentio:yt blocked`), затем `php artisan agentio:yt release $ARGUMENTS --state=Blocked`. После ответов человек возвращает эпик в `Ready`, и цикл продолжит работу в том же worktree.
 
@@ -86,13 +83,14 @@ git rev-parse --show-toplevel # путь worktree
 
 ```
 WORK-EPIC $ARGUMENTS: REVIEW | BLOCKED | IN_PROGRESS
-Ветка: $ARGUMENTS · Коммиты: N · Полный прогон: passed/failed
+Ветка: $ARGUMENTS · PR: <ссылка> · Коммиты: N · Полный прогон: passed/failed
 STORY: {{project}}-.. Review, {{project}}-.. Blocked (<причина>)
 ```
 
 ## Запрещено
 
 - Писать код самому, вместо субагента.
-- `git push` в `{{base_branch}}`/`BASE_BRANCH` и `{{production_branch}}`, `--force`, `reset --hard`, удаление чужих веток.
+- `git push` (ветку эпика публикует только `php artisan agentio:pr`), слияние в `{{base_branch}}`/`BASE_BRANCH` и `{{production_branch}}`, `gh pr merge`, `--force`, `reset --hard`, удаление чужих веток.
+- Отдельные ветки и pull request'ы для STORY и TASK.
 - Брать задачи вне этого эпика.
 - Менять статус задачи без соответствующего комментария `[AGENT:*]` (кроме STORY → In Progress в начале волны).

@@ -14,6 +14,9 @@ final readonly class Git
 {
     public const int TIMEOUT = 120;
 
+    /** Seconds a fetch or a push may take. */
+    public const int NETWORK_TIMEOUT = 300;
+
     public function __construct(private string $directory) {}
 
     public function directory(): string
@@ -103,6 +106,82 @@ final readonly class Git
     public function changes(bool $untracked = false): array
     {
         return $this->lines('status', '--porcelain', '--untracked-files='.($untracked ? 'normal' : 'no'));
+    }
+
+    /**
+     * Whether the repository has the remote (origin by default).
+     */
+    public function hasRemote(string $remote = 'origin'): bool
+    {
+        return $this->output('remote', 'get-url', $remote) !== null;
+    }
+
+    /**
+     * Whether $ancestor is an ancestor of (or equal to) $descendant; false when one of them does not exist.
+     */
+    public function isAncestor(string $ancestor, string $descendant): bool
+    {
+        return $this->run('merge-base', '--is-ancestor', $ancestor, $descendant)->isSuccessful();
+    }
+
+    /**
+     * Fetch branches of origin; the error, or null when it succeeded.
+     */
+    public function fetch(string ...$branches): ?string
+    {
+        $process = $this->runWithTimeout(self::NETWORK_TIMEOUT, 'fetch', '--quiet', 'origin', ...array_map(
+            fn (string $branch): string => '+refs/heads/'.$branch.':refs/remotes/origin/'.$branch,
+            $branches,
+        ));
+
+        return $process->isSuccessful() ? null : self::error($process);
+    }
+
+    /**
+     * Push a local branch to the branch of the same name on origin (never forced); the error, or null.
+     */
+    public function push(string $branch): ?string
+    {
+        $process = $this->runWithTimeout(self::NETWORK_TIMEOUT, 'push', '--quiet', '--set-upstream', 'origin', 'refs/heads/'.$branch.':refs/heads/'.$branch);
+
+        return $process->isSuccessful() ? null : self::error($process);
+    }
+
+    /**
+     * Move the local branch forward to its fetched origin counterpart when that needs no merge: in place when it
+     * is checked out here with nothing uncommitted, by moving the ref when no checkout has it. Returns why it was
+     * left behind, or null when it is up to date.
+     */
+    public function fastForward(string $branch): ?string
+    {
+        $local = 'refs/heads/'.$branch;
+        $remote = 'refs/remotes/origin/'.$branch;
+
+        if (! $this->branchExists($branch) || $this->output('rev-parse', '--verify', '--quiet', $remote) === null || $this->isAncestor($remote, $local)) {
+            return null;
+        }
+
+        if (! $this->isAncestor($local, $remote)) {
+            return "локальная {$branch} разошлась с origin/{$branch}: обновите её вручную (git pull).";
+        }
+
+        if ($this->currentBranch() === $branch) {
+            if ($this->changes() !== []) {
+                return "в главном каталоге незакоммиченные изменения: обновите {$branch} вручную (git pull --ff-only).";
+            }
+
+            $process = $this->runWithTimeout(null, 'merge', '--ff-only', '--quiet', $remote);
+
+            return $process->isSuccessful() ? null : "{$branch} не обновлена: ".self::error($process);
+        }
+
+        if (in_array('branch '.$local, $this->lines('worktree', 'list', '--porcelain'), true)) {
+            return "{$branch} открыта в другом worktree: обновите её там (git pull --ff-only).";
+        }
+
+        $process = $this->run('update-ref', $local, $remote, (string) $this->output('rev-parse', $local));
+
+        return $process->isSuccessful() ? null : "{$branch} не обновлена: ".self::error($process);
     }
 
     /**

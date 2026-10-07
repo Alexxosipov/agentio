@@ -18,10 +18,10 @@ YouTrack — единственный источник правды: задач�
 
 ## Ветки
 
-- `{{production_branch}}` — production. В неё человек выпускает проверенное состояние `{{base_branch}}`. Агенты её не трогают.
-- `{{base_branch}}` — ветка разработки, её разворачивает develop-сервер. От неё создаются ветки эпиков, в неё человек сливает принятые эпики (`Done` = слито в `{{base_branch}}`).
-- Ветка эпика называется **ID эпика**: `{{project}}-10`. Её создаёт цикл агентов вместе с worktree; задачи эпика коммитятся в неё (сообщение начинается с ID задачи). Эпики, начатые прежней версией agentio, продолжают работу на своих ветках `epic/<ID>-<slug>`.
-- Агентам запрещено пушить в `{{base_branch}}` и `{{production_branch}}`, переключаться на них, сливать в них и удалять или двигать любые ветки, кроме веток задач.
+- `{{production_branch}}` — production. В неё попадает только релиз: pull request `{{base_branch}}` → `{{production_branch}}`, который сливают после подтверждения разработчика. Агенты её не трогают.
+- `{{base_branch}}` — ветка разработки, её разворачивает develop-сервер. От неё создаются ветки эпиков; эпики попадают в неё **только через pull request на GitHub**, который сливает человек (`Done` = PR эпика слит в `{{base_branch}}`).
+- Ветка эпика называется **ID эпика**: `{{project}}-10`. Её создаёт цикл агентов вместе с worktree; задачи всех историй эпика коммитятся прямо в неё (сообщение начинается с ID задачи) — локально и автоматически, без отдельных веток и pull request'ов для STORY и TASK. Готовый эпик оркестратор публикует командой `php artisan agentio:pr <EPIC>`: push ветки и pull request в `{{base_branch}}`. Эпики, начатые прежней версией agentio, продолжают работу на своих ветках `epic/<ID>-<slug>`.
+- Агентам запрещено пушить в `{{base_branch}}` и `{{production_branch}}`, переключаться на них, сливать в них, сливать pull request'ы (`gh pr merge`, `gh api`) и удалять или двигать любые ветки, кроме веток задач.
 
 ## Тесты
 
@@ -121,6 +121,8 @@ ADR расходится с конвенцией проекта — решает
 
 **EPIC** можно брать, когда он `Ready`, его зависимости-эпики в `Done`, нет `agent-claimed` и хотя бы одна его TASK готова по правилу выше.
 
+**Только свои задачи.** Агенты берут в работу (планируют, захватывают, выполняют) только идеи, эпики и задачи, **автор (reporter) которых — пользователь YouTrack, от имени которого работает agentio** (владелец токена; запрос `reporter: me`). Задачи, созданные другими людьми, `agentio:yt` не предлагает (`ideas`, `ready-epics`, `ready-tasks`, `resumable`), а `agentio:yt claim` отвечает на них `LOST` (код 3). Проверить задачу: `php artisan agentio:yt mine <ID>`. Всё, что агенты создают сами (`create_issue`), автоматически принадлежит этому пользователю.
+
 Проверка — только `agentio:yt`, язык запросов YouTrack не умеет проверять состояние зависимостей: `php artisan agentio:yt ready-epics`, `php artisan agentio:yt ready-tasks <EPIC>`, `php artisan agentio:yt tree <EPIC>`. Сохранённые поиски «{{project}}: готовые эпики», «{{project}}: готовые задачи» дают только **кандидатов**.
 
 ## 5. Захват
@@ -136,7 +138,7 @@ php artisan agentio:yt claim {{project}}-42 --plan="<кратко план>"
 2. Ставит метку `agent-claimed` и `Stage: In Progress`.
 3. Перечитывает комментарии и проверяет, что активный захват твой. Владелец — самый ранний `[AGENT:START]` после последнего `[AGENT:DONE|BLOCKED|RELEASE]`.
 
-Ветка и worktree берутся из текущего git-каталога, `owner` — `<hostname>:<worktree>`. Субагенты, работающие в одном worktree, добавляют суффикс: `--as=<TASK-ID>`. Коды выхода: `0` — `CLAIMED` или `RESUMED` (продолжаем свой захват); `3` — `LOST` (захват чужой), задачу не трогай.
+Ветка и worktree берутся из текущего git-каталога, `owner` — `<hostname>:<worktree>`. Субагенты, работающие в одном worktree, добавляют суффикс: `--as=<TASK-ID>`. Коды выхода: `0` — `CLAIMED` или `RESUMED` (продолжаем свой захват); `3` — `LOST` (захват чужой или задача создана другим пользователем YouTrack), задачу не трогай.
 
 Освобождение — после итогового комментария: `php artisan agentio:yt release {{project}}-42 --state=Done` (или `Review`, `Blocked`, `Ready`): ставит Stage и снимает `agent-claimed`.
 
@@ -194,9 +196,9 @@ php artisan agentio:yt claim {{project}}-42 --plan="<кратко план>"
 
 | Назначение | Запрос |
 |---|---|
-| Идеи без плана | `project: {{project}} tag: idea Stage: Backlog tag: -{agent-claimed}` (и то же с `Type: Idea`) |
-| Готовые эпики (кандидаты) | `project: {{project}} Type: Epic Stage: Ready tag: -{agent-claimed}` |
-| Готовые задачи (кандидаты) | `project: {{project}} Type: Task Stage: Ready tag: -{agent-claimed}` |
+| Идеи без плана | `project: {{project}} tag: idea Stage: Backlog tag: -{agent-claimed} reporter: me` (и то же с `Type: Idea`) |
+| Готовые эпики (кандидаты) | `project: {{project}} Type: Epic Stage: Ready tag: -{agent-claimed} reporter: me` |
+| Готовые задачи (кандидаты) | `project: {{project}} Type: Task Stage: Ready tag: -{agent-claimed} reporter: me` |
 | Заблокированные (причина в `[AGENT:BLOCKED]`) | `project: {{project}} Stage: Blocked` |
 | В работе у агентов | `project: {{project}} tag: {agent-claimed}` |
 | Эпики на приёмке | `project: {{project}} Type: Epic Stage: Review` |
@@ -225,7 +227,7 @@ php artisan agentio:yt claim {{project}}-42 --plan="<кратко план>"
 ## Чек-лист самопроверки
 
 - [ ] Перед работой прочитан полный контекст (раздел 7), все комментарии — до последней страницы.
-- [ ] Задача захвачена через `agentio:yt claim`, код выхода 0.
+- [ ] Задача захвачена через `agentio:yt claim`, код выхода 0 (чужие задачи — автор не пользователь agentio — не трогаю).
 - [ ] У каждой созданной задачи есть префикс, `Type`, `Stage` и родитель (кроме EPIC и IDEA).
 - [ ] Каждая смена Stage сопровождается комментарием `[AGENT:*]`.
 - [ ] Вопросы к человеку — все сразу, одним `[AGENT:BLOCKED]` на русском, с вариантами, рекомендацией и Stage для возврата; ответы после возобновления (в том числе из Telegram) перенесены в статьи.

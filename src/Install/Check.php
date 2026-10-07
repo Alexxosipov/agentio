@@ -11,11 +11,13 @@ final readonly class Check
 {
     /**
      * @param  bool  $required  A failed required check stops the cycle; an optional one only limits it
+     * @param  bool  $blocking  A failed blocking check stops agentio:install itself
      */
     public function __construct(
         public string $name,
         public bool $ok,
         public bool $required,
         public string $hint = '',
+        public bool $blocking = false,
     ) {}
 }

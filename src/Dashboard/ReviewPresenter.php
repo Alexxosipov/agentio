@@ -12,11 +12,11 @@ use Obrazmisli\Agentio\Settings;
 use Obrazmisli\Agentio\YouTrack\Issue;
 use Obrazmisli\Agentio\YouTrack\IssueType;
 use Obrazmisli\Agentio\YouTrack\YouTrackException;
-use ValueError;
 
 /**
- * The acceptance view of an epic: what its branch changes (commits, files), whether it can be merged into the
- * base branch now, the orchestrator's final [AGENT:DONE] and the review verdict of every story.
+ * The acceptance view of an epic: what its branch changes (commits, files), its pull request into the base
+ * branch and whether it can be merged now, the orchestrator's final [AGENT:DONE] and the review verdict of every
+ * story.
  */
 final readonly class ReviewPresenter
 {
@@ -33,33 +33,22 @@ final readonly class ReviewPresenter
     {
         $epic = $this->source->attempt(fn (): ?Issue => $this->source->graph()->find($id), null);
         $branch = EpicBranch::find($this->settings, $id);
-        $checks = $branch === null ? [] : $this->acceptance->checks($epic, $branch);
+        $assessment = $branch === null ? ['checks' => [], 'pullRequest' => null] : $this->acceptance->assess($epic, $branch);
+        $checks = $assessment['checks'];
         $merged = $branch?->isMerged() ?? false;
 
         return [
             'epicId' => $id,
             'base' => $this->settings->baseBranch(),
-            'mergePolicy' => $this->mergePolicy(),
             'actions' => $actions,
             'branch' => $branch === null ? null : $this->branch($branch, $merged),
+            'pullRequest' => $assessment['pullRequest']?->toArray(),
             'checks' => $checks,
             'canAccept' => $branch !== null && $epic !== null && array_filter($checks, fn (array $check): bool => $check['ok'] === false) === [],
             'summary' => $epic === null ? null : $this->source->attempt(fn (): ?array => $this->summary($epic), null),
             'stories' => $epic === null ? [] : $this->source->attempt(fn (): array => $this->stories($epic), []),
             'youtrack' => $this->source->health(),
         ];
-    }
-
-    /**
-     * The merge policy, or null when AGENTIO_MERGE_POLICY or .agentio.json holds an unknown one.
-     */
-    private function mergePolicy(): ?string
-    {
-        try {
-            return $this->settings->mergePolicy()->value;
-        } catch (ValueError) {
-            return null;
-        }
     }
 
     /**

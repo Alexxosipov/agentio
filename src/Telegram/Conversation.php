@@ -11,7 +11,7 @@ use JsonException;
  * The memory of the bot, in <logs>/telegram (local to the machine that runs agentio:run, like the loop's files):
  *
  * - state.json: the update offset of getUpdates, the time of the last agent comment the watcher saw, a pending
- *   pairing code;
+ *   pairing code, the release pull request waiting for the developer's confirmation;
  * - messages.json: what every message the bot sent is about (the issue, the kind — question, report, answer —
  *   and the Stage the issue returns to), so a reply of the developer is tied to its issue;
  * - history.json: the last messages of the conversation, the context of the assistant;
@@ -29,6 +29,9 @@ final readonly class Conversation
 
     /** How long a pairing code is valid, in seconds. */
     public const int PAIRING_TTL = 3600;
+
+    /** How long the developer may confirm a release after the bot asked, in seconds. */
+    public const int RELEASE_TTL = 86400;
 
     public function __construct(private string $directory) {}
 
@@ -89,6 +92,40 @@ final readonly class Conversation
     {
         $this->update('state', function (array $state): array {
             unset($state['pairing']);
+
+            return $state;
+        });
+    }
+
+    /**
+     * The release pull request the bot asked the developer to confirm, at the commit of the development branch
+     * the question was about.
+     */
+    public function askRelease(int $number, string $head, string $url): void
+    {
+        $this->update('state', fn (array $state): array => [...$state, 'release' => ['number' => $number, 'head' => $head, 'url' => $url, 'expires' => time() + self::RELEASE_TTL]]);
+    }
+
+    /**
+     * The release waiting for the confirmation, or null when the bot asked none (or long ago).
+     *
+     * @return array{number: int, head: string, url: string}|null
+     */
+    public function pendingRelease(): ?array
+    {
+        $release = $this->read('state')['release'] ?? null;
+
+        if (! is_array($release) || ! is_int($release['number'] ?? null) || ! is_string($release['head'] ?? null) || (int) ($release['expires'] ?? 0) < time()) {
+            return null;
+        }
+
+        return ['number' => $release['number'], 'head' => $release['head'], 'url' => is_string($release['url'] ?? null) ? $release['url'] : ''];
+    }
+
+    public function forgetRelease(): void
+    {
+        $this->update('state', function (array $state): array {
+            unset($state['release']);
 
             return $state;
         });

@@ -5,25 +5,19 @@ declare(strict_types=1);
 use Illuminate\Foundation\Http\Middleware\ValidateCsrfToken;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Sleep;
 use Obrazmisli\Agentio\Dashboard\YouTrackSource;
 use Obrazmisli\Agentio\Runtime\LoopState;
+use Obrazmisli\Agentio\Telegram\Conversation;
+use Obrazmisli\Agentio\Telegram\IncomingMessage;
+use Obrazmisli\Agentio\Telegram\Jobs\SendTelegramMessage;
+use Obrazmisli\Agentio\Telegram\Responder;
+use Obrazmisli\Agentio\Tests\Fakes\FakeGitHub;
 use Obrazmisli\Agentio\Tests\Fakes\FakeYouTrackMcp;
 use Obrazmisli\Agentio\YouTrack\Client;
 use Obrazmisli\Agentio\YouTrack\IssueRepository;
 use Obrazmisli\Agentio\YouTrack\Mcp\McpClient;
-use Symfony\Component\Process\Process;
-
-/**
- * Run git in a directory of the test and return its output.
- */
-function git(string $directory, string ...$arguments): string
-{
-    $process = new Process(['git', ...$arguments], $directory);
-    $process->mustRun();
-
-    return trim($process->getOutput());
-}
 
 /**
  * A host project that is a git repository: main with README.md, and the epic branch (XY-2, or a branch of an
@@ -55,8 +49,9 @@ function reviewRepository(string $branch = 'XY-2'): string
 }
 
 /**
- * The package pointed at the repository, a fake YouTrack (REST for reads, MCP for writes) and a logs directory:
- * epic XY-2 in Review with the stories XY-3 (approved) and XY-4 (changes requested, then approved).
+ * The package pointed at the repository, its origin on a fake GitHub (main pushed; app(FakeGitHub::class)), a fake
+ * YouTrack (REST for reads, MCP for writes) and a logs directory: epic XY-2 in Review with the stories XY-3
+ * (approved) and XY-4 (changes requested, then approved).
  *
  * @param  array<string, string>  $states  Issue id => Stage overrides
  */
@@ -74,7 +69,6 @@ function acceptanceEnvironment(string $project, array $states = []): FakeYouTrac
         'agentio.youtrack.project' => 'XY',
         'agentio.youtrack.retries' => 0,
         'agentio.base_branch' => 'main',
-        'agentio.merge_policy' => 'local-branch',
         'agentio.worktrees_path' => $project.'/worktrees',
         'cache.default' => 'array',
     ]);
@@ -82,6 +76,8 @@ function acceptanceEnvironment(string $project, array $states = []): FakeYouTrac
     foreach ([Client::class, McpClient::class, IssueRepository::class, YouTrackSource::class] as $abstract) {
         app()->forgetInstance($abstract);
     }
+
+    app()->instance(FakeGitHub::class, FakeGitHub::originOf($project, 'main')->fake());
 
     mkdir($project.'/logs');
     app()->instance(LoopState::class, new LoopState($project.'/logs', $project.'/logs/stop', 'UTC'));
@@ -154,8 +150,9 @@ it('shows what the epic branch changes and whether it can be merged', function (
             ['path' => 'app/Avatar.php', 'status' => 'A', 'added' => 3, 'deleted' => 0],
         ])
         ->and(array_column($response->json('checks'), 'ok', 'key'))->toMatchArray([
-            'state' => true, 'session' => true, 'worktree' => true, 'checkout' => true, 'clean' => true,
+            'state' => true, 'session' => true, 'worktree' => true, 'github' => true, 'commits' => true, 'pr' => null,
         ])
+        ->and($response->json('pullRequest'))->toBeNull()
         ->and($response->json('canAccept'))->toBeTrue()
         ->and($response->json('base'))->toBe('main')
         ->and($response->json('actions'))->toBeTrue()
@@ -190,9 +187,10 @@ it('reports an epic without a branch', function () {
         ->assertJsonPath('canAccept', false);
 });
 
-it('merges the epic, removes its worktree and closes the stories and the epic', function () {
+it('pushes the epic, opens and merges its pull request, removes its worktree and closes the stories and the epic', function () {
     $project = reviewRepository();
     $mcp = acceptanceEnvironment($project);
+    $github = app(FakeGitHub::class);
     $worktree = epicWorktree($project);
 
     $this->getJson('/agentio/api/epics/XY-2/review')->assertOk();
@@ -200,18 +198,25 @@ it('merges the epic, removes its worktree and closes the stories and the epic', 
     $response = $this->postJson('/agentio/api/epics/XY-2/accept', ['removeWorktree' => true, 'close' => true])
         ->assertOk()
         ->assertJsonPath('merged', true)
+        ->assertJsonPath('pullRequest.number', 1)
+        ->assertJsonPath('pullRequest.url', 'https://github.com/acme/app/pull/1')
         ->assertJsonPath('worktreeRemoved', true)
         ->assertJsonPath('branchDeleted', false)
         ->assertJsonPath('closed', ['XY-3', 'XY-4', 'XY-2'])
         ->assertJsonPath('warnings', []);
 
-    expect(git($project, 'log', '-1', '--format=%s %P'))->toStartWith("Merge branch 'XY-2' into main")
-        ->and(git($project, 'rev-parse', '--short', 'HEAD'))->toBe($response->json('commit'))
+    // The pull request into main was opened by agentio and merged on GitHub; the local main follows origin.
+    expect($github->pullRequests[1])->toMatchArray(['headRefName' => 'XY-2', 'baseRefName' => 'main', 'state' => 'MERGED', 'title' => 'XY-2: Summary of XY-2'])
+        ->and($github->pullRequests[1]['body'])->toContain('- ', 'XY-5 Add the avatar', 'php artisan agentio:accept XY-2')
+        ->and($github->subject('main'))->toBe('Merge pull request #1 from acme/XY-2')
+        ->and(git($project, 'rev-parse', 'main'))->toBe($github->head('main'))
+        ->and(substr((string) $github->head('main'), 0, 7))->toBe($response->json('commit'))
         ->and(file_exists($project.'/app/Avatar.php'))->toBeTrue()
         ->and(is_dir($worktree))->toBeFalse()
         ->and(git($project, 'branch', '--list', 'XY-*'))->toBe('XY-2')
         ->and(array_map(fn (array $issue): ?string => $issue['fields']['Stage'], $mcp->issues))->toBe(['XY-2' => 'Done', 'XY-3' => 'Done', 'XY-4' => 'Done'])
-        ->and($mcp->comments['XY-2'][0]['text'])->toBe('Эпик принят в панели agentio: ветка `XY-2` слита в `main` (`'.$response->json('commit').'`).');
+        ->and($mcp->comments['XY-2'][0]['text'])->toBe('Эпик принят: pull request #1 ветки `XY-2` слит в `main` (`'.$response->json('commit').'`): https://github.com/acme/app/pull/1')
+        ->and($mcp->callsOf('create_issue'))->toBe([]);
 
     // The dashboard forgot its cached YouTrack answers: the next read goes to YouTrack again.
     $before = count(Http::recorded(fn (Request $request): bool => str_ends_with((string) parse_url($request->url(), PHP_URL_PATH), '/api/issues')));
@@ -251,10 +256,86 @@ it('only closes the issues when the base branch already has the epic', function 
         ->assertJsonPath('commit', null);
 
     expect(git($project, 'rev-parse', 'HEAD'))->toBe($head)
-        ->and($mcp->comments['XY-2'][0]['text'])->toContain('уже слита в `main`');
+        ->and(app(FakeGitHub::class)->callsOf('api'))->toBe([])
+        ->and($mcp->comments['XY-2'][0]['text'])->toContain('уже в `main`');
 });
 
-it('refuses to merge when the main checkout is not ready', function (Closure $prepare, string $detail) {
+it('cleans up and closes an epic whose pull request was merged on GitHub, bringing the local main up to date', function () {
+    $project = reviewRepository();
+    $mcp = acceptanceEnvironment($project);
+    $github = app(FakeGitHub::class);
+    git($project, 'push', '-q', 'origin', 'XY-2');
+    $github->pullRequest('XY-2', 'main');
+    $github->pullRequests[1]['state'] = 'MERGED';
+    $clone = temporaryDirectory();
+    git($clone, 'clone', '-q', '-b', 'main', $github->origin, 'repo');
+    git($clone.'/repo', 'config', 'user.email', 'dev@example.com');
+    git($clone.'/repo', 'config', 'user.name', 'Dev');
+    git($clone.'/repo', 'merge', '-q', '--no-ff', '-m', 'Merge pull request #1 from acme/XY-2', 'origin/XY-2');
+    git($clone.'/repo', 'push', '-q', 'origin', 'main');
+
+    $this->postJson('/agentio/api/epics/XY-2/accept')
+        ->assertOk()
+        ->assertJsonPath('merged', false)
+        ->assertJsonPath('pullRequest.state', 'MERGED')
+        ->assertJsonPath('closed', ['XY-3', 'XY-4', 'XY-2']);
+
+    expect(git($project, 'log', '-1', '--format=%s', 'main'))->toBe('Merge pull request #1 from acme/XY-2')
+        ->and(file_exists($project.'/app/Avatar.php'))->toBeTrue()
+        ->and($github->callsOf('api'))->toBe([])
+        ->and($mcp->comments['XY-2'][0]['text'])->toBe('Эпик принят: ветка `XY-2` уже в `main` (pull request #1 https://github.com/acme/app/pull/1).');
+});
+
+it('merges the pull request already open for the epic', function () {
+    $project = reviewRepository();
+    acceptanceEnvironment($project);
+    $github = app(FakeGitHub::class);
+    git($project, 'push', '-q', 'origin', 'XY-2');
+    $github->pullRequest('XY-2', 'main', title: 'XY-2: Аватар');
+
+    $this->getJson('/agentio/api/epics/XY-2/review')
+        ->assertJsonPath('pullRequest.number', 1)
+        ->assertJsonPath('canAccept', true);
+
+    $this->postJson('/agentio/api/epics/XY-2/accept')->assertOk()->assertJsonPath('pullRequest.number', 1);
+
+    expect($github->callsOf('pr create'))->toBe([])
+        ->and($github->subject('main'))->toBe('Merge pull request #1 from acme/XY-2');
+});
+
+it('merges on GitHub even when the main checkout is busy, and says the local main was left behind', function () {
+    $project = reviewRepository();
+    acceptanceEnvironment($project);
+    file_put_contents($project.'/README.md', "changed\n");
+
+    $this->postJson('/agentio/api/epics/XY-2/accept')
+        ->assertOk()
+        ->assertJsonPath('merged', true)
+        ->assertJsonPath('warnings', ['Локальная ветка main не обновлена: в главном каталоге незакоммиченные изменения: обновите main вручную (git pull --ff-only).']);
+
+    expect(app(FakeGitHub::class)->subject('main'))->toBe('Merge pull request #1 from acme/XY-2')
+        ->and(file_get_contents($project.'/README.md'))->toBe("changed\n");
+});
+
+it('refuses to accept without a GitHub it can reach', function (Closure $prepare, string $message) {
+    $project = reviewRepository();
+    $mcp = acceptanceEnvironment($project);
+    $prepare($project, app(FakeGitHub::class));
+
+    $this->getJson('/agentio/api/epics/XY-2/review')->assertJsonPath('canAccept', false);
+
+    $this->postJson('/agentio/api/epics/XY-2/accept')
+        ->assertStatus(409)
+        ->assertJsonPath('message', $message);
+
+    expect($mcp->callsOf('update_issue'))->toBe([]);
+})->with([
+    'no origin' => [fn (string $project) => git($project, 'remote', 'remove', 'origin'), 'У репозитория нет remote origin: эпики принимаются только через pull request на GitHub (git remote add origin …).'],
+    'gh missing' => [fn (string $project, FakeGitHub $github) => $github->installed = false, 'GitHub CLI (gh) is not installed: install it (https://cli.github.com) and run gh auth login.'],
+    'gh logged out' => [fn (string $project, FakeGitHub $github) => $github->authenticated = false, 'GitHub CLI (gh) is not logged in: run gh auth login.'],
+]);
+
+it('refuses to merge when the epic is not ready', function (Closure $prepare, string $detail) {
     $project = reviewRepository();
     $mcp = acceptanceEnvironment($project);
     $prepare($project);
@@ -268,12 +349,19 @@ it('refuses to merge when the main checkout is not ready', function (Closure $pr
 
     expect(implode("\n", $response->json('details')))->toContain($detail)
         ->and(git($project, 'rev-parse', 'HEAD'))->toBe($head)
+        ->and(app(FakeGitHub::class)->callsOf('api'))->toBe([])
         ->and($mcp->callsOf('update_issue'))->toBe([]);
 })->with([
-    'uncommitted changes' => [fn (string $project) => file_put_contents($project.'/README.md', "changed\n"), 'В главном каталоге нет незакоммиченных изменений — M README.md'],
-    'another branch' => [fn (string $project) => git($project, 'checkout', '-q', '-b', 'feature'), 'Главный каталог на ветке main — сейчас: feature'],
     'uncommitted work in the worktree' => [fn (string $project) => file_put_contents(epicWorktree($project).'/app/Avatar.php', 'wip'), 'В worktree эпика всё закоммичено — M app/Avatar.php'],
     'a running session' => [fn (string $project) => file_put_contents($project.'/logs/XY-2.pid', (string) getmypid()), 'Сессия агента по эпику не запущена'],
+    'a draft pull request' => [function (string $project) {
+        git($project, 'push', '-q', 'origin', 'XY-2');
+        app(FakeGitHub::class)->pullRequest('XY-2', 'main', draft: true);
+    }, 'Pull request в main — #1 — черновик (draft)'],
+    'a conflicting pull request' => [function (string $project) {
+        git($project, 'push', '-q', 'origin', 'XY-2');
+        app(FakeGitHub::class)->pullRequest('XY-2', 'main', mergeable: 'CONFLICTING');
+    }, 'Слияние без конфликтов — PR конфликтует с main: влейте main в ветку эпика и разрешите конфликты'],
 ]);
 
 it('refuses an epic that is not in Review', function () {
@@ -285,22 +373,24 @@ it('refuses an epic that is not in Review', function () {
         ->assertJsonPath('details', ['Эпик в статусе Review — сейчас: In Progress']);
 });
 
-it('aborts a conflicting merge and leaves the main checkout as it was', function () {
+it('leaves an epic that conflicts with the base branch to the human', function () {
     $project = reviewRepository();
     $mcp = acceptanceEnvironment($project);
+    $github = app(FakeGitHub::class);
     file_put_contents($project.'/README.md', "# Another app\n");
     git($project, 'commit', '-q', '-am', 'Rename');
-    $head = git($project, 'rev-parse', 'HEAD');
+    git($project, 'push', '-q', 'origin', 'main');
+    $head = (string) $github->head('main');
 
-    // git 2.38+ finds the conflict before the merge (merge-tree), an older git when the merge stops.
-    $details = $this->postJson('/agentio/api/epics/XY-2/accept')
-        ->assertStatus(409)
-        ->json('details');
+    // git 2.38+ finds the conflict before anything is pushed (merge-tree), with an older git GitHub refuses the merge.
+    $response = $this->postJson('/agentio/api/epics/XY-2/accept')->assertStatus(409);
 
-    expect($details)->toBeIn([['README.md'], ['Слияние без конфликтов — README.md']])
-        ->and(git($project, 'rev-parse', 'HEAD'))->toBe($head)
+    expect([$response->json('message'), $response->json('details')])->toBeIn([
+        ['Эпик сейчас нельзя принять.', ['Слияние без конфликтов — README.md']],
+        ['GitHub не слил #1 (https://github.com/acme/app/pull/1): gh: Pull Request is not mergeable (HTTP 405)', []],
+    ])
+        ->and($github->head('main'))->toBe($head)
         ->and(git($project, 'status', '--porcelain', '--untracked-files=no'))->toBe('')
-        ->and(file_exists($project.'/.git/MERGE_HEAD'))->toBeFalse()
         ->and($mcp->callsOf('update_issue'))->toBe([]);
 });
 
@@ -402,7 +492,7 @@ it('accepts an epic started on a branch of an earlier agentio version', function
 
     $this->postJson('/agentio/api/epics/XY-2/accept')->assertOk()->assertJsonPath('merged', true);
 
-    expect(git($project, 'log', '-1', '--format=%s'))->toBe("Merge branch 'epic/XY-2-avatar' into main");
+    expect(git($project, 'log', '-1', '--format=%s'))->toBe('Merge pull request #1 from acme/epic/XY-2-avatar');
 });
 
 it('merges the branch even when a tag has the same name', function () {
@@ -431,6 +521,7 @@ it('accepts an epic from the command line the way the dashboard does', function 
 
     $this->artisan('agentio:accept', ['epic' => 'XY-2'])
         ->expectsOutputToContain('XY-2: merged XY-2 into main')
+        ->expectsOutputToContain('Pull request: #1 https://github.com/acme/app/pull/1')
         ->assertSuccessful();
 
     expect($mcp->issues['XY-2']['fields']['Stage'])->toBe('Done');
@@ -438,4 +529,35 @@ it('accepts an epic from the command line the way the dashboard does', function 
     $this->artisan('agentio:accept', ['epic' => 'XY-7'])
         ->expectsOutputToContain('XY-7: Задача XY-7 не найдена.')
         ->assertFailed();
+});
+
+it('merges the epic the developer asks for in Telegram, without a new YouTrack issue', function () {
+    $project = reviewRepository();
+    $mcp = acceptanceEnvironment($project);
+    assistantDecides(['reply' => 'Сливаю XY-2.', 'actions' => [['type' => 'merge', 'issue' => 'XY-2']]]);
+    $conversation = app(Conversation::class);
+    $conversation->remember([600], 'report', 'XY-2');
+
+    app(Responder::class)->answer($conversation->putInbox(new IncomingMessage(9, 1009, '42', 'мержи', replyToId: 600, replyToBot: true)));
+
+    expect(app(FakeGitHub::class)->subject('main'))->toBe('Merge pull request #1 from acme/XY-2')
+        ->and(array_map(fn (array $issue): ?string => $issue['fields']['Stage'], $mcp->issues))->toBe(['XY-2' => 'Done', 'XY-3' => 'Done', 'XY-4' => 'Done'])
+        ->and($mcp->callsOf('create_issue'))->toBe([]);
+    Queue::assertPushed(SendTelegramMessage::class, fn (SendTelegramMessage $job): bool => $job->kind === 'answer'
+        && $job->issue === 'XY-2'
+        && str_contains($job->text, "Сливаю XY-2.\n\n✅ Слил PR #1 эпика XY-2 в main (")
+        && str_contains($job->text, '): https://github.com/acme/app/pull/1')
+        && str_contains($job->text, 'В Done: XY-3, XY-4, XY-2.'));
+});
+
+it('tells the developer in Telegram why an epic cannot be merged', function () {
+    $project = reviewRepository();
+    $mcp = acceptanceEnvironment($project, ['XY-2' => 'In Progress']);
+    assistantDecides(['reply' => 'Пробую.', 'actions' => [['type' => 'merge', 'issue' => 'XY-2']]]);
+
+    app(Responder::class)->answer(app(Conversation::class)->putInbox(new IncomingMessage(10, 1010, '42', 'смержи XY-2')));
+
+    expect(app(FakeGitHub::class)->callsOf('api'))->toBe([])
+        ->and($mcp->callsOf('update_issue'))->toBe([]);
+    Queue::assertPushed(SendTelegramMessage::class, fn (SendTelegramMessage $job): bool => str_contains($job->text, '⚠️ Не смог слить XY-2: Эпик сейчас нельзя принять. (Эпик в статусе Review — сейчас: In Progress)'));
 });

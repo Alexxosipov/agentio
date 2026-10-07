@@ -11,14 +11,15 @@ use Illuminate\Support\Facades\Http;
 
 /**
  * A stateful fake of the YouTrack MCP server at https://yt.example.com/mcp, with the paging limits and the query
- * language subset agentio uses: issues with Type, Stage, tags, parent and dependencies, comments and articles.
+ * language subset agentio uses: issues with Type, Stage, tags, parent, dependencies and reporter (`reporter: me` is
+ * the user of the token), comments and articles.
  * Tools not modelled here can be answered with on().
  */
 final class FakeYouTrackMcp
 {
     public const string URL = 'https://yt.example.com';
 
-    /** @var array<string, array{id: string, summary: string, description: string, fields: array<string, string|null>, tags: list<string>, parent: string|null, dependsOn: list<string>, relatesTo: list<string>}> */
+    /** @var array<string, array{id: string, summary: string, description: string, fields: array<string, string|null>, tags: list<string>, parent: string|null, dependsOn: list<string>, relatesTo: list<string>, reporter: string}> */
     public array $issues = [];
 
     /** @var array<string, list<array{author: string, text: string, createdAt: int}>> */
@@ -60,8 +61,9 @@ final class FakeYouTrackMcp
      * @param  list<string>  $tags
      * @param  list<string>  $dependsOn
      * @param  list<string>  $relatesTo
+     * @param  string|null  $reporter  The login of who reported it (by default the user of the token)
      */
-    public function issue(string $id, string $type, string $state, ?string $parent = null, array $dependsOn = [], array $tags = [], ?string $summary = null, array $relatesTo = [], array $fields = []): self
+    public function issue(string $id, string $type, string $state, ?string $parent = null, array $dependsOn = [], array $tags = [], ?string $summary = null, array $relatesTo = [], array $fields = [], ?string $reporter = null): self
     {
         $prefix = ['Idea' => '[IDEA]', 'Epic' => '[EPIC]', 'Story' => '[STORY]', 'Task' => '[TASK]'][$type] ?? '';
 
@@ -74,6 +76,7 @@ final class FakeYouTrackMcp
             'parent' => $parent,
             'dependsOn' => $dependsOn,
             'relatesTo' => $relatesTo,
+            'reporter' => $reporter ?? $this->user,
         ];
 
         return $this;
@@ -254,8 +257,13 @@ final class FakeYouTrackMcp
      */
     private function search(string $query): array
     {
-        preg_match_all('/(project|tag|Type|Stage|subtask of|parent for|is required for|depends on|relates to): (-?\{[^}]*\}|\S+)/', $query, $matches, PREG_SET_ORDER);
         $ids = array_keys($this->issues);
+
+        if (preg_match('/issue ID: ([A-Z][A-Z0-9_]*-\d+(?:, [A-Z][A-Z0-9_]*-\d+)*)/', $query, $match) === 1) {
+            $ids = array_values(array_intersect($ids, explode(', ', $match[1])));
+        }
+
+        preg_match_all('/(project|tag|Type|Stage|subtask of|parent for|is required for|depends on|relates to|reporter): (-?\{[^}]*\}|\S+)/', (string) preg_replace('/issue ID: \S+(, \S+)*/', '', $query), $matches, PREG_SET_ORDER);
 
         foreach ($matches as [, $key, $value]) {
             $negated = str_starts_with($value, '-');
@@ -270,6 +278,7 @@ final class FakeYouTrackMcp
                     'parent for' => ($this->issues[$value]['parent'] ?? null) === $id,
                     'is required for' => in_array($id, $this->issues[$value]['dependsOn'] ?? [], true),
                     'depends on' => in_array($value, $issue['dependsOn'], true),
+                    'reporter' => $issue['reporter'] === ($value === 'me' ? $this->user : $value),
                     default => in_array($value, $issue['relatesTo'], true) || in_array($id, $this->issues[$value]['relatesTo'] ?? [], true),
                 };
 

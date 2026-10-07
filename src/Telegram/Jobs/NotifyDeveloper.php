@@ -30,6 +30,7 @@ final class NotifyDeveloper implements ShouldQueue
         public ?string $name = null,
         public ?int $until = null,
         public ?string $window = null,
+        public ?string $url = null,
     ) {
         $settings = BotSettings::fromConfig();
         $this->onConnection($settings->queueConnection)->onQueue($settings->queue);
@@ -46,7 +47,7 @@ final class NotifyDeveloper implements ShouldQueue
     public function handle(Reports $reports, Messenger $messenger): void
     {
         $messenger->send(
-            $reports->event($this->event, $this->issue, $this->name, $this->until, $this->window),
+            $reports->event($this->event, $this->issue, $this->name, $this->until, $this->window, $this->url),
             'report',
             $this->issue === '' ? null : $this->issue,
         );

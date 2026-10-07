@@ -16,6 +16,8 @@ use Obrazmisli\Agentio\Console\Commands\CommitCommand;
 use Obrazmisli\Agentio\Console\Commands\InstallCommand;
 use Obrazmisli\Agentio\Console\Commands\LimitCommand;
 use Obrazmisli\Agentio\Console\Commands\LogCommand;
+use Obrazmisli\Agentio\Console\Commands\PullRequestCommand;
+use Obrazmisli\Agentio\Console\Commands\ReleaseCommand;
 use Obrazmisli\Agentio\Console\Commands\RunCommand;
 use Obrazmisli\Agentio\Console\Commands\SetupTelegramCommand;
 use Obrazmisli\Agentio\Console\Commands\SetupYouTrackCommand;
@@ -24,6 +26,7 @@ use Obrazmisli\Agentio\Console\Commands\TelegramCommand;
 use Obrazmisli\Agentio\Console\Commands\WorktreeCommand;
 use Obrazmisli\Agentio\Console\Commands\YouTrackCommand;
 use Obrazmisli\Agentio\Dashboard\YouTrackSource;
+use Obrazmisli\Agentio\GitHub\GitHub;
 use Obrazmisli\Agentio\Http\Middleware\Authorize;
 use Obrazmisli\Agentio\Runtime\LoopState;
 use Obrazmisli\Agentio\Runtime\SystemTimezone;
@@ -48,6 +51,8 @@ final class AgentioServiceProvider extends ServiceProvider
         $this->mergeConfigFrom(__DIR__.'/../config/agentio.php', 'agentio');
 
         $this->app->bind(Settings::class, fn (Application $app): Settings => new Settings($app->basePath()));
+
+        $this->app->bind(GitHub::class, fn (Application $app): GitHub => new GitHub($app->basePath()));
 
         $this->app->singleton(Client::class, fn (Application $app): Client => new Client(
             url: $this->configString('agentio.youtrack.url'),
@@ -129,6 +134,8 @@ final class AgentioServiceProvider extends ServiceProvider
             YouTrackCommand::class,
             WorktreeCommand::class,
             AcceptCommand::class,
+            PullRequestCommand::class,
+            ReleaseCommand::class,
             CommitCommand::class,
             LogCommand::class,
             LimitCommand::class,
@@ -148,8 +155,8 @@ final class AgentioServiceProvider extends ServiceProvider
     }
 
     /**
-     * The "viewAgentio" gate (open the dashboard) and the "manageAgentio" gate (accept or send back an epic from
-     * it): everyone in the local environment, otherwise the emails in agentio.ui.allowed_emails. An application
+     * The "viewAgentio" gate (open the dashboard) and the "manageAgentio" gate (accept — merge the pull request of —
+     * or send back an epic from it): everyone in the local environment, otherwise the emails in agentio.ui.allowed_emails. An application
      * may define its own gates or replace both checks with Agentio::auth().
      */
     private function defineGate(): void

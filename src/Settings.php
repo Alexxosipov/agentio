@@ -5,8 +5,6 @@ declare(strict_types=1);
 namespace Obrazmisli\Agentio;
 
 use Obrazmisli\Agentio\Install\Manifest;
-use Obrazmisli\Agentio\Runtime\MergePolicy;
-use ValueError;
 
 /**
  * The settings of the cycle in the host project: config/agentio.php (the environment and .env) first, then the
@@ -39,8 +37,8 @@ final readonly class Settings
     }
 
     /**
-     * The development branch (dev): what the develop server runs; the epic branches start from it and are merged
-     * back into it.
+     * The development branch (dev): what the develop server runs; the epic branches start from it and reach it
+     * through pull requests.
      */
     public function baseBranch(): string
     {
@@ -48,7 +46,8 @@ final readonly class Settings
     }
 
     /**
-     * The production branch (main): releases of the development branch are merged into it by humans.
+     * The production branch (main): releases of the development branch reach it through a pull request the
+     * developer confirms.
      */
     public function productionBranch(): string
     {
@@ -63,16 +62,6 @@ final readonly class Settings
     public function protectedBranches(): array
     {
         return array_values(array_unique([$this->baseBranch(), $this->productionBranch(), 'main', 'master']));
-    }
-
-    /**
-     * @throws ValueError When AGENTIO_MERGE_POLICY or .agentio.json holds an unknown policy
-     */
-    public function mergePolicy(): MergePolicy
-    {
-        $value = self::string('agentio.merge_policy') ?? $this->manifest()->mergePolicy;
-
-        return $value === null ? MergePolicy::LocalBranch : MergePolicy::from($value);
     }
 
     /**

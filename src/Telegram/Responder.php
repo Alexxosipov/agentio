@@ -10,7 +10,8 @@ use Throwable;
 
 /**
  * Answers a message of the developer (php artisan agentio:telegram assist <key>, one at a time): transcribes a
- * voice message, asks the assistant, makes the YouTrack changes it decided on and replies with what was done.
+ * voice message, asks the assistant, makes the changes it decided on (YouTrack, merges of pull requests) and
+ * replies with what was done.
  * When the assistant is unavailable, a reply to a question is still recorded in its issue as a comment.
  */
 final readonly class Responder
@@ -103,7 +104,7 @@ final readonly class Responder
             implode("\n", $result['lines']),
         ])));
 
-        $this->messenger->send($reply !== '' ? $reply : 'Принял.', 'answer', $result['issues'][0] ?? $about['issue'] ?? null, replyTo: $message->messageId);
+        $this->messenger->send($reply !== '' ? $reply : 'Принял.', $result['kind'] ?? 'answer', $result['issues'][0] ?? $about['issue'] ?? null, replyTo: $message->messageId);
     }
 
     /**
@@ -119,7 +120,7 @@ final readonly class Responder
         if ($about !== null && $about['kind'] === 'question' && $about['issue'] !== null) {
             return new Decision(
                 "⚠️ Ассистент сейчас недоступен ({$reason}), поэтому записал ваш ответ в {$about['issue']} как есть. Когда ответите на все вопросы, верните задачу в работу в YouTrack или напишите мне «вернуть в работу» реплаем на вопросы.",
-                [['type' => DecisionAction::Answer, 'issue' => $about['issue'], 'comment' => '', 'resume' => false, 'summary' => '', 'description' => '']],
+                [['type' => DecisionAction::Answer, 'issue' => $about['issue'], 'comment' => '', 'resume' => false, 'summary' => '', 'description' => '', 'confirm' => false]],
             );
         }
 

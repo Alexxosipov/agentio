@@ -7,9 +7,8 @@ namespace Obrazmisli\Agentio\Install;
 use JsonException;
 
 /**
- * The committed .agentio.json of the host project: the YouTrack project, the development and the production
- * branch and the merge policy
- * the skills were installed for, the knowledge base article ids and the hashes of the installed files (a file
+ * The committed .agentio.json of the host project: the YouTrack project and the development and the production
+ * branch the skills were installed for, the knowledge base article ids and the hashes of the installed files (a file
  * whose content still matches its hash was not edited by hand and is updated on reinstall).
  */
 final readonly class Manifest
@@ -25,7 +24,6 @@ final readonly class Manifest
         public ?string $baseBranch = null,
         public array $kb = [],
         public array $files = [],
-        public ?string $mergePolicy = null,
         public ?string $productionBranch = null,
     ) {}
 
@@ -56,7 +54,6 @@ final readonly class Manifest
             baseBranch: self::stringOf($data['base_branch'] ?? null),
             kb: self::stringMap($data['kb'] ?? null),
             files: self::stringMap($data['files'] ?? null),
-            mergePolicy: self::stringOf($data['merge_policy'] ?? null),
             productionBranch: self::stringOf($data['production_branch'] ?? null),
         );
     }
@@ -65,14 +62,13 @@ final readonly class Manifest
      * @param  array<string, string>|null  $kb
      * @param  array<string, string>|null  $files
      */
-    public function with(?string $project = null, ?string $baseBranch = null, ?array $kb = null, ?array $files = null, ?string $mergePolicy = null, ?string $productionBranch = null): self
+    public function with(?string $project = null, ?string $baseBranch = null, ?array $kb = null, ?array $files = null, ?string $productionBranch = null): self
     {
         return new self(
             $project ?? $this->project,
             $baseBranch ?? $this->baseBranch,
             $kb ?? $this->kb,
             $files ?? $this->files,
-            $mergePolicy ?? $this->mergePolicy,
             $productionBranch ?? $this->productionBranch,
         );
     }
@@ -86,7 +82,6 @@ final readonly class Manifest
             'project' => $this->project,
             'base_branch' => $this->baseBranch,
             'production_branch' => $this->productionBranch,
-            'merge_policy' => $this->mergePolicy,
             'kb' => (object) $this->kb,
             'files' => (object) $files,
         ], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR).PHP_EOL);

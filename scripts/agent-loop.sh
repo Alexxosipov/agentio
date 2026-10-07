@@ -12,11 +12,13 @@
 # Options: --interval=SEC  --max-parallel=N  --max-parallel-tasks=N  --epic=<ID> (only this epic)  --no-plan  --no-wait
 #
 # Env (set by agentio:run): AGENTIO_ROOT (the project), YOUTRACK_URL, YOUTRACK_TOKEN, AGENTIO_PROJECT, BASE_BRANCH,
-#   WORKTREES_DIR, MERGE_POLICY, MAX_PARALLEL, MAX_PARALLEL_TASKS, AGENT_LOOP_INTERVAL, CLAUDE_BIN, CLAUDE_MODEL,
+#   WORKTREES_DIR, MAX_PARALLEL, MAX_PARALLEL_TASKS, AGENT_LOOP_INTERVAL, CLAUDE_BIN, CLAUDE_MODEL,
 #   AGENT_LOG_DIR, AGENTIO_STOP_FILE, AGENTIO_SESSION_SETTINGS and AGENTIO_PLANNING_SETTINGS (settings of the epic
 #   and of the planning sessions, JSON), AGENTIO_MCP_CONFIG (MCP configs of the sessions, one per line),
 #   MAX_RESTARTS=3 (sessions that end without finishing, in a row and without new commits, before Blocked; a session
 #   that ends at the usage limit of Claude Code does not count).
+# An epic in Review is published as a pull request into BASE_BRANCH (php artisan agentio:pr: push and gh pr create);
+# humans merge it (the dashboard, agentio:accept or the Telegram bot), never the loop.
 # Files in AGENT_LOG_DIR: loop.log, loop.pid and loop.lock (this loop), <EPIC>.pid/.log (epic sessions),
 #   plan-<IDEA>.pid/.log (planning sessions), <NAME>.restarts ("<count> <branch head>"), limit ("<resume time>
 #   <limit>" while the loop pauses at the usage limit).
@@ -38,7 +40,6 @@ MAX_PARALLEL_TASKS="${MAX_PARALLEL_TASKS:-2}"
 MAX_RESTARTS="${MAX_RESTARTS:-3}"
 BASE_BRANCH="${BASE_BRANCH:-dev}"
 CLAUDE_BIN="${CLAUDE_BIN:-claude}"
-MERGE_POLICY="${MERGE_POLICY:-local-branch}"
 MCP_CONFIGS=()
 while IFS= read -r config; do
     [[ -n "$config" ]] && MCP_CONFIGS+=("$config")
@@ -72,7 +73,7 @@ fi
 
 mkdir -p "$WORKTREES_DIR" "$LOG_DIR"
 WORKTREES_DIR="$(cd "$WORKTREES_DIR" && pwd -P)"
-export AGENTIO_ROOT BASE_BRANCH WORKTREES_DIR MAX_PARALLEL_TASKS MERGE_POLICY AGENT_LOG_DIR="$LOG_DIR"
+export AGENTIO_ROOT BASE_BRANCH WORKTREES_DIR MAX_PARALLEL_TASKS AGENT_LOG_DIR="$LOG_DIR"
 cd "$ROOT" || exit 1
 
 log() { echo "[$(date '+%F %T')] $*" | tee -a "$LOG_DIR/loop.log" >&2; }
@@ -227,8 +228,19 @@ launch_epic() {
     log "$epic: started /agentio-work-epic (pid $pid, worktree $dir, log $LOG_DIR/$epic.log)"
 }
 
+# The pull request of an epic in Review (push and gh pr create, or the open one updated); prints its URL.
+publish_epic() {
+    local epic="$1" output
+    if output="$(artisan agentio:pr "$epic" 2>&1)"; then
+        tail -n 1 <<<"$output"
+    else
+        log "$epic: ERROR: the pull request into $BASE_BRANCH was not published: $(tr '\n' ' ' <<<"$output")"
+        return 1
+    fi
+}
+
 finish_epic() {
-    local epic="$1" state branch restarts
+    local epic="$1" state branch restarts url
     state="$(issue_state "$epic")"
     branch="$(epic_branch "$epic")"
     log "$epic: session finished, epic state: ${state:-unknown}"
@@ -236,20 +248,12 @@ finish_epic() {
     case "$state" in
         Review)
             rm -f "$LOG_DIR/$epic.restarts"
-            if [[ "$MERGE_POLICY" != "local-branch" ]] && git -C "$ROOT" remote | grep -q . \
-                && command -v gh >/dev/null && gh pr view "$branch" --json url >/dev/null 2>&1; then
-                artisan agentio:worktree "$epic" --remove && log "$epic: PR exists, worktree removed"
-            elif [[ "$MERGE_POLICY" == "auto-merge" ]] && ! git -C "$ROOT" remote | grep -q .; then
-                # The same acceptance as the dashboard's: checks, merge (aborted on a conflict), worktree, Done.
-                if artisan agentio:accept "$epic" >>"$LOG_DIR/loop.log" 2>&1; then
-                    log "$epic: auto-merged $branch into $BASE_BRANCH and closed"
-                    notify merged "$epic"
-                else
-                    log "$epic: auto-merge not possible (see above), left for a human"
-                    notify review "$epic"
-                fi
+            # Epics reach the development branch only through a pull request a human merges.
+            if url="$(publish_epic "$epic")"; then
+                log "$epic: ready for human review: pull request $url ($branch -> $BASE_BRANCH, worktree kept: $WORKTREES_DIR/$epic)"
+                notify review "$epic" --url="$url"
             else
-                log "$epic: ready for human review on branch $branch (worktree kept: $WORKTREES_DIR/$epic)"
+                log "$epic: ready for human review on branch $branch, without a pull request yet (run php artisan agentio:pr $epic)"
                 notify review "$epic"
             fi
             ;;
@@ -368,7 +372,7 @@ plan_ideas() {
 dry_run() {
     local epic
     echo "== Agent loop dry run ($(date '+%F %T')) =="
-    echo "PROJECT=${AGENTIO_PROJECT:-?} MERGE_POLICY=$MERGE_POLICY MAX_PARALLEL=$MAX_PARALLEL MAX_PARALLEL_TASKS=$MAX_PARALLEL_TASKS BASE_BRANCH=$BASE_BRANCH WORKTREES_DIR=$WORKTREES_DIR"
+    echo "PROJECT=${AGENTIO_PROJECT:-?} MAX_PARALLEL=$MAX_PARALLEL MAX_PARALLEL_TASKS=$MAX_PARALLEL_TASKS BASE_BRANCH=$BASE_BRANCH WORKTREES_DIR=$WORKTREES_DIR"
     echo "Running sessions: $(running_epics | tr '\n' ' ') $(running plan | sed 's/^/plan-/' | tr '\n' ' ')"
     paused && echo "Paused at the Claude Code usage limit until $(local_time "$(limit_until)"): nothing would be started before"
     echo
@@ -428,7 +432,7 @@ fi
 echo "$$" >"$LOOP_PID_FILE"
 trap '[[ "$(cat "$LOOP_PID_FILE" 2>/dev/null)" == "$$" ]] && rm -f "$LOOP_PID_FILE"' EXIT
 
-log "agent loop started: mode=$MODE policy=$MERGE_POLICY max_parallel=$MAX_PARALLEL interval=${INTERVAL}s${ONLY_EPIC:+ epic=$ONLY_EPIC}"
+log "agent loop started: mode=$MODE max_parallel=$MAX_PARALLEL interval=${INTERVAL}s${ONLY_EPIC:+ epic=$ONLY_EPIC}"
 paused && log "paused at the Claude Code usage limit until $(local_time "$(limit_until)")"
 
 while true; do

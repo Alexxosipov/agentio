@@ -1,5 +1,5 @@
 {
-    "$comment": "Permissions of the assistant of the Telegram bot (agentio-telegram-assistant), which runs in the developer's main checkout: it reads the code, the state of the loop and YouTrack, and changes nothing — agentio makes the YouTrack changes it decides on (answers, comments, ideas). Merged by SessionSettings::assistant() with the deny rules of settings.json.",
+    "$comment": "Permissions of the assistant of the Telegram bot (agentio-telegram-assistant), which runs in the developer's main checkout: it reads the code, the state of the loop, the pull requests and YouTrack, and changes nothing — agentio makes the changes it decides on (answers, comments, ideas, merges of pull requests, releases). Merged by SessionSettings::assistant() with the deny rules of settings.json.",
     "permissions": {
         "allow": [
             "Read",
@@ -34,6 +34,10 @@
             "Bash(git diff*)",
             "Bash(git branch*)",
             "Bash(git ls-files*)",
+            "Bash(gh pr list*)",
+            "Bash(gh pr view*)",
+            "Bash(gh pr diff*)",
+            "Bash(gh pr checks*)",
             "Bash(ls*)",
             "Bash(cat *)",
             "Bash(head *)",
@@ -63,7 +67,14 @@
             "Bash(git merge *)",
             "Bash(git checkout *)",
             "Bash(git switch *)",
-            "Bash(git push *)"
+            "Bash(git push *)",
+            "Bash(gh pr merge*)",
+            "Bash(gh pr create*)",
+            "Bash(gh pr close*)",
+            "Bash(gh api*)",
+            "Bash(php artisan agentio:accept*)",
+            "Bash(php artisan agentio:pr*)",
+            "Bash(php artisan agentio:release*)"
         ]
     }
 }

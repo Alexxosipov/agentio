@@ -6,6 +6,7 @@ use Illuminate\Filesystem\Filesystem;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Process;
+use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Str;
 use Obrazmisli\Agentio\Agentio;
 use Obrazmisli\Agentio\Process\ReadinessGraph;
@@ -13,6 +14,7 @@ use Obrazmisli\Agentio\Runtime\LoopState;
 use Obrazmisli\Agentio\Tests\TestCase;
 use Obrazmisli\Agentio\YouTrack\Issue;
 use Obrazmisli\Agentio\YouTrack\State;
+use Symfony\Component\Process\Process as SymfonyProcess;
 
 uses(TestCase::class)
     // Every outside system is faked: a request of the HTTP client (YouTrack, the Telegram Bot API, the
@@ -96,6 +98,17 @@ function graphOf(array $specs): ReadinessGraph
     }
 
     return new ReadinessGraph($issues);
+}
+
+/**
+ * Run git in a directory of the test and return its output.
+ */
+function git(string $directory, string ...$arguments): string
+{
+    $process = new SymfonyProcess(['git', ...$arguments], $directory);
+    $process->mustRun();
+
+    return trim($process->getOutput());
 }
 
 /**
@@ -237,7 +250,6 @@ function projectForLoop(array $ideas = []): string
         'agentio.youtrack.token' => 'secret-token',
         'agentio.youtrack.project' => 'XY',
         'agentio.base_branch' => 'develop',
-        'agentio.merge_policy' => null,
         'agentio.max_parallel' => 3,
         'agentio.max_parallel_tasks' => 4,
         'agentio.interval' => 60,
@@ -252,7 +264,7 @@ function projectForLoop(array $ideas = []): string
 
 /**
  * A fake `artisan` of the host project: agentio:yt answers the ideas and empty lists, state answers
- * fixed values; every call is appended to artisan-calls.log.
+ * fixed values, agentio:pr prints the URL of a pull request; every call is appended to artisan-calls.log.
  *
  * @param  list<string>  $ideas
  */
@@ -273,6 +285,11 @@ function writeFakeArtisan(string $project, array $ideas = []): void
                 'blocked' => "Blocked (needs a human):\\nReady but waiting for dependencies:\\n",
                 default => \$json ? '[]' : '',
             };
+            exit(0);
+        }
+
+        if ((\$argv[1] ?? '') === 'agentio:pr') {
+            echo "  INFO  pull request #3 into develop opened.\n\nhttps://github.com/acme/app/pull/3\n";
             exit(0);
         }
 
@@ -344,4 +361,21 @@ function projectWithBot(?string $chatId = '42'): string
     app()->forgetInstance(LoopState::class);
 
     return $project;
+}
+
+/**
+ * The bot of the current project paired with the chat 42, the Telegram queue faked, and the assistant (a faked
+ * Claude Code session) answering every message with $decision.
+ *
+ * @param  array<string, mixed>  $decision
+ */
+function assistantDecides(array $decision): void
+{
+    Queue::fake();
+    config(['agentio.telegram.token' => '123456:TEST-token-0123456789abcdefghijklmnop', 'agentio.telegram.chat_id' => '42']);
+    Process::fake(['*--output-format*' => Process::result((string) json_encode([
+        'type' => 'result',
+        'is_error' => false,
+        'result' => json_encode($decision, JSON_UNESCAPED_UNICODE),
+    ]))]);
 }

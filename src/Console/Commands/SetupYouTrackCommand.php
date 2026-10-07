@@ -18,7 +18,6 @@ use Obrazmisli\Agentio\YouTrack\Client;
 use Obrazmisli\Agentio\YouTrack\Mcp\Tools;
 use Obrazmisli\Agentio\YouTrack\YouTrackException;
 use Symfony\Component\Console\Attribute\AsCommand;
-use ValueError;
 
 /**
  * Configures the YouTrack project for the cycle (see YouTrackSetup): Stage and Type values, tags, saved
@@ -68,19 +67,11 @@ final class SetupYouTrackCommand extends Command
             return self::FAILURE;
         }
 
-        try {
-            $policy = $settings->mergePolicy();
-        } catch (ValueError) {
-            $this->components->error('Invalid merge policy (AGENTIO_MERGE_POLICY or .agentio.json): use local-branch, pull-request or auto-merge.');
-
-            return self::FAILURE;
-        }
-
         $this->components->info(($dryRun ? 'Dry run, nothing is changed. Plan of the setup' : 'Setting up').' of the YouTrack project '.$project.'.');
 
         $manifest = $settings->manifest();
         $setup = new YouTrackSetup($client, $tools, KnowledgeBase::ofPackage(), $dryRun);
-        $placeholders = new Placeholders($project, $settings->baseBranch(), $policy, $manifest->kb, $settings->productionBranch());
+        $placeholders = new Placeholders($project, $settings->baseBranch(), $manifest->kb, $settings->productionBranch());
 
         try {
             $kb = $setup->run($project, $placeholders);

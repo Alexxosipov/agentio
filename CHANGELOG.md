@@ -1,6 +1,30 @@
 # Release Notes
 
-## [Unreleased](https://github.com/Alexxosipov/agentio/compare/v0.8.0...main)
+## [Unreleased](https://github.com/Alexxosipov/agentio/compare/v0.9.0...main)
+
+## [v0.9.0](https://github.com/Alexxosipov/agentio/releases/tag/v0.9.0) - 2026-10-08
+
+Update with `composer require alexxosipov/agentio:^0.9 --dev`. Install the [GitHub CLI](https://cli.github.com) and run `gh auth login` first (`agentio:install` and `agentio:run` no longer start without it), make sure the repository has its GitHub `origin` with `main` and `dev` pushed, then run `php artisan agentio:install` (refreshes the skills and drops `merge_policy` from `.agentio.json`) and `php artisan agentio:setup-youtrack` (refreshes the automation guide), commit `.claude/skills/agentio-*` and `.agentio.json` to the development branch together with `composer.json` and `composer.lock`, and restart `agentio:run`. Ideas, epics and tasks reported by other YouTrack users are no longer taken: file them as the user of `YOUTRACK_TOKEN` (or change their reporter). An epic already in `Review` gets its pull request when you accept it (or run `php artisan agentio:pr <ID>`).
+
+### Added
+
+- **Epics are accepted only through GitHub pull requests.** `php artisan agentio:pr <EPIC>` pushes the epic branch to `origin` (never forced) and opens its pull request into the development branch, or updates the open one after rework; the orchestrator runs it when the epic is done and the loop once more when the epic reaches `Review`, writes the link to `loop.log` and sends it to the Telegram bot. The tasks of the stories keep going into the epic branch locally and automatically, without branches or pull requests of their own.
+- **Accepting merges the pull request.** The dashboard's «Принять и слить», `php artisan agentio:accept <ID>` and the Telegram bot push the branch (opening the pull request when there is none) and merge the pull request into the development branch on GitHub with a merge commit, only while its head is the local tip of the epic branch (`gh api …/pulls/<n>/merge` with the head sha); then they fast-forward the local development branch, remove the worktree and close the stories and the epic with a comment that links the pull request. A draft or conflicting pull request is refused with the reason; a pull request merged on GitHub by hand is detected, and accepting only cleans up and closes. The dashboard shows the pull request of the epic and its merge checks (GitHub CLI, pull request, conflicts).
+- **Merging from Telegram.** «смержи TP-12» (or «мержи» as a reply to the report of a finished epic) accepts the epic the same way; it never creates a YouTrack issue. The «epic ready for review» report carries the link to the pull request.
+- **Releases through a confirmed pull request.** «вмержи dev в main» to the bot opens the pull request of the development branch into the production branch (or finds the open one), sends the link and asks to confirm; only «да» to that question merges it, and only at the commit of `dev` the question was about (when `dev` moved, the bot asks again). `php artisan agentio:release [--merge] [--yes]` does the same from the command line. Releases are not YouTrack issues either.
+- **The agents work only on the issues of the agentio user.** `agentio:yt ideas`, `ready-epics`, `ready-tasks` and `resumable` offer only the issues reported by the YouTrack user of the token (`reporter: me`), and `agentio:yt claim` answers `LOST` (exit 3) for an issue another user reported. `php artisan agentio:yt mine <ID>` tells `MINE` or `FOREIGN`; `agentio:install` says which user the agents work as.
+- `agentio:install` checks the GitHub CLI before anything else and stops, changing nothing, when `gh` is missing or not logged in (`gh auth status`); `git remote origin` is a new precondition. `agentio:run` refuses to start without a logged-in `gh` (except `--dry-run` and `--kill`).
+- New epic worktrees start from `origin/<dev>` when GitHub has epics the local development branch lacks.
+
+### Changed
+
+- The orchestrator (`agentio-work-epic`) brings `origin/<dev>` into the epic branch before the full test run and publishes the epic with `php artisan agentio:pr`; the workflow, project manager, status and Telegram assistant skills, the «Процесс разработки» article and the manual describe the pull request flow, the releases and the issue ownership rule.
+- The agents only read GitHub: the guard refuses every `gh` command but `gh pr view|list|diff|checks|status`, `gh run view|list`, `gh repo view` and `gh auth status`, and the session settings deny `gh pr merge`, `gh pr create`, `gh api` and `agentio:release`. The assistant of the bot may read pull requests.
+
+### Removed
+
+- **The merge policies** (`local-branch`, `pull-request`, `auto-merge`): `agentio:install --merge-policy`, `AGENTIO_MERGE_POLICY`, the `merge_policy` config key, `Settings::mergePolicy()`, `Runtime\MergePolicy`, the `{{merge_policy}}` placeholder and the `merge_policy` of `.agentio.json` (ignored when present). Epics are never merged locally or automatically any more, and the loop no longer accepts epics by itself. The `merged` event of `agentio:telegram notify` is gone; `notify review` takes `--url=`.
+- `mergePolicy` of the dashboard's `/api/status` and `/api/epics/{id}/review` (the review has `pullRequest` instead), and the `checkout` and `clean` checks of an acceptance (the main checkout is no longer merged into).
 
 ## [v0.8.0](https://github.com/Alexxosipov/agentio/releases/tag/v0.8.0) - 2026-10-07
 

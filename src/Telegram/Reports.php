@@ -17,13 +17,13 @@ use Throwable;
 
 /**
  * The messages of the bot, in Russian and short, like a project manager reporting to the developer: the questions
- * of the agents and the events of the loop (an idea planned, an epic ready for review or merged, a session that
- * gave up, the loop paused at the usage limit of Claude Code and resumed after it).
+ * of the agents and the events of the loop (an idea planned, an epic ready for review with its pull request, a
+ * session that gave up, the loop paused at the usage limit of Claude Code and resumed after it).
  */
 final readonly class Reports
 {
     /** The events of the loop the bot reports (agentio:telegram notify <event> <id>). */
-    public const array EVENTS = ['planned', 'review', 'merged', 'blocked', 'limit', 'resumed'];
+    public const array EVENTS = ['planned', 'review', 'blocked', 'limit', 'resumed'];
 
     /** The events about the loop as a whole: the id (the session that ran into the limit) is optional. */
     public const array LOOP_EVENTS = ['limit', 'resumed'];
@@ -48,9 +48,9 @@ final readonly class Reports
 
     /**
      * The report of an event of the loop; $until (a Unix time) and $window (five_hour, seven_day, ...) belong to
-     * the limit event: when the loop resumes and which limit was hit.
+     * the limit event: when the loop resumes and which limit was hit; $url to the review event: the pull request.
      */
-    public function event(string $event, string $id, ?string $name = null, ?int $until = null, ?string $window = null): string
+    public function event(string $event, string $id, ?string $name = null, ?int $until = null, ?string $window = null, ?string $url = null): string
     {
         if ($event === 'limit') {
             return $this->limit($id, $until, $window);
@@ -66,8 +66,8 @@ final readonly class Reports
 
         return match ($event) {
             'planned' => '🗂 Идея '.$title.' спланирована.'.$this->epicsOf($id),
-            'review' => '✅ Эпик '.$title.' готов к приёмке: ветка '.$id.'.'.$this->done($id)."\n\nПринять: панель /agentio или php artisan agentio:accept {$id}.",
-            'merged' => '🚀 Эпик '.$title.' принят автоматически: слит в '.$base.' и закрыт.',
+            'review' => '✅ Эпик '.$title.' готов к приёмке: '.($url === null ? 'ветка '.$id.' (pull request ещё не открыт: php artisan agentio:pr '.$id.')' : 'pull request в '.$base.' — '.$url).'.'.$this->done($id)
+                ."\n\n↩️ Чтобы слить его в {$base}, ответьте на это сообщение (reply) «мержи». Или смержите в панели /agentio, или php artisan agentio:accept {$id}.",
             'blocked' => '⛔ '.$title.': сессия '.($name !== null && str_starts_with($name, 'plan-') ? 'планирования' : 'эпика').' несколько раз подряд оборвалась без результата, задача в Blocked. Лог: php artisan agentio:log '.($name ?? $id).'.',
             default => 'ℹ️ '.$title.': '.$event.'.',
         };

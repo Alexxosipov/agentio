@@ -358,7 +358,6 @@
                 pills.push(`<span class="pill warn" title="Claude Code упёрся в ${esc(loop.usageLimit.label)}: цикл не запускает сессии, задачи остаются в своих статусах и продолжатся после сброса"><span class="dot"></span>Пауза: лимит Claude Code${time ? ` до <b>${esc(time)}</b>` : ''}</span>`);
             }
             pills.push(`<span class="pill" title="Живые сессии Claude Code"><span>Сессий: <b>${esc(st.sessions.alive)}</b></span></span>`);
-            pills.push(`<span class="pill" title="MERGE_POLICY"><span>Слияние: <b>${esc(st.mergePolicy)}</b></span></span>`);
             const yt = st.youtrack;
             if (!yt.configured) {
                 pills.push('<span class="pill warn" title="Задайте YOUTRACK_URL и YOUTRACK_TOKEN"><span class="dot"></span>YouTrack не настроен</span>');
@@ -766,6 +765,7 @@
             `<span class="mono"><b>${esc(b.name)}</b> → ${esc(r.base)}</span>`,
             b.head ? `<span class="mono faint">${esc(b.head)}</span>` : '',
             b.merged ? `<span class="badge v-ok">уже в ${esc(r.base)}</span>` : '',
+            r.pullRequest && safeUrl(r.pullRequest.url) ? `<a class="mono" href="${esc(r.pullRequest.url)}" target="_blank" rel="noopener">PR #${esc(r.pullRequest.number)}</a>${r.pullRequest.state === 'MERGED' ? ' <span class="badge v-ok">слит</span>' : r.pullRequest.draft ? ' <span class="badge">draft</span>' : ''}` : '',
             `<span>${esc(plural(b.ahead, 'коммит', 'коммита', 'коммитов'))} · ${esc(plural(b.files.length, 'файл', 'файла', 'файлов'))} · <span class="add">+${esc(b.added)}</span> <span class="del">−${esc(b.deleted)}</span></span>`,
             b.behind ? `<span class="warn-text">${esc(r.base)} ушла вперёд на ${esc(plural(b.behind, 'коммит', 'коммита', 'коммитов'))}</span>` : '',
         ].filter(Boolean).join('');
@@ -816,11 +816,10 @@
         }
         const busy = S.busy !== null;
         const merged = r.branch.merged;
-        const policyNote = r.mergePolicy === 'local-branch' ? '' : ` Политика <code>${esc(r.mergePolicy)}</code>: если эпик сливается через PR, слейте PR и примите эпик после этого.`;
         const accept = '<div class="action-card"><h3>Принять</h3>'
             + `<p class="muted small">${merged
                 ? `Ветка уже в <code>${esc(r.base)}</code>: останется убрать worktree и закрыть задачи.`
-                : `<code>git merge --no-ff ${esc(r.branch.name)}</code> в <code>${esc(r.base)}</code> главного каталога. Push не выполняется.${policyNote}`}</p>`
+                : `Сливает pull request ветки <code>${esc(r.branch.name)}</code> в <code>${esc(r.base)}</code> на GitHub${r.pullRequest && r.pullRequest.state === 'OPEN' ? ` (PR #${esc(r.pullRequest.number)})` : ': ветка запушится, и PR откроется'} и обновляет локальную <code>${esc(r.base)}</code>.`}</p>`
             + '<label class="check-option"><input type="checkbox" data-field="removeWorktree"> удалить worktree эпика</label>'
             + '<label class="check-option"><input type="checkbox" data-field="deleteBranch"> удалить ветку эпика</label>'
             + '<label class="check-option"><input type="checkbox" data-field="close"> перевести истории (из Review) и эпик в Done</label>'
@@ -888,7 +887,7 @@
 
     function acceptedText(data) {
         return [
-            data.merged ? `Ветка ${data.branch} слита в ${data.base} (${data.commit}).` : `Ветка ${data.branch} уже была в ${data.base}.`,
+            data.merged ? `PR${data.pullRequest ? ' #' + data.pullRequest.number : ''} ветки ${data.branch} слит в ${data.base} (${data.commit}).` : `Ветка ${data.branch} уже была в ${data.base}.`,
             data.worktreeRemoved ? 'Worktree удалён.' : '',
             data.branchDeleted ? 'Ветка удалена.' : '',
             data.closed.length ? `В Done: ${data.closed.join(', ')}.` : '',
@@ -905,7 +904,7 @@
         let body;
         if (kind === 'accept') {
             const steps = [
-                r.branch.merged ? null : `слить ${r.branch.name} в ${r.base}`,
+                r.branch.merged ? null : `слить pull request ${r.branch.name} в ${r.base} на GitHub`,
                 form.removeWorktree ? 'удалить worktree' : null,
                 form.deleteBranch ? 'удалить ветку' : null,
                 form.close ? 'закрыть истории и эпик в YouTrack' : null,

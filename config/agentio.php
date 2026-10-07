@@ -35,11 +35,11 @@ return [
     | Settings of the agent loop (php artisan agentio:run). "base_branch" is the
     | development branch: what the develop server runs; every epic is worked on
     | in a branch named after its issue id (TP-12), started from it and merged
-    | back into it. "production_branch" is what production runs; humans merge
-    | releases of the development branch into it. When one of them or
-    | "merge_policy" (local-branch, pull-request or auto-merge) is null, the
-    | value agentio:install recorded in .agentio.json is used (then "dev",
-    | "main" and "local-branch"). "worktrees_path" is where the git worktrees
+    | back into it through a GitHub pull request (gh). "production_branch" is
+    | what production runs; a release reaches it through a pull request the
+    | developer confirms. When one of them is null, the value agentio:install
+    | recorded in .agentio.json is used (then "dev" and "main").
+    | "worktrees_path" is where the git worktrees
     | of the epics are created; agentio:install asks for it and writes it to
     | .env (it has no default: the loop refuses to start without it).
     | "worktree_setup" is an optional shell command run last in every new epic
@@ -52,8 +52,6 @@ return [
     'base_branch' => env('AGENTIO_BASE_BRANCH'),
 
     'production_branch' => env('AGENTIO_PRODUCTION_BRANCH'),
-
-    'merge_policy' => env('AGENTIO_MERGE_POLICY'),
 
     'max_parallel' => (int) env('AGENTIO_MAX_PARALLEL', 2),
 
@@ -140,8 +138,8 @@ return [
     | The page polls its JSON endpoints every "poll" seconds; YouTrack
     | responses are cached for "cache" seconds (0 disables the cache; failures
     | are cached for at least 30 seconds). "actions" allows accepting an epic
-    | in Review from the page (merging its branch into the base branch of
-    | this checkout) and sending it back for rework; false makes the page
+    | in Review from the page (merging its pull request into the base branch
+    | on GitHub) and sending it back for rework; false makes the page
     | read-only.
     |
     */

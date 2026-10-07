@@ -126,7 +126,7 @@ it('reports a stopped loop when there is no log at all', function () {
 it('reads the tail of loop.log', function () {
     [$state, $directory] = loopState();
     file_put_contents($directory.'/loop.log', implode("\n", [
-        '[2026-10-03 14:56:35] agent loop started: mode=once policy=local-branch max_parallel=2 interval=300s epic=TP-2',
+        '[2026-10-03 14:56:35] agent loop started: mode=once max_parallel=2 interval=300s epic=TP-2',
         '[2026-10-03 14:57:38] TP-2: started /agentio-work-epic (pid 547704, worktree /srv/worktrees/TP-2, log /srv/app/storage/logs/agents/TP-2.log)',
         '',
         'Merge made by the \'ort\' strategy.',

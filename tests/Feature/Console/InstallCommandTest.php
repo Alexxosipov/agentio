@@ -10,7 +10,7 @@ use Obrazmisli\Agentio\Install\Installer;
 use Obrazmisli\Agentio\Install\KnowledgeBase;
 use Obrazmisli\Agentio\Install\Manifest;
 use Obrazmisli\Agentio\Install\Placeholders;
-use Obrazmisli\Agentio\Runtime\MergePolicy;
+use Obrazmisli\Agentio\Tests\Fakes\FakeGitHub;
 use Obrazmisli\Agentio\Tests\Fakes\FakeYouTrackMcp;
 
 const STUB_SKILLS = [
@@ -21,6 +21,7 @@ const STUB_SKILLS = [
 beforeEach(function () {
     Sleep::fake();
     Http::preventStrayRequests();
+    app()->instance(FakeGitHub::class, (new FakeGitHub(''))->fake());
     config(['agentio.youtrack.url' => null, 'agentio.youtrack.token' => null, 'agentio.youtrack.project' => null, 'agentio.worktrees_path' => null]);
 });
 
@@ -91,7 +92,7 @@ function offline(string $project, array $options = []): array
 it('installs only the skills into .claude/skills, with the placeholders rendered', function () {
     $project = projectWithFakeClaude();
 
-    $this->artisan('agentio:install', offline($project, ['--base-branch' => 'develop', '--merge-policy' => 'pull-request', '--skip-services' => true]))
+    $this->artisan('agentio:install', offline($project, ['--base-branch' => 'develop', '--skip-services' => true]))
         ->expectsOutputToContain('YouTrack is skipped')
         ->assertSuccessful();
 
@@ -101,7 +102,7 @@ it('installs only the skills into .claude/skills, with the placeholders rendered
     expect(array_keys($files))->toBe(['.agentio.json', ...array_values($skills), '.env'])
         ->and(array_values(array_unique(array_map(fn (string $path): string => explode('/', $path)[2], $skills))))->toBe(STUB_SKILLS)
         ->and($files['.claude/skills/agentio-youtrack-workflow/SKILL.md'])->toContain('# YouTrack workflow (проект `XY`)', '| Обзор продукта | «Обзор продукта» |')
-        ->and($files['.claude/skills/agentio-work-epic/SKILL.md'])->toContain('`BASE_BRANCH` (develop)', '(в этом проекте — `pull-request`)')
+        ->and($files['.claude/skills/agentio-work-epic/SKILL.md'])->toContain('`BASE_BRANCH` (develop)', 'php artisan agentio:pr $ARGUMENTS', 'pull request в `develop`')
         ->and(implode('', $files))->not->toContain('{{', 'scripts/', 'yt.php', 'Stage')
         ->and($files['.env'])->toBe("# agentio\nAGENTIO_WORKTREES_PATH={$project}-worktrees\n")
         ->and(is_dir($project.'-worktrees'))->toBeTrue()
@@ -111,7 +112,7 @@ it('installs only the skills into .claude/skills, with the placeholders rendered
 
     expect($manifest->project)->toBe('XY')
         ->and($manifest->baseBranch)->toBe('develop')
-        ->and($manifest->mergePolicy)->toBe('pull-request')
+        ->and(json_decode((string) file_get_contents($project.'/.agentio.json'), true))->not->toHaveKey('merge_policy')
         ->and(array_keys($manifest->files))->toBe(array_values($skills))
         ->and($manifest->files['.claude/skills/agentio-plan/SKILL.md'])->toBe(hash('sha256', $files['.claude/skills/agentio-plan/SKILL.md']));
 });
@@ -313,14 +314,13 @@ it('needs an explicit worktrees directory outside the project', function () {
     expect(is_dir($project.'/.claude'))->toBeFalse();
 });
 
-it('rejects an invalid merge policy or project key', function (array $options, string $message) {
+it('rejects an invalid project key or MCP scope', function (array $options, string $message) {
     $project = projectWithFakeClaude();
 
     $this->artisan('agentio:install', [...offline($project), ...$options])
         ->expectsOutputToContain($message)
         ->assertFailed();
 })->with([
-    'merge policy' => [['--merge-policy' => 'yolo'], 'Invalid merge policy'],
     'project key' => [['--project' => 'not a key'], 'Invalid YouTrack project short name'],
     'mcp scope' => [['--mcp-scope' => 'project'], 'Invalid --mcp-scope'],
 ]);
@@ -425,7 +425,7 @@ it('configures the YouTrack project with --setup-youtrack and records the knowle
 
     expect($manifest->kb)->toHaveCount(count(KnowledgeBase::ARTICLES))
         ->and(file_get_contents($project.'/.claude/skills/agentio-youtrack-workflow/SKILL.md'))->toContain('| Обзор продукта | '.$manifest->kb['overview'].' |')
-        ->and($manifest->files)->toHaveCount(count((new Installer($project, dirname(__DIR__, 3).'/stubs', new Placeholders('XY', 'main', MergePolicy::LocalBranch), services: true))->stubFiles()));
+        ->and($manifest->files)->toHaveCount(count((new Installer($project, dirname(__DIR__, 3).'/stubs', new Placeholders('XY', 'main'), services: true))->stubFiles()));
 });
 
 it('installs the skills but fails when the YouTrack project has no board set up for the cycle', function () {
@@ -460,11 +460,6 @@ it('asks for the connection, the project and the settings, and offers the setup'
         ->expectsQuestion('YouTrack project short name', 'XY')
         ->expectsQuestion('Production branch', 'main')
         ->expectsQuestion('Development branch', 'dev')
-        ->expectsChoice('What happens to an epic branch when the agents are done?', 'local-branch', [
-            'local-branch' => 'local-branch — the branch stays local, a human merges it',
-            'pull-request' => 'pull-request — the branch is pushed and a PR opened (gh), a human merges it',
-            'auto-merge' => 'auto-merge — merged automatically after a green full test run',
-        ])
         ->expectsQuestion('Directory of the epic worktrees', $worktrees)
         ->expectsConfirmation('Configure the YouTrack project XY now?', 'no')
         ->expectsOutputToContain('Would add the youtrack MCP server (https://yt.example.com/mcp, scope local) in Claude Code.')
@@ -482,19 +477,29 @@ it('installs without YouTrack when the URL is left empty', function () {
         ->expectsQuestion('YouTrack project short name', 'XY')
         ->expectsQuestion('Production branch', 'main')
         ->expectsQuestion('Development branch', 'dev')
-        ->expectsChoice('What happens to an epic branch when the agents are done?', 'auto-merge', [
-            'local-branch' => 'local-branch — the branch stays local, a human merges it',
-            'pull-request' => 'pull-request — the branch is pushed and a PR opened (gh), a human merges it',
-            'auto-merge' => 'auto-merge — merged automatically after a green full test run',
-        ])
         ->expectsQuestion('Directory of the epic worktrees', '../'.basename($project).'-worktrees')
         ->expectsConfirmation('Connect your own Telegram bot (questions of the agents, short reports, ideas by voice)?', 'no')
         ->expectsOutputToContain('YouTrack is skipped')
         ->assertSuccessful();
 
     expect((new EnvFile($project.'/.env'))->get('AGENTIO_WORKTREES_PATH'))->toBe($project.'-worktrees')
-        ->and(Manifest::load($project)->mergePolicy)->toBe('auto-merge');
+        ->and(Manifest::load($project)->project)->toBe('XY');
 });
+
+it('stops before installing anything without a GitHub CLI that is logged in', function (Closure $prepare, string $message) {
+    $project = projectWithFakeClaude();
+    $prepare(app(FakeGitHub::class));
+
+    $this->artisan('agentio:install', offline($project))
+        ->expectsOutputToContain($message)
+        ->assertFailed();
+
+    expect(glob($project.'/{,.}[!.]*', GLOB_BRACE))->toBe([])
+        ->and(claudeCalls($project))->toBe([]);
+})->with([
+    'not installed' => [fn (FakeGitHub $github) => $github->installed = false, 'GitHub CLI (gh): install it (https://cli.github.com), then run gh auth login'],
+    'not logged in' => [fn (FakeGitHub $github) => $github->authenticated = false, 'GitHub CLI (gh): not logged in: run gh auth login (gh auth status must succeed). agentio:install does not continue without it.'],
+]);
 
 it('reports missing preconditions with hints', function () {
     $project = projectWithFakeClaude();

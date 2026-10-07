@@ -19,7 +19,6 @@ use Obrazmisli\Agentio\YouTrack\Mcp\Tools;
 it('merges the package config with the documented defaults', function () {
     expect(config('agentio.youtrack.project'))->toBeNull()
         ->and(config('agentio.base_branch'))->toBeNull()
-        ->and(config('agentio.merge_policy'))->toBeNull()
         ->and(config('agentio.max_parallel'))->toBe(2)
         ->and(config('agentio.max_parallel_tasks'))->toBe(2)
         ->and(config('agentio.interval'))->toBe(300)
@@ -85,7 +84,7 @@ it('builds the loop state from the logs path, with the stop flag next to the log
 it('registers the agentio commands', function () {
     $commands = array_keys(Artisan::all());
 
-    expect($commands)->toContain('agentio:install', 'agentio:setup-youtrack', 'agentio:run', 'agentio:status', 'agentio:yt', 'agentio:worktree', 'agentio:commit', 'agentio:log', 'agentio:accept')
+    expect($commands)->toContain('agentio:install', 'agentio:setup-youtrack', 'agentio:run', 'agentio:status', 'agentio:yt', 'agentio:worktree', 'agentio:commit', 'agentio:log', 'agentio:accept', 'agentio:pr', 'agentio:release')
         ->not->toContain('agentio:guard');
 });
 

@@ -6,7 +6,6 @@ use Illuminate\Support\Facades\Artisan;
 use Obrazmisli\Agentio\Console\Commands\RunCommand;
 use Obrazmisli\Agentio\Install\Preconditions;
 use Obrazmisli\Agentio\Runtime\LoopState;
-use Obrazmisli\Agentio\Runtime\MergePolicy;
 use Obrazmisli\Agentio\Runtime\SessionSettings;
 use Obrazmisli\Agentio\Settings;
 use Symfony\Component\Process\Process;
@@ -24,7 +23,7 @@ beforeEach(function () {
  */
 function runPackageLoop(string $project, string ...$arguments): Process
 {
-    $environment = app(RunCommand::class)->environment(app(Settings::class), MergePolicy::LocalBranch, app(LoopState::class));
+    $environment = app(RunCommand::class)->environment(app(Settings::class), app(LoopState::class));
     $process = new Process([...RunCommand::scriptCommand(RunCommand::SCRIPT), ...$arguments], $project, $environment, null, 60);
     $process->run();
 
@@ -60,7 +59,7 @@ it('keeps loop.pid while running and plan-<ID>.pid while planning', function () 
         ->and(file_get_contents($logs.'/seen-by-claude.txt'))->toContain('loop.pid', 'plan-XY-1.pid')
         ->and($logs.'/loop.pid')->not->toBeFile()
         ->and($logs.'/plan-XY-1.pid')->not->toBeFile()
-        ->and(file_get_contents($logs.'/loop.log'))->toContain('agent loop started: mode=once policy=local-branch', 'XY-1: planning finished', 'agent loop stopped')
+        ->and(file_get_contents($logs.'/loop.log'))->toContain('agent loop started: mode=once max_parallel=', 'XY-1: planning finished', 'agent loop stopped')
         ->and(file_get_contents($logs.'/plan-XY-1.log'))->toContain('/agentio-plan XY-1', 'claude -p /agentio-plan XY-1')
         ->and(file_get_contents($project.'/artisan-calls.log'))->toContain('agentio:yt resumable --json', 'agentio:yt ready-epics --json', 'agentio:yt ideas --json');
 });
@@ -250,6 +249,18 @@ it('removes a stale planning pid file without treating it as an epic', function 
     expect($process->getExitCode())->toBe(0, $process->getErrorOutput())
         ->and($project.'/storage/logs/agents/plan-XY-3.pid')->not->toBeFile()
         ->and(file_get_contents($project.'/storage/logs/agents/loop.log'))->not->toContain('plan-XY-3: session finished');
+});
+
+it('publishes an epic that reached Review as a pull request and reports it with the link', function () {
+    $project = projectForLoop();
+    mkdir($project.'/storage/logs/agents', 0777, true);
+    file_put_contents($project.'/storage/logs/agents/XY-2.pid', '999999999');
+
+    $process = runPackageLoop($project, '--once', '--no-plan');
+
+    expect($process->getExitCode())->toBe(0, $process->getErrorOutput())
+        ->and(file_get_contents($project.'/storage/logs/agents/loop.log'))->toContain('XY-2: ready for human review: pull request https://github.com/acme/app/pull/3')
+        ->and(waitForArtisanCall($project, 'agentio:telegram notify review'))->toContain("agentio:pr XY-2\n", 'agentio:telegram notify review XY-2 --url=https://github.com/acme/app/pull/3');
 });
 
 it('does not start an epic whose skills are not committed to the base branch', function () {

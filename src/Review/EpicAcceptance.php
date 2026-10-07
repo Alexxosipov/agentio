@@ -7,6 +7,9 @@ namespace Obrazmisli\Agentio\Review;
 use Closure;
 use Obrazmisli\Agentio\Git\Git;
 use Obrazmisli\Agentio\Git\RepositoryLock;
+use Obrazmisli\Agentio\GitHub\GitHub;
+use Obrazmisli\Agentio\GitHub\GitHubException;
+use Obrazmisli\Agentio\GitHub\PullRequest;
 use Obrazmisli\Agentio\Process\ReadinessGraph;
 use Obrazmisli\Agentio\Runtime\LoopState;
 use Obrazmisli\Agentio\Settings;
@@ -16,15 +19,15 @@ use Obrazmisli\Agentio\YouTrack\IssueType;
 use Obrazmisli\Agentio\YouTrack\Mcp\Tools;
 use Obrazmisli\Agentio\YouTrack\State;
 use Obrazmisli\Agentio\YouTrack\YouTrackException;
-use Throwable;
 
 /**
- * The human's decision on an epic in Review, taken from the dashboard: accept it (merge the epic branch into
- * the base branch of the main checkout, remove the worktree, close the stories and the epic) or send it back
- * (a TASK with the remark in a story, the story and the epic back to Ready, so the loop resumes the epic in the
- * same worktree). Issues are read through the REST API and changed through the MCP server, like the agents do.
- * One action runs at a time per repository, whether it comes from the dashboard or from the agent loop
- * (php artisan agentio:accept).
+ * The human's decision on an epic in Review, taken from the dashboard, the command line or the Telegram bot:
+ * accept it (merge the pull request of the epic branch into the development branch on GitHub — opening it first
+ * when there is none —, bring the local development branch up to date, remove the worktree, close the stories
+ * and the epic) or send it back (a TASK with the remark in a story, the story and the epic back to Ready, so the
+ * loop resumes the epic in the same worktree). Epics reach the development branch only through pull requests.
+ * Issues are read through the REST API and changed through the MCP server, like the agents do. One action runs at
+ * a time per repository, whatever starts it.
  */
 final readonly class EpicAcceptance
 {
@@ -39,14 +42,17 @@ final readonly class EpicAcceptance
         private IssueRepository $issues,
         private Tools $tools,
         private LoopState $loop,
+        private EpicPullRequest $pullRequests,
+        private GitHub $github,
     ) {}
 
     /**
-     * What a merge of the epic branch needs; ok is null when it cannot be told in advance.
+     * What accepting the epic needs, and its pull request (null when it has none or GitHub could not be asked);
+     * ok of a check is null when it cannot be told in advance.
      *
-     * @return list<array{key: string, label: string, ok: bool|null, detail: string|null}>
+     * @return array{checks: list<array{key: string, label: string, ok: bool|null, detail: string|null}>, pullRequest: PullRequest|null}
      */
-    public function checks(?Issue $epic, EpicBranch $branch): array
+    public function assess(?Issue $epic, EpicBranch $branch): array
     {
         $checks = [
             self::check('state', 'Эпик в статусе Review', $epic?->hasState(State::Review), match (true) {
@@ -64,29 +70,51 @@ final readonly class EpicAcceptance
             $checks[] = self::check('worktree', 'В worktree эпика всё закоммичено', $changes === [], self::listed($changes));
         }
 
-        if (! $branch->isMerged()) {
-            $ahead = $branch->divergence()['ahead'];
-            $checks[] = self::check('commits', 'В ветке эпика есть коммиты', $ahead > 0, $ahead > 0 ? null : 'ветка не отличается от '.$branch->base);
+        $pullRequest = null;
 
-            $current = $branch->git->currentBranch();
-            $checks[] = self::check('checkout', 'Главный каталог на ветке '.$branch->base, $current === $branch->base, $current === $branch->base ? null : 'сейчас: '.($current ?? 'detached HEAD'));
+        try {
+            $this->pullRequests->ensureReady($branch);
+            $pullRequest = $this->pullRequests->current($branch);
+            $checks[] = self::check('github', 'GitHub: есть origin, gh установлен и авторизован', true, null);
+        } catch (ReviewException $exception) {
+            $checks[] = self::check('github', 'GitHub: есть origin, gh установлен и авторизован', false, $exception->getMessage());
+        }
 
-            $changes = $branch->git->changes();
-            $checks[] = self::check('clean', 'В главном каталоге нет незакоммиченных изменений', $changes === [], self::listed($changes));
+        if ($branch->isMerged()) {
+            return ['checks' => $checks, 'pullRequest' => $pullRequest];
+        }
 
+        $ahead = $branch->divergence()['ahead'];
+        $checks[] = self::check('commits', 'В ветке эпика есть коммиты', $ahead > 0, $ahead > 0 ? null : 'ветка не отличается от '.$branch->base);
+
+        $open = $pullRequest?->isOpen() === true ? $pullRequest : null;
+        $checks[] = match (true) {
+            $open === null => self::check('pr', 'Pull request в '.$branch->base, null, 'ещё не открыт: приёмка запушит ветку и откроет его'),
+            $open->draft => self::check('pr', 'Pull request в '.$branch->base, false, $open->label().' — черновик (draft): переведите его в Ready for review'),
+            default => self::check('pr', 'Pull request в '.$branch->base, true, $open->label().' '.$open->url),
+        };
+
+        if ($open !== null) {
+            $checks[] = self::check('conflicts', 'Слияние без конфликтов', $open->canMerge(), match ($open->canMerge()) {
+                true => null,
+                false => 'PR конфликтует с '.$branch->base.': влейте '.$branch->base.' в ветку эпика и разрешите конфликты',
+                null => 'GitHub ещё проверяет',
+            });
+        } else {
             $conflicts = $branch->conflicts();
             $checks[] = self::check('conflicts', 'Слияние без конфликтов', $conflicts === null ? null : $conflicts === [], $conflicts === null ? 'заранее проверить нельзя (нужен git 2.38+): конфликт остановит слияние' : self::listed($conflicts));
         }
 
-        return $checks;
+        return ['checks' => $checks, 'pullRequest' => $pullRequest];
     }
 
     /**
-     * Accept the epic: merge its branch (unless the base already has it), then optionally remove the worktree,
-     * delete the branch and move the reviewed stories and the epic to Done. Steps after the merge never undo it:
-     * their failures come back as warnings.
+     * Accept the epic: merge its pull request on GitHub (pushing the branch and opening the pull request first when
+     * needed; nothing to merge when the development branch already has the epic), bring the local development
+     * branch up to date, then optionally remove the worktree, delete the local branch and move the reviewed stories
+     * and the epic to Done. Steps after the merge never undo it: their failures come back as warnings.
      *
-     * @return array{merged: bool, commit: string|null, branch: string, base: string, worktreeRemoved: bool, branchDeleted: bool, closed: list<string>, warnings: list<string>}
+     * @return array{merged: bool, commit: string|null, branch: string, base: string, pullRequest: array<string, mixed>|null, worktreeRemoved: bool, branchDeleted: bool, closed: list<string>, warnings: list<string>}
      *
      * @throws ReviewException
      */
@@ -98,12 +126,16 @@ final readonly class EpicAcceptance
             $branch = EpicBranch::find($this->settings, $epicId)
                 ?? throw new ReviewException("В главном каталоге нет ветки {$epicId}.");
 
+            $this->pullRequests->ensureReady($branch);
+            $branch->git->fetch($branch->base);
+
             // A branch without commits of its own looks merged to git: tell it from a merged pull request.
             if ($branch->isMerged() && ! $this->baseHasWorkOf($graph, $epic, $branch)) {
                 throw new ReviewException("В {$branch->base} нет коммитов задач эпика, а ветка {$branch->name} не отличается от неё: принимать нечего.", 409);
             }
 
-            $failed = array_filter($this->checks($epic, $branch), fn (array $check): bool => $check['ok'] === false);
+            $assessment = $this->assess($epic, $branch);
+            $failed = array_filter($assessment['checks'], fn (array $check): bool => $check['ok'] === false);
 
             if ($failed !== []) {
                 throw new ReviewException('Эпик сейчас нельзя принять.', 409, array_values(array_map(
@@ -113,16 +145,30 @@ final readonly class EpicAcceptance
             }
 
             $warnings = [];
-            $commit = $branch->isMerged() ? null : $this->merge($branch);
+            $pullRequest = $assessment['pullRequest'];
+            $commit = null;
+
+            if (! $branch->isMerged()) {
+                $pullRequest = $this->pullRequests->publishBranch($branch)['pullRequest'];
+                $commit = $this->merge($branch, $pullRequest);
+                $branch->git->fetch($branch->base);
+            }
+
+            $behind = $branch->git->fastForward($branch->base);
+
+            if ($behind !== null) {
+                $warnings[] = 'Локальная ветка '.$branch->base.' не обновлена: '.$behind;
+            }
 
             return [
                 'merged' => $commit !== null,
                 'commit' => $commit,
                 'branch' => $branch->name,
                 'base' => $branch->base,
+                'pullRequest' => $pullRequest?->toArray(),
                 'worktreeRemoved' => $removeWorktree && $this->removeWorktree($branch, $warnings),
                 'branchDeleted' => $deleteBranch && $this->deleteBranch($branch, $warnings),
-                'closed' => $close ? $this->close($graph, $epic, $branch, $commit, $warnings) : [],
+                'closed' => $close ? $this->close($graph, $epic, $branch, $pullRequest, $commit, $warnings) : [],
                 'warnings' => $warnings,
             ];
         });
@@ -238,33 +284,21 @@ final readonly class EpicAcceptance
     }
 
     /**
-     * Merge the branch into the base of the main checkout; a failed merge is aborted.
+     * Merge the pull request on GitHub with a merge commit, as long as its head is the local tip of the branch.
      *
      * @return string The short hash of the merge commit
      *
      * @throws ReviewException
      */
-    private function merge(EpicBranch $branch): string
+    private function merge(EpicBranch $branch, PullRequest $pullRequest): string
     {
-        // The full ref: a tag named like the branch (TP-12) would win over a short name.
         try {
-            $process = $branch->git->runWithTimeout(null, 'merge', '--no-ff', '-m', "Merge branch '{$branch->name}' into {$branch->base}", 'refs/heads/'.$branch->name);
-        } catch (Throwable $exception) {
-            $this->abortMerge($branch);
-
-            throw new ReviewException('git merge прерван: '.$exception->getMessage().' Главный каталог возвращён в прежнее состояние.', 500);
+            $commit = $this->github->merge($pullRequest, (string) $branch->sha());
+        } catch (GitHubException $exception) {
+            throw new ReviewException('GitHub не слил '.$pullRequest->label().' ('.$pullRequest->url.'): '.$exception->getMessage(), 409);
         }
 
-        if ($process->isSuccessful()) {
-            return (string) $branch->git->output('rev-parse', '--short', 'HEAD');
-        }
-
-        $conflicts = $branch->git->lines('diff', '--name-only', '--diff-filter=U');
-        $this->abortMerge($branch);
-
-        throw new ReviewException($conflicts === []
-            ? 'git merge не удался: '.Git::error($process)
-            : 'Слияние остановлено из-за конфликтов, главный каталог возвращён в прежнее состояние. Слейте ветку вручную.', 409, $conflicts);
+        return substr($commit, 0, 7);
     }
 
     /**
@@ -279,14 +313,13 @@ final readonly class EpicAcceptance
             return false;
         }
 
-        return $branch->git->lines('log', '-1', '--format=%h', '-E', '--grep=^('.implode('|', $ids).')([^0-9]|$)', 'refs/heads/'.$branch->base) !== [];
-    }
-
-    private function abortMerge(EpicBranch $branch): void
-    {
-        if ($branch->git->run('rev-parse', '--quiet', '--verify', 'MERGE_HEAD')->isSuccessful()) {
-            $branch->git->run('merge', '--abort');
+        foreach (['refs/heads/', 'refs/remotes/origin/'] as $prefix) {
+            if ($branch->git->lines('log', '-1', '--format=%h', '-E', '--grep=^('.implode('|', $ids).')([^0-9]|$)', $prefix.$branch->base) !== []) {
+                return true;
+            }
         }
+
+        return false;
     }
 
     /**
@@ -327,14 +360,15 @@ final readonly class EpicAcceptance
      * @param  list<string>  $warnings
      * @return list<string> The issues moved to Done
      */
-    private function close(ReadinessGraph $graph, Issue $epic, EpicBranch $branch, ?string $commit, array &$warnings): array
+    private function close(ReadinessGraph $graph, Issue $epic, EpicBranch $branch, ?PullRequest $pullRequest, ?string $commit, array &$warnings): array
     {
         $closed = [];
+        $request = $pullRequest === null ? '' : ' (pull request '.$pullRequest->label().' '.$pullRequest->url.')';
 
         try {
             $this->tools->addComment($epic->id, $commit === null
-                ? "Эпик принят в панели agentio: ветка `{$branch->name}` уже слита в `{$branch->base}`."
-                : "Эпик принят в панели agentio: ветка `{$branch->name}` слита в `{$branch->base}` (`{$commit}`).");
+                ? "Эпик принят: ветка `{$branch->name}` уже в `{$branch->base}`{$request}."
+                : "Эпик принят: pull request {$pullRequest?->label()} ветки `{$branch->name}` слит в `{$branch->base}` (`{$commit}`): {$pullRequest?->url}");
 
             $open = [];
 

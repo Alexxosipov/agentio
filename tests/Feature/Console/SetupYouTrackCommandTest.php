@@ -10,7 +10,6 @@ use Obrazmisli\Agentio\Install\KnowledgeBase;
 use Obrazmisli\Agentio\Install\Manifest;
 use Obrazmisli\Agentio\Install\Placeholders;
 use Obrazmisli\Agentio\Install\YouTrackSetup;
-use Obrazmisli\Agentio\Runtime\MergePolicy;
 use Obrazmisli\Agentio\Tests\Fakes\FakeYouTrackMcp;
 use Obrazmisli\Agentio\YouTrack\Client;
 use Obrazmisli\Agentio\YouTrack\Mcp\McpClient;
@@ -80,7 +79,7 @@ function existingKnowledgeBase(FakeYouTrackMcp $mcp): void
         $kb[$key] = 'XY-A-'.($index + 1);
     }
 
-    $mcp->articles['XY-A-10']['content'] = KnowledgeBase::ofPackage()->content('guide', new Placeholders('XY', 'dev', MergePolicy::LocalBranch, $kb));
+    $mcp->articles['XY-A-10']['content'] = KnowledgeBase::ofPackage()->content('guide', new Placeholders('XY', 'dev', $kb));
 }
 
 it('sets up an empty project: Stage and Type values, tags, saved searches and the knowledge base', function () {
@@ -412,7 +411,7 @@ it('records the knowledge base ids in the installed skills', function () {
     $project = hostProject();
     (new FakeYouTrackMcp)->fake();
     fakeYouTrackRestApi(russianYouTrack());
-    $installer = new Installer($project, dirname(__DIR__, 3).'/stubs', new Placeholders('XY', 'main', MergePolicy::LocalBranch));
+    $installer = new Installer($project, dirname(__DIR__, 3).'/stubs', new Placeholders('XY', 'main'));
     $installer->install();
     (new Manifest('XY', 'main', files: $installer->hashes()))->save($project);
 

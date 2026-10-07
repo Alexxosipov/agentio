@@ -65,14 +65,14 @@ it('reports the events of the loop briefly', function () {
     $reports = app(Reports::class);
 
     expect($reports->event('planned', 'XY-1'))->toBe("🗂 Идея XY-1 «Оплата» спланирована.\n\nЭпики:\n• XY-2 Оплата заказов — Review")
-        ->and($reports->event('review', 'XY-2'))->toContain('✅ Эпик XY-2 «Оплата заказов» готов к приёмке: ветка XY-2.', "Сделано:\n- Оплата картой\n- Возвраты", 'php artisan agentio:accept XY-2')
-        ->and($reports->event('merged', 'XY-2'))->toBe('🚀 Эпик XY-2 «Оплата заказов» принят автоматически: слит в dev и закрыт.')
+        ->and($reports->event('review', 'XY-2', url: 'https://github.com/acme/app/pull/7'))->toContain('✅ Эпик XY-2 «Оплата заказов» готов к приёмке: pull request в dev — https://github.com/acme/app/pull/7.', "Сделано:\n- Оплата картой\n- Возвраты", 'ответьте на это сообщение (reply) «мержи»', 'php artisan agentio:accept XY-2')
+        ->and($reports->event('review', 'XY-2'))->toContain('ветка XY-2 (pull request ещё не открыт: php artisan agentio:pr XY-2).')
         ->and($reports->event('blocked', 'XY-1', 'plan-XY-1'))->toContain('сессия планирования', 'php artisan agentio:log plan-XY-1')
         ->and($reports->event('review', 'XY-404'))->toStartWith('✅ Эпик XY-404 готов к приёмке');
 
-    app()->call([new NotifyDeveloper('merged', 'XY-2'), 'handle']);
+    app()->call([new NotifyDeveloper('review', 'XY-2', url: 'https://github.com/acme/app/pull/7'), 'handle']);
 
-    Queue::assertPushed(SendTelegramMessage::class, fn (SendTelegramMessage $job): bool => $job->kind === 'report' && $job->issue === 'XY-2' && str_starts_with($job->text, '🚀'));
+    Queue::assertPushed(SendTelegramMessage::class, fn (SendTelegramMessage $job): bool => $job->kind === 'report' && $job->issue === 'XY-2' && str_contains($job->text, 'https://github.com/acme/app/pull/7'));
 });
 
 it('reports the pause at the usage limit and the resumed work', function () {

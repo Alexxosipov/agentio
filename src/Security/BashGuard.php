@@ -11,9 +11,10 @@ use Symfony\Component\Process\Process;
  * The second line of defence behind the permission rules of the headless agent sessions: decides whether a
  * Bash command of an agent is refused. Refused are pushes to protected branches, force pushes, deleting or
  * moving branches other than the branches of issues (TP-12, see Branches), merges into protected branches,
- * history rewrites, git subcommands agents have no use for (aliases included), destructive commands and writes
- * outside the project, writes to the agents' own settings and skills, access to secrets and to the YouTrack
- * token, and the agentio commands that only humans and the loop run.
+ * history rewrites, git subcommands agents have no use for (aliases included), every GitHub CLI command that is
+ * not a read (merging and opening pull requests is the business of agentio and of the developer), destructive
+ * commands and writes outside the project, writes to the agents' own settings and skills, access to secrets and
+ * to the YouTrack token, and the agentio commands that only humans and the loop run.
  *
  * The command line is split into simple commands by a small shell lexer (quotes, escapes, command substitution,
  * lists and pipes), and a `cd` moves the directory the following commands are resolved against. It is not a
@@ -28,6 +29,14 @@ final readonly class BashGuard
         'merge', 'merge-base', 'mv', 'name-rev', 'pull', 'push', 'reflog', 'remote', 'reset', 'restore', 'rev-list',
         'rev-parse', 'revert', 'rm', 'shortlog', 'show', 'show-ref', 'stash', 'status', 'switch', 'tag', 'version',
         'worktree',
+    ];
+
+    /** The GitHub CLI commands agents may run: reads only. */
+    private const array GH_READS = [
+        'pr' => ['view', 'list', 'diff', 'checks', 'status'],
+        'run' => ['view', 'list'],
+        'repo' => ['view'],
+        'auth' => ['status'],
     ];
 
     /** Commands that change or remove every file they are given. */
@@ -68,6 +77,7 @@ final readonly class BashGuard
                     $words === [] => null,
                     $words[0] === 'git' => $this->git(array_slice($words, 1), $cwd),
                     $words[0] === 'php' => $this->php(array_slice($words, 1)),
+                    $words[0] === 'gh' => self::gh(array_slice($words, 1)),
                     in_array($words[0], ['composer', 'composer.phar'], true) => self::composer(array_slice($words, 1)),
                     $words[0] === 'find' => $this->find($words, $cwd),
                     in_array($words[0], ['sed', 'perl'], true) => $this->inPlaceEdit($words, $cwd),
@@ -273,10 +283,26 @@ final readonly class BashGuard
         $command = $rest[0] ?? '';
 
         return match (true) {
-            in_array($command, ['agentio:install', 'agentio:setup-youtrack', 'agentio:worktree', 'agentio:accept', 'tinker'], true) => "php artisan {$command} is run by humans, not by agents.",
+            in_array($command, ['agentio:install', 'agentio:setup-youtrack', 'agentio:worktree', 'agentio:accept', 'agentio:release', 'tinker'], true) => "php artisan {$command} is run by humans, not by agents.",
             $command === 'agentio:run' && ! self::onlyDryRun(array_slice($rest, 1)) => 'php artisan agentio:run is run by humans; agents may only use --dry-run (with --epic= or --no-plan).',
             default => null,
         };
+    }
+
+    /**
+     * The GitHub CLI only reads: an epic is published with php artisan agentio:pr, and pull requests are merged by
+     * the developer (the dashboard, agentio:accept, the Telegram bot), never by agents.
+     *
+     * @param  list<string>  $args
+     */
+    private static function gh(array $args): ?string
+    {
+        $words = array_values(array_filter($args, fn (string $arg): bool => ! str_starts_with($arg, '-')));
+        [$group, $command] = [$words[0] ?? '', $words[1] ?? ''];
+
+        return in_array($command, self::GH_READS[$group] ?? [], true)
+            ? null
+            : "gh {$group} {$command} is not allowed: agents only read GitHub; publish an epic with php artisan agentio:pr, the developer merges pull requests.";
     }
 
     /**

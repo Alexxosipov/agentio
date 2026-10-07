@@ -7,18 +7,21 @@ namespace Obrazmisli\Agentio\Telegram;
 use JsonException;
 
 /**
- * What the assistant decided to do with a message of the developer: the reply, and the YouTrack changes agentio
- * makes for it (the assistant session itself only reads):
+ * What the assistant decided to do with a message of the developer: the reply, and the changes agentio makes for
+ * it (the assistant session itself only reads):
  *
  * - answer: {issue, comment, resume} — the developer answered the questions of an issue: the comment is posted,
  *   and with resume the issue goes back from Blocked to work;
  * - comment: {issue, comment} — a remark for an issue, nothing else changes;
- * - idea: {summary, description} — a new idea for the planning loop.
+ * - idea: {summary, description} — a new idea for the planning loop;
+ * - merge: {issue} — merge the pull request of the epic into the development branch and close the epic;
+ * - release: {confirm} — open the release pull request and ask the developer to confirm it; with confirm (the
+ *   developer said yes to that question), merge it.
  */
 final readonly class Decision
 {
     /**
-     * @param  list<array{type: DecisionAction, issue: string|null, comment: string, resume: bool, summary: string, description: string}>  $actions
+     * @param  list<array{type: DecisionAction, issue: string|null, comment: string, resume: bool, summary: string, description: string, confirm: bool}>  $actions
      */
     public function __construct(
         public string $reply,
@@ -59,6 +62,7 @@ final readonly class Decision
                 'resume' => ($action['resume'] ?? false) === true,
                 'summary' => is_string($action['summary'] ?? null) ? trim($action['summary']) : '',
                 'description' => is_string($action['description'] ?? null) ? trim($action['description']) : '',
+                'confirm' => ($action['confirm'] ?? false) === true,
             ];
         }
 

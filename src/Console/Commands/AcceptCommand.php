@@ -10,9 +10,11 @@ use Obrazmisli\Agentio\Review\ReviewException;
 use Symfony\Component\Console\Attribute\AsCommand;
 
 /**
- * Accepts an epic in Review the way the dashboard does (EpicAcceptance): merges its branch into the development
- * branch of this checkout (nothing is pushed), removes the worktree and moves the reviewed stories and the epic
- * to Done. The agent loop runs it for the auto-merge policy when the project has no remote; agents never do.
+ * Accepts an epic in Review the way the dashboard and the Telegram bot do (EpicAcceptance): merges its pull
+ * request into the development branch on GitHub (pushing the branch and opening the pull request first when
+ * there is none), brings the local development branch up to date, removes the worktree and moves the reviewed
+ * stories and the epic to Done. After a pull request merged on GitHub by hand it only cleans up and closes the
+ * epic. Humans run it; agents never do.
  */
 #[AsCommand(name: 'agentio:accept')]
 final class AcceptCommand extends Command
@@ -23,14 +25,14 @@ final class AcceptCommand extends Command
     protected $signature = 'agentio:accept
         {epic : The epic id, e.g. TP-12}
         {--keep-worktree : Do not remove the epic worktree}
-        {--delete-branch : Delete the epic branch after the merge}
+        {--delete-branch : Delete the local epic branch after the merge}
         {--no-close : Do not move the stories and the epic to Done}
         {--json : Print the result as JSON}';
 
     /**
      * @var string
      */
-    protected $description = 'Accept an epic in Review: merge its branch into the development branch and close it';
+    protected $description = 'Accept an epic in Review: merge its pull request into the development branch on GitHub and close it';
 
     public function handle(EpicAcceptance $acceptance): int
     {
@@ -66,6 +68,10 @@ final class AcceptCommand extends Command
         $this->components->info($result['merged']
             ? "{$epic}: merged {$result['branch']} into {$result['base']} ({$result['commit']})."
             : "{$epic}: {$result['base']} already contains {$result['branch']}.");
+
+        if ($result['pullRequest'] !== null) {
+            $this->line('  Pull request: #'.$result['pullRequest']['number'].' '.$result['pullRequest']['url']);
+        }
 
         if ($result['closed'] !== []) {
             $this->line('  Done: '.implode(', ', $result['closed']));

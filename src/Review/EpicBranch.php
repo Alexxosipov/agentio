@@ -60,11 +60,21 @@ final readonly class EpicBranch
     }
 
     /**
-     * Whether the base branch already contains the branch tip.
+     * The full hash of the branch tip.
+     */
+    public function sha(): ?string
+    {
+        return $this->git->output('rev-parse', '--verify', '--quiet', 'refs/heads/'.$this->name);
+    }
+
+    /**
+     * Whether the base branch already contains the branch tip: the local one, or the one of origin as last fetched
+     * (a pull request merged on GitHub).
      */
     public function isMerged(): bool
     {
-        return $this->git->run('merge-base', '--is-ancestor', 'refs/heads/'.$this->name, 'refs/heads/'.$this->base)->isSuccessful();
+        return $this->git->isAncestor('refs/heads/'.$this->name, 'refs/heads/'.$this->base)
+            || $this->git->isAncestor('refs/heads/'.$this->name, 'refs/remotes/origin/'.$this->base);
     }
 
     /**

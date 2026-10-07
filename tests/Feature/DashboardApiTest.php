@@ -23,7 +23,6 @@ function dashboardEnvironment(bool $configured = true): string
         'agentio.youtrack.url' => $configured ? 'https://yt.example.com' : null,
         'agentio.youtrack.token' => $configured ? 'secret' : null,
         'agentio.youtrack.retries' => 0,
-        'agentio.merge_policy' => 'pull-request',
         'cache.default' => 'array',
     ]);
 
@@ -100,7 +99,7 @@ function fakeYouTrack(?array $issues = null): void
 function runningLoopLogs(string $logs): void
 {
     file_put_contents($logs.'/loop.log', implode("\n", [
-        '[2026-10-03 14:57:38] agent loop started: mode=loop policy=pull-request max_parallel=2 interval=300s',
+        '[2026-10-03 14:57:38] agent loop started: mode=loop max_parallel=2 interval=300s',
         '[2026-10-03 14:57:39] TP-2: started /agentio-work-epic (pid 547803)',
     ])."\n");
     file_put_contents($logs.'/loop.pid', (string) getmypid());
@@ -124,7 +123,6 @@ it('reports the header status', function () {
             'youtrack' => ['configured' => true, 'ok' => true, 'error' => null],
             'loop' => ['status' => 'running', 'label' => 'работает', 'pid' => getmypid(), 'stopRequested' => false],
             'sessions' => ['alive' => 1, 'total' => 1],
-            'mergePolicy' => 'pull-request',
             'logs' => ['exists' => true],
             'poll' => 5,
         ])
@@ -135,12 +133,10 @@ it('reports a stop request and a stopped loop', function () {
     $logs = dashboardEnvironment(configured: false);
     file_put_contents($logs.'/loop.pid', (string) getmypid());
     touch($logs.'/stop');
-    config(['agentio.merge_policy' => 'something-else']);
 
     $this->getJson('/agentio/api/status')->assertOk()->assertJson([
         'loop' => ['status' => 'stopping', 'label' => 'останавливается', 'stopRequested' => true],
-        'mergePolicy' => 'something-else',
-    ]);
+    ])->assertJsonMissingPath('mergePolicy');
 
     unlink($logs.'/loop.pid');
 

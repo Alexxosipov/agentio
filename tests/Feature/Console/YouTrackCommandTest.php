@@ -233,6 +233,39 @@ it('lists the epics and ideas this machine left unfinished', function () {
         ]);
 });
 
+it('offers and lets claim only the issues reported by the user of the token', function () {
+    $project = hostProject();
+    $worktrees = $project.'/worktrees';
+    mkdir($worktrees.'/XY-31', 0777, true);
+    config(['agentio.worktrees_path' => $worktrees]);
+    $host = gethostname();
+
+    $server = epicProject()
+        ->issue('XY-10', 'Idea', 'Backlog', summary: 'Our idea')
+        ->issue('XY-11', 'Idea', 'Backlog', summary: 'Their idea', reporter: 'colleague')
+        ->issue('XY-12', 'Task', 'Ready', 'XY-3', reporter: 'colleague')
+        ->issue('XY-30', 'Epic', 'Ready', reporter: 'colleague')
+        ->issue('XY-32', 'Story', 'Ready', 'XY-30')
+        ->issue('XY-33', 'Task', 'Ready', 'XY-32')
+        ->issue('XY-31', 'Epic', 'In Progress', tags: ['agent-claimed'], reporter: 'colleague')
+        ->comment('XY-31', "[AGENT:START]\nowner: `{$host}:{$worktrees}/XY-31`");
+
+    expect(yt(['action' => 'ideas']))->toBe([0, "XY-10 Our idea\n"])
+        ->and(json_decode(yt(['action' => 'ready-epics', '--json' => true])[1], true))->toBe([['id' => 'XY-2', 'summary' => '[EPIC] Summary of XY-2', 'branch' => 'XY-2', 'readyTasks' => ['XY-6']]])
+        ->and(array_column(json_decode(yt(['action' => 'ready-tasks', 'id' => 'XY-2', '--json' => true])[1], true), 'id'))->toBe(['XY-6'])
+        ->and(json_decode(yt(['action' => 'resumable', '--json' => true])[1], true))->toBe([])
+        ->and(yt(['action' => 'mine', 'id' => 'XY-6']))->toBe([0, "MINE XY-6\n"])
+        ->and(yt(['action' => 'mine', 'id' => 'XY-12']))->toBe([3, "FOREIGN XY-12\n"]);
+
+    [$status, $output] = yt(['action' => 'claim', 'id' => 'XY-12', '--as' => 'XY-12', '--worktree' => '/w/XY-2', '--branch' => 'XY-2']);
+
+    expect($status)->toBe(3)
+        ->and($output)->toContain('LOST: XY-12 was reported by another YouTrack user')
+        ->and($server->issues['XY-12']['fields']['Stage'])->toBe('Ready')
+        ->and($server->callsOf('add_issue_comment'))->toBe([])
+        ->and($server->callsOf('manage_issue_tags'))->toBe([]);
+});
+
 it('refuses an unknown Stage', function () {
     epicProject();
 

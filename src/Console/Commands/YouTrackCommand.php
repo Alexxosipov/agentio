@@ -14,6 +14,7 @@ use Obrazmisli\Agentio\Process\StructureValidator;
 use Obrazmisli\Agentio\Process\TreeNode;
 use Obrazmisli\Agentio\Settings;
 use Obrazmisli\Agentio\YouTrack\Issue;
+use Obrazmisli\Agentio\YouTrack\IssueRepository;
 use Obrazmisli\Agentio\YouTrack\IssueType;
 use Obrazmisli\Agentio\YouTrack\Mcp\Tools;
 use Obrazmisli\Agentio\YouTrack\State;
@@ -26,6 +27,9 @@ use Symfony\Component\Process\Process;
  * The deterministic YouTrack helper of the cycle: the readiness rules, epic trees, graph validation, claims
  * and the knowledge base tree, computed the same way for the loop and for the agents. Everything goes through
  * the YouTrack MCP server (the same tools the agents call), never through the REST API.
+ *
+ * The cycle works only on the issues reported by the YouTrack user of the token (`reporter: me`): ideas, epics
+ * and tasks of other people are neither offered to the loop and the orchestrator nor claimable.
  */
 #[AsCommand(name: 'agentio:yt')]
 final class YouTrackCommand extends Command
@@ -34,11 +38,14 @@ final class YouTrackCommand extends Command
 
     public const int INVALID = 2;
 
+    /** The search filter of the issues the cycle may work on: reported by the user of the token. */
+    public const string OWN = 'reporter: me';
+
     /**
      * @var string
      */
     protected $signature = 'agentio:yt
-        {action=help : ideas, ready-epics, claimed-epics, resumable, tree, ready-tasks, blocked, validate, claim, release, state, kb-tree}
+        {action=help : ideas, ready-epics, claimed-epics, resumable, tree, ready-tasks, blocked, validate, claim, release, state, kb-tree, mine}
         {id? : The issue (or, for kb-tree, the article) id}
         {--json : Print JSON}
         {--as= : claim: owner suffix of a subagent, e.g. its TASK id}
@@ -97,6 +104,7 @@ final class YouTrackCommand extends Command
                 'claim' => $this->claim($this->id()),
                 'release' => $this->release($this->id()),
                 'state' => $this->state($this->id()),
+                'mine' => $this->mine($this->id()),
                 'kb-tree' => $this->kbTree($this->stringArgument('id')),
                 default => $this->failWith("Unknown action {$action}: run php artisan agentio:yt help."),
             };
@@ -106,14 +114,14 @@ final class YouTrackCommand extends Command
     }
 
     /**
-     * Ideas waiting for planning: tag idea or Type Idea, Stage Backlog, not claimed.
+     * Ideas waiting for planning: tag idea or Type Idea, Stage Backlog, not claimed, reported by the user of the token.
      */
     private function ideas(): int
     {
         $ideas = [];
 
         foreach (['tag: {'.Tag::Idea->value.'}', 'Type: '.IssueType::Idea->value] as $filter) {
-            foreach ($this->tools->searchIssues($this->query($filter.' '.State::FIELD.': '.State::Backlog->value.' tag: -{'.Tag::Claimed->value.'}')) as $raw) {
+            foreach ($this->tools->searchIssues($this->query($filter.' '.State::FIELD.': '.State::Backlog->value.' tag: -{'.Tag::Claimed->value.'} '.self::OWN)) as $raw) {
                 $issue = Issue::fromMcp($raw);
 
                 if ($issue->hasState(State::Backlog)) {
@@ -132,18 +140,24 @@ final class YouTrackCommand extends Command
     }
 
     /**
-     * Epics the loop may start: Ready, not claimed, no unmet dependencies, at least one ready task.
+     * Epics the loop may start: Ready, not claimed, reported by the user of the token, no unmet dependencies, at
+     * least one ready task of the same user.
      */
     private function readyEpics(): int
     {
         $epics = [];
 
-        foreach ($this->tools->searchIssues($this->query('Type: Epic '.State::FIELD.': '.State::Ready->value.' tag: -{'.Tag::Claimed->value.'}')) as $raw) {
+        foreach ($this->tools->searchIssues($this->query('Type: Epic '.State::FIELD.': '.State::Ready->value.' tag: -{'.Tag::Claimed->value.'} '.self::OWN)) as $raw) {
             $id = (string) ($raw['id'] ?? '');
 
-            if ($id !== '' && $this->graph()->isEpicReady($id)) {
-                $summary = $this->graph()->get($id)->summary;
-                $epics[] = ['id' => $id, 'summary' => $summary, 'branch' => Branches::forIssue($id), 'readyTasks' => $this->graph()->readyTasks($id)];
+            if ($id === '' || ! $this->graph()->isEpicReady($id)) {
+                continue;
+            }
+
+            $tasks = $this->own($this->graph()->readyTasks($id));
+
+            if ($tasks !== []) {
+                $epics[] = ['id' => $id, 'summary' => $this->graph()->get($id)->summary, 'branch' => Branches::forIssue($id), 'readyTasks' => $tasks];
             }
         }
 
@@ -180,14 +194,15 @@ final class YouTrackCommand extends Command
 
     /**
      * What this machine left unfinished, for the loop to resume: epics In Progress claimed by their worktree here
-     * (which still exists), and ideas in planning claimed by the project manager of this checkout.
+     * (which still exists), and ideas in planning claimed by the project manager of this checkout — of those
+     * reported by the user of the token.
      */
     private function resumable(): int
     {
         $items = [];
         $worktrees = $this->settings->worktreesPath();
 
-        foreach ($this->tools->searchIssues($this->query('Type: Epic tag: {'.Tag::Claimed->value.'}')) as $raw) {
+        foreach ($this->tools->searchIssues($this->query('Type: Epic tag: {'.Tag::Claimed->value.'} '.self::OWN)) as $raw) {
             $epic = Issue::fromMcp($raw);
             $worktree = $worktrees === null ? null : (realpath($worktrees) ?: $worktrees).'/'.$epic->id;
 
@@ -199,7 +214,7 @@ final class YouTrackCommand extends Command
         $planner = Claims::owner(realpath($this->settings->basePath()) ?: $this->settings->basePath(), Claims::PLANNER);
 
         foreach (['tag: {'.Tag::Idea->value.'}', 'Type: '.IssueType::Idea->value] as $filter) {
-            foreach ($this->tools->searchIssues($this->query($filter.' tag: {'.Tag::Claimed->value.'}')) as $raw) {
+            foreach ($this->tools->searchIssues($this->query($filter.' tag: {'.Tag::Claimed->value.'} '.self::OWN)) as $raw) {
                 $idea = Issue::fromMcp($raw);
 
                 if (! isset($items[$idea->id]) && ($idea->hasState(State::Analysis) || $idea->hasState(State::InProgress)) && $this->claims->ownerOf($idea->id) === $planner) {
@@ -248,7 +263,7 @@ final class YouTrackCommand extends Command
     }
 
     /**
-     * Tasks of the epic that can be started now.
+     * Tasks of the epic that can be started now (those reported by the user of the token).
      */
     private function readyTasks(string $epic): int
     {
@@ -256,7 +271,7 @@ final class YouTrackCommand extends Command
             'id' => $id,
             'summary' => $this->graph()->get($id)->summary,
             'story' => $this->graph()->parentOf($id),
-        ], $this->graph()->readyTasks($epic));
+        ], $this->own($this->graph()->readyTasks($epic)));
 
         return $this->output($tasks, function (array $tasks): void {
             foreach ($tasks as $task) {
@@ -347,10 +362,17 @@ final class YouTrackCommand extends Command
 
     /**
      * Claim the issue (or resume an own claim): [AGENT:START] with owner, branch and worktree, the agent-claimed
-     * tag, Stage In Progress, then read the comments again and check that the active claim is ours.
+     * tag, Stage In Progress, then read the comments again and check that the active claim is ours. An issue
+     * another user reported is lost from the start: the cycle never works on it.
      */
     private function claim(string $id): int
     {
+        if ($this->own([$id]) === []) {
+            $this->output(['claimed' => false, 'owner' => null, 'foreign' => true], fn () => $this->line("LOST: {$id} was reported by another YouTrack user; agentio works only on the issues of the user of its token (".self::OWN.')'));
+
+            return self::LOST;
+        }
+
         $worktree = $this->stringOption('worktree') ?? $this->git('rev-parse', '--show-toplevel');
         $branch = $this->stringOption('branch') ?? $this->git('branch', '--show-current');
 
@@ -385,6 +407,17 @@ final class YouTrackCommand extends Command
         $this->claims->release($id, $state, $this->stringOption('comment'));
 
         return $this->output(['id' => $id, 'state' => $state->value], fn () => $this->line("RELEASED {$id} -> {$state->value}"));
+    }
+
+    /**
+     * Whether the cycle may work on the issue: it was reported by the user of the token (exit 0), or not (exit 3).
+     */
+    private function mine(string $id): int
+    {
+        $mine = $this->own([$id]) !== [];
+        $this->output(['id' => $id, 'mine' => $mine], fn () => $this->line($mine ? "MINE {$id}" : "FOREIGN {$id}"));
+
+        return $mine ? self::SUCCESS : self::LOST;
     }
 
     private function state(string $id): int
@@ -458,6 +491,25 @@ final class YouTrackCommand extends Command
         }
 
         return ['id' => $id, 'summary' => $articles[$id]['summary'], 'children' => $children];
+    }
+
+    /**
+     * The issues of the list reported by the user of the token, in the order of the list.
+     *
+     * @param  list<string>  $ids
+     * @return list<string>
+     *
+     * @throws YouTrackException
+     */
+    private function own(array $ids): array
+    {
+        if ($ids === []) {
+            return [];
+        }
+
+        $own = $this->tools->issueIds($this->query(IssueRepository::idQuery($ids).' '.self::OWN));
+
+        return array_values(array_filter($ids, fn (string $id): bool => in_array($id, $own, true)));
     }
 
     private function graph(): ReadinessGraph
@@ -570,6 +622,8 @@ final class YouTrackCommand extends Command
             Usage: php artisan agentio:yt <action> [<ID>] [options] [--json]
             Works through the YouTrack MCP server with YOUTRACK_URL, YOUTRACK_TOKEN (environment or .env).
 
+            Only the issues reported by the YouTrack user of the token are offered and claimable (reporter: me).
+
               ideas                    Ideas waiting for planning (tag idea or Type Idea, Stage Backlog, not claimed)
               ready-epics              Epics ready to be worked on (full readiness rule) with their first wave of tasks
               claimed-epics            Epics with the agent-claimed tag and the owners of their claims
@@ -579,7 +633,9 @@ final class YouTrackCommand extends Command
               validate <EPIC|IDEA>     Structure checks: prefixes and types, parents, empty stories, first wave, cycles (exit 2)
               claim <ID> [--as=SUFFIX] [--plan=TEXT] [--branch=B] [--worktree=W] [--owner=O]
                                        Claim or resume an own claim: [AGENT:START], tag agent-claimed, Stage In Progress,
-                                       re-read, verify. CLAIMED / RESUMED (exit 0) or LOST (exit 3)
+                                       re-read, verify. CLAIMED / RESUMED (exit 0) or LOST (exit 3; also an issue
+                                       another user reported)
+              mine <ID>                Whether the issue was reported by the user of the token: MINE (0) / FOREIGN (3)
               release <ID> --state=S [--comment=TEXT]
                                        Post an optional comment, set Stage, remove the agent-claimed tag
               resumable                Epics and ideas this machine left unfinished (claimed here, no session needed)

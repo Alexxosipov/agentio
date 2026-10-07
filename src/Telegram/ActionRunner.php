@@ -6,6 +6,9 @@ namespace Obrazmisli\Agentio\Telegram;
 
 use Obrazmisli\Agentio\Process\AgentCommentKind;
 use Obrazmisli\Agentio\Process\AgentComments;
+use Obrazmisli\Agentio\Review\EpicAcceptance;
+use Obrazmisli\Agentio\Review\Release;
+use Obrazmisli\Agentio\Review\ReviewException;
 use Obrazmisli\Agentio\Settings;
 use Obrazmisli\Agentio\YouTrack\IssueType;
 use Obrazmisli\Agentio\YouTrack\Mcp\Tools;
@@ -14,25 +17,33 @@ use Obrazmisli\Agentio\YouTrack\Tag;
 use Obrazmisli\Agentio\YouTrack\YouTrackException;
 
 /**
- * Makes the YouTrack changes the assistant decided on, through the YouTrack MCP server, and reports each one in
- * a line of Russian for the developer. An answer to the questions of an issue is a comment that does not start
- * with [AGENT:, so the resumed agent reads it as the human's answer (see the «Вопросы к человеку» section of
+ * Makes the changes the assistant decided on and reports each one in a line of Russian for the developer. YouTrack
+ * changes go through the YouTrack MCP server: an answer to the questions of an issue is a comment that does not
+ * start with [AGENT:, so the resumed agent reads it as the human's answer (see the «Вопросы к человеку» section of
  * agentio-youtrack-workflow); with resume, an issue in Blocked goes back to the Stage its [AGENT:BLOCKED] names.
+ * Merges go through pull requests on GitHub and never create a YouTrack issue: an epic is accepted the way the
+ * dashboard does it, a release is merged only after the developer confirmed the question the bot asked.
  */
 final readonly class ActionRunner
 {
     public function __construct(
         private Tools $tools,
         private Settings $settings,
+        private EpicAcceptance $acceptance,
+        private Release $release,
+        private Conversation $conversation,
     ) {}
 
     /**
-     * @return array{lines: list<string>, issues: list<string>} What was done (or failed), and the issues touched
+     * @return array{lines: list<string>, issues: list<string>, kind: string|null} What was done (or failed), the
+     *                                                                             issues touched, and the kind of the reply
+     *                                                                             (release when it asks to confirm one)
      */
     public function run(Decision $decision, IncomingMessage $message, string $text): array
     {
         $lines = [];
         $issues = [];
+        $kind = null;
 
         foreach ($decision->actions as $action) {
             try {
@@ -40,9 +51,15 @@ final readonly class ActionRunner
                     DecisionAction::Answer => $this->answer($action['issue'], $action['comment'] !== '' ? $action['comment'] : $text, $action['resume'], $message, $text),
                     DecisionAction::Comment => $this->comment($action['issue'], $action['comment'] !== '' ? $action['comment'] : $text, $message, $text),
                     DecisionAction::Idea => $this->idea($action['summary'], $action['description'] !== '' ? $action['description'] : $text, $message),
+                    DecisionAction::Merge => $this->merge($action['issue']),
+                    DecisionAction::Release => $this->release($action['confirm']),
                 };
             } catch (YouTrackException $exception) {
                 [$line, $issue] = ['⚠️ Не удалось записать в YouTrack'.($action['issue'] === null ? '' : ' ('.$action['issue'].')').': '.TelegramText::limit($exception->getMessage(), 300), $action['issue']];
+            }
+
+            if ($action['type'] === DecisionAction::Release && $this->conversation->pendingRelease() !== null) {
+                $kind = 'release';
             }
 
             $lines[] = $line;
@@ -52,7 +69,105 @@ final readonly class ActionRunner
             }
         }
 
-        return ['lines' => $lines, 'issues' => array_values(array_unique($issues))];
+        return ['lines' => $lines, 'issues' => array_values(array_unique($issues)), 'kind' => $kind];
+    }
+
+    /**
+     * The developer asked to merge an epic: its pull request is merged into the development branch on GitHub (opened
+     * first when there is none), the worktree removed, the reviewed stories and the epic moved to Done.
+     *
+     * @return array{0: string, 1: string|null}
+     */
+    public function merge(?string $id): array
+    {
+        if ($id === null) {
+            return ['⚠️ Не понял, какой эпик слить: напишите его ID.', null];
+        }
+
+        try {
+            $result = $this->acceptance->accept($id);
+        } catch (ReviewException $exception) {
+            return ['⚠️ Не смог слить '.$id.': '.self::reason($exception), $id];
+        }
+
+        $request = $result['pullRequest'];
+        $label = $request === null ? '' : 'PR #'.$request['number'].' ';
+        $lines = [$result['merged']
+            ? "✅ Слил {$label}эпика {$id} в {$result['base']} ({$result['commit']})".($request === null ? '.' : ': '.$request['url'])
+            : "✅ Эпик {$id} уже в {$result['base']}".($request === null ? '' : " ({$label}{$request['url']})").': прибрал worktree и закрыл задачи.'];
+
+        if ($result['closed'] !== []) {
+            $lines[] = 'В Done: '.implode(', ', $result['closed']).'.';
+        }
+
+        foreach ($result['warnings'] as $warning) {
+            $lines[] = '⚠️ '.$warning;
+        }
+
+        return [implode("\n", $lines), $id];
+    }
+
+    /**
+     * The developer asked for a release: the pull request of the development branch into the production branch is
+     * opened (or the open one found) and the developer asked to confirm it. Only a confirmation of that question
+     * merges it, and only at the commit the question was about.
+     *
+     * @return array{0: string, 1: null}
+     */
+    public function release(bool $confirm): array
+    {
+        $pending = $this->conversation->pendingRelease();
+
+        if ($confirm && $pending !== null) {
+            try {
+                $merged = $this->release->merge($pending['number'], $pending['head']);
+            } catch (ReviewException $exception) {
+                if ($exception->status === Release::MOVED) {
+                    return $this->askRelease('⚠️ '.$exception->getMessage());
+                }
+
+                return ['⚠️ Релиз не слит: '.self::reason($exception), null];
+            }
+
+            $this->conversation->forgetRelease();
+            $pullRequest = $merged['pullRequest'];
+
+            return [implode("\n", [
+                "🚀 Релиз выпущен: PR #{$pullRequest->number} ({$pullRequest->head} → {$pullRequest->base}) слит ({$merged['commit']}): {$pullRequest->url}",
+                ...array_map(fn (string $warning): string => '⚠️ '.$warning, $merged['warnings']),
+            ]), null];
+        }
+
+        return $this->askRelease($confirm ? 'Подтверждать пока нечего: сначала открою PR релиза.' : null);
+    }
+
+    /**
+     * @return array{0: string, 1: null}
+     */
+    private function askRelease(?string $note): array
+    {
+        try {
+            $prepared = $this->release->prepare();
+        } catch (ReviewException $exception) {
+            $this->conversation->forgetRelease();
+
+            return [trim(($note ?? '')."\n".'⚠️ Не смог подготовить релиз: '.self::reason($exception)), null];
+        }
+
+        $pullRequest = $prepared['pullRequest'];
+        $this->conversation->askRelease($pullRequest->number, $prepared['head'], $pullRequest->url);
+
+        return [implode("\n", array_filter([
+            $note,
+            "🚀 PR релиза #{$pullRequest->number} {$pullRequest->head} → {$pullRequest->base}".($prepared['created'] ? ' открыт' : ' уже открыт')." ({$prepared['commits']} коммитов): {$pullRequest->url}",
+            $prepared['unpushed'] > 0 ? "⚠️ В локальной {$pullRequest->head} есть коммиты, которых нет на GitHub ({$prepared['unpushed']}): в релиз они не попадут." : null,
+            "Слить его в {$pullRequest->base}? Ответьте «да» на это сообщение (reply) — без подтверждения не сливаю.",
+        ])), null];
+    }
+
+    private static function reason(ReviewException $exception): string
+    {
+        return TelegramText::limit($exception->getMessage().($exception->details === [] ? '' : ' ('.implode('; ', $exception->details).')'), 500);
     }
 
     /**

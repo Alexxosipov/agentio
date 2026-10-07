@@ -12,14 +12,12 @@ use Obrazmisli\Agentio\Git\PathPackages;
 use Obrazmisli\Agentio\Install\Preconditions;
 use Obrazmisli\Agentio\Queue\Horizon;
 use Obrazmisli\Agentio\Runtime\LoopState;
-use Obrazmisli\Agentio\Runtime\MergePolicy;
 use Obrazmisli\Agentio\Runtime\SessionSettings;
 use Obrazmisli\Agentio\Settings;
 use Obrazmisli\Agentio\Telegram\BotSupervisor;
 use Obrazmisli\Agentio\Testing\IsolatedTests;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Process\Process;
-use ValueError;
 
 /**
  * Runs the agent loop of the package (scripts/agent-loop.sh, never copied into the project) with the settings of
@@ -85,21 +83,13 @@ final class RunCommand extends Command
             return self::FAILURE;
         }
 
-        try {
-            $policy = $settings->mergePolicy();
-        } catch (ValueError) {
-            $this->components->error('Invalid merge policy (AGENTIO_MERGE_POLICY or .agentio.json): use local-branch, pull-request or auto-merge.');
-
-            return self::FAILURE;
-        }
-
         $this->handleStopFlag($loop);
         $this->announceDashboard();
 
         $this->process = new Process(
             [...self::scriptCommand(self::SCRIPT), ...$this->scriptArguments()],
             $settings->basePath(),
-            $this->environment($settings, $policy, $loop),
+            $this->environment($settings, $loop),
             null,
             null,
         );
@@ -144,7 +134,7 @@ final class RunCommand extends Command
      *
      * @return array<string, string|false>
      */
-    public function environment(Settings $settings, MergePolicy $policy, LoopState $loop): array
+    public function environment(Settings $settings, LoopState $loop): array
     {
         $sessions = new SessionSettings($settings);
 
@@ -154,7 +144,6 @@ final class RunCommand extends Command
             'AGENT_LOOP_INTERVAL' => Settings::string('agentio.interval'),
             'CLAUDE_BIN' => Settings::string('agentio.claude_binary'),
             'CLAUDE_MODEL' => $settings->claudeModel(),
-            'MERGE_POLICY' => $policy->value,
             'AGENT_LOG_DIR' => $loop->logsPath(),
             'AGENTIO_STOP_FILE' => $loop->stopFile(),
             'AGENTIO_SESSION_SETTINGS' => $sessions->toJson(),
@@ -210,6 +199,15 @@ final class RunCommand extends Command
 
         if (Preconditions::executable($claude) === null) {
             $errors[] = "Claude Code CLI not found ({$claude}): install it or set AGENTIO_CLAUDE_BIN";
+        }
+
+        // Finished epics are published as pull requests (agentio:pr); a dry run or --kill publishes nothing.
+        if (! $this->option('dry-run') && ! $this->option('kill')) {
+            $github = (new Preconditions($settings->basePath(), $claude))->gitHub();
+
+            if (! $github->ok) {
+                $errors[] = "{$github->name}: {$github->hint}";
+            }
         }
 
         foreach (['url' => 'YOUTRACK_URL', 'token' => 'YOUTRACK_TOKEN'] as $key => $variable) {
