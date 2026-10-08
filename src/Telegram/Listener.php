@@ -13,8 +13,8 @@ use Throwable;
 
 /**
  * The bot's process next to the loop (php artisan agentio:telegram listen, started by agentio:run): reads the
- * updates with getUpdates (long polling) and queues each one, and every watch interval sends the new questions
- * of the agents. An update is confirmed (the offset moves past it) only after it was queued.
+ * updates with getUpdates (long polling: messages and the presses of buttons) and queues each one, and every watch
+ * interval sends the new questions of the agents with their buttons. An update is confirmed (the offset moves past it) only after it was queued.
  */
 final readonly class Listener
 {
@@ -86,7 +86,7 @@ final readonly class Listener
         }
 
         try {
-            $sent = $this->watcher->poll(fn (Comment $comment, string $text): bool => $this->messenger->send($text, 'question', $comment->issueId, ReturnStage::named($comment->text)));
+            $sent = $this->watcher->poll(fn (Comment $comment, string $text): bool => $this->messenger->send($text, 'question', $comment->issueId, ReturnStage::named($comment->text), markup: Reports::questionButtons($comment->issueId)));
         } catch (Throwable $exception) {
             $log('watching the questions: '.$exception->getMessage());
 

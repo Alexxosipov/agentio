@@ -16,8 +16,10 @@ use Obrazmisli\Agentio\Console\Commands\CommitCommand;
 use Obrazmisli\Agentio\Console\Commands\InstallCommand;
 use Obrazmisli\Agentio\Console\Commands\LimitCommand;
 use Obrazmisli\Agentio\Console\Commands\LogCommand;
+use Obrazmisli\Agentio\Console\Commands\PauseCommand;
 use Obrazmisli\Agentio\Console\Commands\PullRequestCommand;
 use Obrazmisli\Agentio\Console\Commands\ReleaseCommand;
+use Obrazmisli\Agentio\Console\Commands\ResumeCommand;
 use Obrazmisli\Agentio\Console\Commands\RunCommand;
 use Obrazmisli\Agentio\Console\Commands\SetupTelegramCommand;
 use Obrazmisli\Agentio\Console\Commands\SetupYouTrackCommand;
@@ -134,6 +136,8 @@ final class AgentioServiceProvider extends ServiceProvider
             YouTrackCommand::class,
             WorktreeCommand::class,
             AcceptCommand::class,
+            PauseCommand::class,
+            ResumeCommand::class,
             PullRequestCommand::class,
             ReleaseCommand::class,
             CommitCommand::class,

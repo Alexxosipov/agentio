@@ -120,7 +120,7 @@ final readonly class Responder
         if ($about !== null && $about['kind'] === 'question' && $about['issue'] !== null) {
             return new Decision(
                 "⚠️ Ассистент сейчас недоступен ({$reason}), поэтому записал ваш ответ в {$about['issue']} как есть. Когда ответите на все вопросы, верните задачу в работу в YouTrack или напишите мне «вернуть в работу» реплаем на вопросы.",
-                [['type' => DecisionAction::Answer, 'issue' => $about['issue'], 'comment' => '', 'resume' => false, 'summary' => '', 'description' => '', 'confirm' => false]],
+                [['type' => DecisionAction::Answer, 'issue' => $about['issue'], 'comment' => '', 'resume' => false, 'summary' => '', 'description' => '', 'confirm' => false, 'now' => false, 'park' => false]],
             );
         }
 

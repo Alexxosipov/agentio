@@ -33,7 +33,7 @@ beforeEach(function () {
  * @param  array<int|string, string>  $types
  * @return array<string, mixed>
  */
-function russianYouTrack(bool $withState = false, array $stages = ['Backlog', 'Analysis', 'Ready', 'In Progress', 'Review', 'Blocked', 'Done'], array $types = ['Idea', 'Epic', 'Story', 'Task']): array
+function russianYouTrack(bool $withState = false, array $stages = ['Backlog', 'Analysis', 'Ready', 'In Progress', 'Review', 'Blocked', 'On Hold', 'Done'], array $types = ['Idea', 'Epic', 'Story', 'Task']): array
 {
     $values = fn (string $prefix, array $values): array => array_map(
         fn (int|string $key, string $value): array => is_int($key)
@@ -59,7 +59,7 @@ function russianYouTrack(bool $withState = false, array $stages = ['Backlog', 'A
             ['id' => 'f-stage', 'name' => 'Stage', 'localizedName' => 'Этап', 'fieldType' => ['id' => 'state[1]'], 'instances' => [['project' => ['id' => '0-9'], 'bundle' => ['id' => 'b-stage']]]],
             ['id' => 'f-type', 'name' => 'Type', 'localizedName' => 'Тип', 'fieldType' => ['id' => 'enum[1]'], 'instances' => [['project' => ['id' => '0-9'], 'bundle' => ['id' => 'b-type']]]],
         ],
-        'tags' => [['id' => '1', 'name' => 'idea'], ['id' => '2', 'name' => 'agent-claimed']],
+        'tags' => [['id' => '1', 'name' => 'idea'], ['id' => '2', 'name' => 'agent-claimed'], ['id' => '3', 'name' => 'parked']],
         'queries' => array_map(fn (string $name, string $query): array => ['name' => $name, 'query' => $query], array_keys(YouTrackSetup::savedSearches('XY')), YouTrackSetup::savedSearches('XY')),
     ];
 }
@@ -148,14 +148,16 @@ it('adds the missing values to the Stage field of the project and removes the va
     $added = array_values(array_filter(restWrites(), fn (string $write): bool => str_starts_with($write, 'POST admin/customFieldSettings/bundles/state/b-stage/values')));
     $removed = array_values(array_filter(restWrites(), fn (string $write): bool => str_starts_with($write, 'DELETE ')));
 
-    expect($added)->toHaveCount(4)
-        ->and(implode("\n", $added))->toContain('"name":"Analysis"', '"name":"Ready"', '"name":"In Progress"', '"name":"Blocked"')
+    // «On hold» of a team is the On Hold of the cycle: renamed, not added next to it.
+    expect($added)->toHaveCount(5)
+        ->and(implode("\n", $added))->toContain('"name":"Analysis"', '"name":"Ready"', '"name":"In Progress"', '"name":"Blocked"', 'values/s-On%20hold {"name":"On Hold","localizedName":null}')
+        ->and(implode("\n", $added))->not->toContain('values {"name":"On Hold"')
         ->and($removed)->toBe([
             'DELETE admin/customFieldSettings/bundles/state/b-stage/values/s-Develop []',
             'DELETE admin/customFieldSettings/bundles/state/b-stage/values/s-Test []',
             'DELETE admin/customFieldSettings/bundles/state/b-stage/values/s-Staging []',
         ])
-        ->and(implode("\n", restWrites()))->not->toContain('customFieldSettings/customFields {', 'bundles/state {', 'On hold');
+        ->and(implode("\n", restWrites()))->not->toContain('customFieldSettings/customFields {', 'bundles/state {');
 });
 
 it('keeps a Stage value of YouTrack that issues of the project are in and reports it', function () {
@@ -163,7 +165,7 @@ it('keeps a Stage value of YouTrack that issues of the project are in and report
     $mcp = (new FakeYouTrackMcp)->fake();
     existingKnowledgeBase($mcp);
     fakeYouTrackRestApi([
-        ...russianYouTrack(stages: ['Backlog', 'Analysis', 'Ready', 'In Progress', 'Review', 'Blocked', 'Done', 'Develop', 'Test']),
+        ...russianYouTrack(stages: ['Backlog', 'Analysis', 'Ready', 'In Progress', 'Review', 'Blocked', 'On Hold', 'Done', 'Develop', 'Test']),
         'issues' => fn (string $query): array => $query === 'project: XY Stage: {Test}' ? [['id' => '2-1']] : [],
     ]);
 
@@ -178,7 +180,7 @@ it('never removes values from a Stage bundle shared with other projects', functi
     hostProject();
     $mcp = (new FakeYouTrackMcp)->fake();
     existingKnowledgeBase($mcp);
-    $youtrack = russianYouTrack(stages: ['Backlog', 'Analysis', 'Ready', 'In Progress', 'Review', 'Blocked', 'Done', 'Develop']);
+    $youtrack = russianYouTrack(stages: ['Backlog', 'Analysis', 'Ready', 'In Progress', 'Review', 'Blocked', 'On Hold', 'Done', 'Develop']);
     $youtrack['fields'][0]['instances'][] = ['project' => ['id' => '0-5'], 'bundle' => ['id' => 'b-stage']];
     fakeYouTrackRestApi([...$youtrack, 'issues' => [['id' => '2-1']]]);
 
@@ -230,7 +232,7 @@ it('shows the values YouTrack localized by their English names, so the MCP serve
     $mcp = (new FakeYouTrackMcp)->fake();
     existingKnowledgeBase($mcp);
     fakeYouTrackRestApi(russianYouTrack(
-        stages: ['Backlog' => 'Очередь', 'Develop' => 'Разработка', 'Analysis', 'Ready', 'In Progress', 'Review' => 'Ревью', 'Blocked', 'Done' => 'Готово'],
+        stages: ['Backlog' => 'Очередь', 'Develop' => 'Разработка', 'Analysis', 'Ready', 'In Progress', 'Review' => 'Ревью', 'Blocked', 'On Hold', 'Done' => 'Готово'],
         types: ['Idea', 'Epic', 'Story', 'Task' => 'Задание'],
     ));
 

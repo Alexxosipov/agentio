@@ -373,6 +373,10 @@ final class YouTrackCommand extends Command
             return self::LOST;
         }
 
+        if (Issue::fromMcp($this->tools->issue($id))->hasState(State::OnHold)) {
+            return $this->onHold($id);
+        }
+
         $worktree = $this->stringOption('worktree') ?? $this->git('rev-parse', '--show-toplevel');
         $branch = $this->stringOption('branch') ?? $this->git('branch', '--show-current');
 
@@ -402,6 +406,12 @@ final class YouTrackCommand extends Command
 
         if ($state === null) {
             return $this->failWith('Usage: agentio:yt release <ID> --state=<Stage> [--comment=<text>]  (Stage: '.$this->states().')');
+        }
+
+        // A paused epic keeps its Stage until the developer lifts the pause (agentio:resume): a session that ends
+        // after the pause must not move it on.
+        if ($state !== State::OnHold && Issue::fromMcp($this->tools->issue($id))->hasState(State::OnHold)) {
+            return $this->onHold($id);
         }
 
         $this->claims->release($id, $state, $this->stringOption('comment'));
@@ -532,10 +542,23 @@ final class YouTrackCommand extends Command
         return self::LOST;
     }
 
+    /**
+     * The issue is on hold (a paused epic, a parked idea): nobody claims it or moves its Stage until a human decides.
+     */
+    private function onHold(string $id): int
+    {
+        $this->output(['id' => $id, 'onHold' => true], fn () => $this->line("ON_HOLD: {$id} is on hold (Stage On Hold): leave it as it is; the developer resumes it (php artisan agentio:resume {$id})"));
+
+        return self::LOST;
+    }
+
     private function validState(?string $value): ?State
     {
+        // "On Hold", "on-hold" and OnHold name the same Stage: a value with a space is awkward on a command line.
+        $normalized = fn (string $name): string => (string) preg_replace('/[\s_-]+/', '', mb_strtolower($name));
+
         foreach (State::cases() as $state) {
-            if ($value !== null && mb_strtolower($state->value) === mb_strtolower(trim($value))) {
+            if ($value !== null && $normalized($state->value) === $normalized($value)) {
                 return $state;
             }
         }
@@ -634,10 +657,11 @@ final class YouTrackCommand extends Command
               claim <ID> [--as=SUFFIX] [--plan=TEXT] [--branch=B] [--worktree=W] [--owner=O]
                                        Claim or resume an own claim: [AGENT:START], tag agent-claimed, Stage In Progress,
                                        re-read, verify. CLAIMED / RESUMED (exit 0) or LOST (exit 3; also an issue
-                                       another user reported)
+                                       another user reported) or ON_HOLD (exit 3: a paused epic, a parked idea)
               mine <ID>                Whether the issue was reported by the user of the token: MINE (0) / FOREIGN (3)
               release <ID> --state=S [--comment=TEXT]
                                        Post an optional comment, set Stage, remove the agent-claimed tag
+                                       (S "On Hold" may be written OnHold; an issue on hold: ON_HOLD, exit 3)
               resumable                Epics and ideas this machine left unfinished (claimed here, no session needed)
               state <ID>               The Stage of the issue
               kb-tree [<ARTICLE>] [--depth=N]

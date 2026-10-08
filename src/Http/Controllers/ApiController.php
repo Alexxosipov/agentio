@@ -18,12 +18,14 @@ use Obrazmisli\Agentio\Dashboard\StatusPresenter;
 use Obrazmisli\Agentio\Dashboard\YouTrackSource;
 use Obrazmisli\Agentio\Review\EpicAcceptance;
 use Obrazmisli\Agentio\Review\EpicBranch;
+use Obrazmisli\Agentio\Review\EpicPause;
 use Obrazmisli\Agentio\Review\ReviewException;
 use Obrazmisli\Agentio\Settings;
+use Obrazmisli\Agentio\Telegram\Messenger;
 
 /**
- * The JSON endpoints of the dashboard: the ones it polls, and the acceptance actions on an epic in Review
- * (POST, disabled with agentio.ui.actions = false). YouTrack failures never fail a response:
+ * The JSON endpoints of the dashboard: the ones it polls, the acceptance actions on an epic in Review and the pause
+ * of an epic (POST, disabled with agentio.ui.actions = false). YouTrack failures never fail a response:
  * every payload that needs YouTrack carries a "youtrack" block with the connection state.
  * The YouTrack token never leaves the server: should a session log or an error message
  * contain it, it is replaced with "[redacted]".
@@ -136,6 +138,52 @@ final class ApiController
         }
     }
 
+    /**
+     * Pause the epic: after its current wave of tasks, or with now right away; the developer's bot is told, with
+     * the epics that wait for it.
+     */
+    public function pause(Request $request, EpicPause $pause, Messenger $messenger, YouTrackSource $source, string $id): JsonResponse
+    {
+        $refused = self::refuseAction($request);
+
+        if ($refused !== null) {
+            return $refused;
+        }
+
+        $reason = trim((string) $request->input('reason', ''));
+
+        try {
+            $result = $pause->pause($id, $request->boolean('now'), $reason === '' ? null : mb_substr($reason, 0, self::MAX_REMARK), 'панель agentio');
+            $messenger->send(EpicPause::pausedMessage($result), 'report', $result['epic']);
+
+            return self::json([...$result, 'message' => EpicPause::pausedMessage($result)]);
+        } catch (ReviewException $exception) {
+            return self::failure($exception);
+        } finally {
+            $source->flush();
+        }
+    }
+
+    public function resume(Request $request, EpicPause $pause, Messenger $messenger, YouTrackSource $source, string $id): JsonResponse
+    {
+        $refused = self::refuseAction($request);
+
+        if ($refused !== null) {
+            return $refused;
+        }
+
+        try {
+            $result = $pause->resume($id, 'панель agentio');
+            $messenger->send(EpicPause::resumedMessage($result), 'report', $result['epic']);
+
+            return self::json([...$result, 'message' => EpicPause::resumedMessage($result)]);
+        } catch (ReviewException $exception) {
+            return self::failure($exception);
+        } finally {
+            $source->flush();
+        }
+    }
+
     private static function actionsEnabled(): bool
     {
         return (bool) config('agentio.ui.actions', true);
@@ -149,7 +197,7 @@ final class ApiController
     {
         return match (true) {
             ! self::actionsEnabled() => self::json(['message' => 'Действия в панели отключены (AGENTIO_UI_ACTIONS=false).'], 403),
-            ! Agentio::canManage($request) => self::json(['message' => 'Нет права принимать эпики (gate manageAgentio).'], 403),
+            ! Agentio::canManage($request) => self::json(['message' => 'Нет права управлять эпиками (gate manageAgentio).'], 403),
             ! $request->hasSession() => self::json(['message' => 'Действия требуют сессию с CSRF-токеном: ui.middleware должен запускать сессию (как web).'], 403),
             default => null,
         };

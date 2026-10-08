@@ -18,7 +18,7 @@ use Symfony\Component\Console\Attribute\AsCommand;
 /**
  * A summary of the autonomous cycle: the local loop and its live sessions, and the YouTrack project
  * (counts by Type × Stage, ideas and ready epics, work in progress, blocked issues with their reasons,
- * epics awaiting a human).
+ * paused epics and parked ideas, epics awaiting a human).
  */
 #[AsCommand(name: 'agentio:status')]
 final class StatusCommand extends Command
@@ -136,7 +136,8 @@ final class StatusCommand extends Command
                 'counts' => $counts,
                 'ideas' => $pick(fn (Issue $issue): bool => $issue->isIdea() && $issue->hasState(State::Backlog) && ! $issue->isClaimed()),
                 'readyEpics' => array_map(fn (string $id): array => [...$brief($graph->get($id)), 'readyTasks' => $graph->readyTasks($id)], $graph->readyEpics()),
-                'inProgress' => $pick(fn (Issue $issue): bool => $issue->hasState(State::InProgress) || $issue->isClaimed()),
+                'inProgress' => $pick(fn (Issue $issue): bool => ($issue->hasState(State::InProgress) || $issue->isClaimed()) && ! $issue->hasState(State::OnHold)),
+                'onHold' => $pick(fn (Issue $issue): bool => $issue->hasState(State::OnHold)),
                 'blocked' => $blocked,
                 'awaitingHuman' => $pick(fn (Issue $issue): bool => $issue->hasState(State::Review) && $issue->hasType(IssueType::Epic, IssueType::Idea)),
             ];
@@ -224,6 +225,7 @@ final class StatusCommand extends Command
             'readyEpics' => 'Ready epics',
             'inProgress' => 'In progress / claimed',
             'blocked' => 'Blocked (needs a human)',
+            'onHold' => 'On hold (paused epics, parked ideas)',
             'awaitingHuman' => 'Awaiting a human (Review)',
         ];
 

@@ -70,7 +70,7 @@ final readonly class Bot
         $updates = $this->call('getUpdates', array_filter([
             'offset' => $offset,
             'timeout' => $timeout,
-            'allowed_updates' => ['message'],
+            'allowed_updates' => ['message', 'callback_query'],
         ], fn (mixed $value): bool => $value !== null), $timeout + 15);
 
         return array_values(array_filter(is_array($updates) ? $updates : [], is_array(...)));
@@ -78,26 +78,31 @@ final readonly class Bot
 
     /**
      * Send a text (Markdown of the agents, see TelegramText), split into as many messages as it needs (at most
-     * 4096 characters each); the first one replies to $replyTo. A message Telegram cannot parse as HTML is sent
-     * as plain text. Returns the ids of the sent messages.
+     * 4096 characters each); the first one replies to $replyTo, the last one carries $markup (buttons under it, or a
+     * request for a reply). A message Telegram cannot parse as HTML is sent as plain text. Returns the ids of the
+     * sent messages.
      *
+     * @param  array<string, mixed>|null  $markup  The reply_markup of the Bot API: inline_keyboard or force_reply
      * @return list<int>
      *
      * @throws TelegramException
      */
-    public function send(string $chatId, string $text, ?int $replyTo = null): array
+    public function send(string $chatId, string $text, ?int $replyTo = null, ?array $markup = null): array
     {
         $ids = [];
+        $chunks = TelegramText::chunks($text);
 
-        foreach (TelegramText::chunks($text) as $chunk) {
+        foreach ($chunks as $index => $chunk) {
+            $last = $index === array_key_last($chunks) ? $markup : null;
+
             try {
-                $message = $this->call('sendMessage', self::message($chatId, TelegramText::html($chunk), 'HTML', $replyTo));
+                $message = $this->call('sendMessage', self::message($chatId, TelegramText::html($chunk), 'HTML', $replyTo, $last));
             } catch (TelegramException $exception) {
                 if ($exception->errorCode !== 400 || ! str_contains(strtolower($exception->getMessage()), 'parse')) {
                     throw $exception;
                 }
 
-                $message = $this->call('sendMessage', self::message($chatId, TelegramText::plain($chunk), null, $replyTo));
+                $message = $this->call('sendMessage', self::message($chatId, TelegramText::plain($chunk), null, $replyTo, $last));
             }
 
             if (is_array($message) && is_int($message['message_id'] ?? null)) {
@@ -108,6 +113,31 @@ final readonly class Bot
         }
 
         return $ids;
+    }
+
+    /**
+     * Answer the press of a button: Telegram stops the spinner on it and shows $text briefly (as an alert window
+     * with $alert).
+     *
+     * @throws TelegramException
+     */
+    public function answerButton(string $callbackId, string $text = '', bool $alert = false): void
+    {
+        $this->call('answerCallbackQuery', array_filter([
+            'callback_query_id' => $callbackId,
+            'text' => $text === '' ? null : mb_substr($text, 0, 200),
+            'show_alert' => $alert ? true : null,
+        ], fn (mixed $value): bool => $value !== null));
+    }
+
+    /**
+     * Remove the buttons under a message of the bot.
+     *
+     * @throws TelegramException
+     */
+    public function removeButtons(string $chatId, int $messageId): void
+    {
+        $this->call('editMessageReplyMarkup', ['chat_id' => $chatId, 'message_id' => $messageId, 'reply_markup' => ['inline_keyboard' => []]]);
     }
 
     /**
@@ -212,9 +242,10 @@ final readonly class Bot
     }
 
     /**
+     * @param  array<string, mixed>|null  $markup
      * @return array<string, mixed>
      */
-    private static function message(string $chatId, string $text, ?string $parseMode, ?int $replyTo): array
+    private static function message(string $chatId, string $text, ?string $parseMode, ?int $replyTo, ?array $markup = null): array
     {
         return array_filter([
             'chat_id' => $chatId,
@@ -222,6 +253,7 @@ final readonly class Bot
             'parse_mode' => $parseMode,
             'link_preview_options' => ['is_disabled' => true],
             'reply_parameters' => $replyTo === null ? null : ['message_id' => $replyTo, 'allow_sending_without_reply' => true],
+            'reply_markup' => $markup,
         ], fn (mixed $value): bool => $value !== null);
     }
 

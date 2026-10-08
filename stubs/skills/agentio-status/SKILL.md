@@ -30,6 +30,10 @@ Epic: Ready=1 In Progress=1 Review=0 … | Story: … | Task: …
 ## Заблокировано
 {{project}}-20 [TASK] … — <причина>; нужно: <что от человека>
 
+## На паузе и отложено
+{{project}}-12 [EPIC] … — на паузе с <дата> (`[AGENT:PAUSE]`), ждут его: {{project}}-14; продолжить: php artisan agentio:resume {{project}}-12 (или «продолжи {{project}}-12» в Telegram-боте)
+{{project}}-7 [IDEA] … — отложенная идея, анализ в статье «Идеи»; взять в работу: снять метку parked и вернуть Stage в Backlog (или «бери в работу {{project}}-7»)
+
 ## Ждёт человека
 1. Ответить на вопросы: {{project}}-20 (ссылка), …
 2. Принять эпики: {{project}}-10 — ветка {{project}}-10, N коммитов, тесты passed.

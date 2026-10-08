@@ -171,6 +171,7 @@ button { font: inherit; color: inherit; }
 .badge.s-in-progress { background: var(--warn-soft); color: var(--warn); }
 .badge.s-review { background: var(--teal-soft); color: var(--teal); }
 .badge.s-blocked { background: var(--err-soft); color: var(--err); }
+.badge.s-on-hold { background: var(--gray-soft); color: var(--text); }
 .badge.s-done { background: var(--ok-soft); color: var(--ok); }
 
 .badge.k-start { background: var(--info-soft); color: var(--info); }
@@ -178,6 +179,7 @@ button { font: inherit; color: inherit; }
 .badge.k-blocked { background: var(--err-soft); color: var(--err); }
 .badge.k-done { background: var(--ok-soft); color: var(--ok); }
 .badge.k-release { background: var(--gray-soft); color: var(--muted); }
+.badge.k-pause, .badge.k-resume { background: var(--gray-soft); color: var(--text); }
 
 .type {
     display: inline-flex; align-items: center; justify-content: center;
@@ -327,6 +329,13 @@ select, input[type="search"] {
     font-size: 12.5px; color: var(--err);
 }
 .pipe-blocked::before { content: "●"; font-size: 10px; }
+.pipe-hold {
+    grid-column: 1 / -1;
+    margin-top: 4px;
+    display: flex; gap: 8px; align-items: baseline;
+    font-size: 12.5px; color: var(--muted);
+}
+.pipe-hold::before { content: "⏸"; font-size: 11px; }
 
 .mini-stages { display: flex; gap: 3px; margin: 2px 0; }
 .mini-stages .seg { height: 6px; flex: 1; border-radius: 3px; }
@@ -521,6 +530,10 @@ details.fold[open] > summary::before { transform: rotate(45deg); }
 .epic-head h1 { margin: 0; font-size: 18px; font-weight: 650; letter-spacing: -.01em; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .epic-facts { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 12.5px; color: var(--muted); align-items: center; }
 .epic-facts b { color: var(--text); font-weight: 600; }
+.epic-pause { display: grid; gap: 8px; padding-top: 4px; border-top: 1px solid var(--border); }
+.epic-pause .pause-buttons { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.epic-pause .dependents { font-size: 12.5px; color: var(--muted); }
+.epic-pause .notice { margin: 0; }
 .epic-grid { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(300px, 1fr); gap: 16px; align-items: start; margin-top: 16px; }
 
 .progress { height: 6px; border-radius: 3px; background: var(--gray-soft); overflow: hidden; display: flex; }

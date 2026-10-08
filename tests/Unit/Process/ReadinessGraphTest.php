@@ -191,6 +191,30 @@ it('loads unknown issues through the resolver once', function () {
         ->and(array_keys($graph->issues()))->toBe(['EXT-1']);
 });
 
+it('names the unfinished epics that wait for an epic, directly or through another one', function () {
+    $graph = graphOf([
+        'E1' => ['Epic', 'In Progress'],
+        'S1' => ['Story', 'In Progress', 'E1'],
+        'T1' => ['Task', 'In Progress', 'S1'],
+        'E2' => ['Epic', 'Ready', null, ['E1']],
+        'S2' => ['Story', 'Ready', 'E2'],
+        'T2' => ['Task', 'Ready', 'S2'],
+        'E3' => ['Epic', 'Backlog'],
+        'S3' => ['Story', 'Backlog', 'E3'],
+        'T3' => ['Task', 'Backlog', 'S3', ['T2']],
+        'E4' => ['Epic', 'Ready'],
+        'S4' => ['Story', 'Ready', 'E4', ['T1']],
+        'E5' => ['Epic', 'Done', null, ['E1']],
+        'E6' => ['Epic', 'Ready'],
+    ]);
+
+    expect($graph->dependents('E1'))->toBe([
+        ['id' => 'E2', 'via' => null],
+        ['id' => 'E4', 'via' => null],
+        ['id' => 'E3', 'via' => 'E2'],
+    ])->and($graph->dependents('E6'))->toBe([]);
+});
+
 it('throws for an issue that cannot be found', function () {
     expect(fn () => projectGraph()->get('GONE'))->toThrow(OutOfBoundsException::class, 'Issue GONE is not in the graph.')
         ->and(projectGraph()->get('E1')->id)->toBe('E1');

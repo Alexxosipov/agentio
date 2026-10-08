@@ -127,6 +127,8 @@
             "Bash(php artisan agentio:setup-youtrack*)",
             "Bash(php artisan agentio:worktree*)",
             "Bash(php artisan agentio:accept*)",
+            "Bash(php artisan agentio:pause*)",
+            "Bash(php artisan agentio:resume*)",
             "Bash(php artisan agentio:release*)",
             "Bash(gh pr merge*)",
             "Bash(gh pr create*)",

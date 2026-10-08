@@ -93,7 +93,7 @@ it('gives epic sessions the session settings of the package and the project rule
     expect($settings['permissions']['allow'])->toContain('Bash(php artisan agentio:yt *)', 'Bash(php artisan agentio:commit *)', 'Bash(composer test*)', 'Bash(vendor/bin/pest*)', 'mcp__youtrack__*', 'Skill', 'Edit(./**)', 'Bash(make lint)', 'Bash(git push -u origin XY-*)', 'Bash(git merge --no-edit develop)', 'Bash(git merge --abort)')
         // "/**" is relative to the main checkout in a git worktree: it would not let the agents edit the epic worktree.
         ->and($settings['permissions']['allow'])->not->toContain('Edit(/**)', 'Bash(php -i)')
-        ->and($settings['permissions']['deny'])->toContain('Bash(git push --force*)', 'Bash(git push origin develop*)', 'Bash(git checkout develop*)', 'Bash(git push origin main*)', 'Bash(php artisan agentio:accept*)', 'Read(./.env)', 'Read(**/.env)', 'Edit(.claude/skills/agentio-*/**)', 'Read(./secrets/**)', 'mcp__laravel-boost__tinker', 'mcp__laravel-boost__record-rule', 'Bash(php artisan config:show*)', 'Edit(CLAUDE.md)')
+        ->and($settings['permissions']['deny'])->toContain('Bash(git push --force*)', 'Bash(git push origin develop*)', 'Bash(git checkout develop*)', 'Bash(git push origin main*)', 'Bash(php artisan agentio:accept*)', 'Bash(php artisan agentio:pause*)', 'Bash(php artisan agentio:resume*)', 'Read(./.env)', 'Read(**/.env)', 'Edit(.claude/skills/agentio-*/**)', 'Read(./secrets/**)', 'mcp__laravel-boost__tinker', 'mcp__laravel-boost__record-rule', 'Bash(php artisan config:show*)', 'Edit(CLAUDE.md)')
         ->and($settings['hooks']['PreToolUse'][0]['hooks'][0]['command'])->toBe("php '{$package}/bin/agentio-guard' '--protected=develop,main,master' '--root=/srv/shared'");
 });
 
@@ -261,6 +261,34 @@ it('publishes an epic that reached Review as a pull request and reports it with 
     expect($process->getExitCode())->toBe(0, $process->getErrorOutput())
         ->and(file_get_contents($project.'/storage/logs/agents/loop.log'))->toContain('XY-2: ready for human review: pull request https://github.com/acme/app/pull/3')
         ->and(waitForArtisanCall($project, 'agentio:telegram notify review'))->toContain("agentio:pr XY-2\n", 'agentio:telegram notify review XY-2 --url=https://github.com/acme/app/pull/3');
+});
+
+it('takes an epic session stopped at the pause of its epic for no failure', function () {
+    $project = projectForLoop();
+    file_put_contents($project.'/artisan', str_replace('\'state\' => "Review\\n"', '\'state\' => "On Hold\\n"', (string) file_get_contents($project.'/artisan')));
+    mkdir($project.'/storage/logs/agents', 0777, true);
+    file_put_contents($project.'/storage/logs/agents/XY-2.pid', '999999999');
+    file_put_contents($project.'/storage/logs/agents/XY-2.restarts', "2 abc\n");
+
+    $process = runPackageLoop($project, '--once', '--no-plan');
+
+    expect($process->getExitCode())->toBe(0, $process->getErrorOutput())
+        ->and(file_get_contents($project.'/storage/logs/agents/loop.log'))->toContain('XY-2: paused (On Hold): the session stopped, claim and worktree kept')
+        ->and($project.'/storage/logs/agents/XY-2.restarts')->not->toBeFile()
+        ->and(waitForArtisanCall($project, 'agentio:telegram notify paused'))->toContain('agentio:telegram notify paused XY-2')
+        ->and(file_get_contents($project.'/artisan-calls.log'))->not->toContain('agentio:yt release', 'agentio:pr');
+});
+
+it('reports an idea analysed and parked instead of planned', function () {
+    $project = projectForLoop(['XY-1']);
+    file_put_contents($project.'/artisan', str_replace('\'state\' => "Review\\n"', '\'state\' => "On Hold\\n"', (string) file_get_contents($project.'/artisan')));
+
+    $process = runPackageLoop($project, '--once');
+
+    expect($process->getExitCode())->toBe(0, $process->getErrorOutput())
+        ->and(file_get_contents($project.'/storage/logs/agents/loop.log'))->toContain('XY-1: analysed and parked (On Hold), nothing goes to development')
+        ->and(waitForArtisanCall($project, 'agentio:telegram notify parked'))->toContain('agentio:telegram notify parked XY-1')
+        ->and(file_get_contents($project.'/artisan-calls.log'))->not->toContain('notify planned');
 });
 
 it('does not start an epic whose skills are not committed to the base branch', function () {

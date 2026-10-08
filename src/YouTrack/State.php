@@ -19,5 +19,12 @@ enum State: string
     case InProgress = 'In Progress';
     case Review = 'Review';
     case Blocked = 'Blocked';
+
+    /**
+     * Not to be worked on until a human decides: an epic paused by the developer (its claim stays with its owner),
+     * or an idea analysed and parked (the parked tag) instead of being planned into development.
+     */
+    case OnHold = 'On Hold';
+
     case Done = 'Done';
 }

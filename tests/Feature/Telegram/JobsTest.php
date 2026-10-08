@@ -68,7 +68,9 @@ it('reports the events of the loop briefly', function () {
         ->and($reports->event('review', 'XY-2', url: 'https://github.com/acme/app/pull/7'))->toContain('✅ Эпик XY-2 «Оплата заказов» готов к приёмке: pull request в dev — https://github.com/acme/app/pull/7.', "Сделано:\n- Оплата картой\n- Возвраты", 'ответьте на это сообщение (reply) «мержи»', 'php artisan agentio:accept XY-2')
         ->and($reports->event('review', 'XY-2'))->toContain('ветка XY-2 (pull request ещё не открыт: php artisan agentio:pr XY-2).')
         ->and($reports->event('blocked', 'XY-1', 'plan-XY-1'))->toContain('сессия планирования', 'php artisan agentio:log plan-XY-1')
-        ->and($reports->event('review', 'XY-404'))->toStartWith('✅ Эпик XY-404 готов к приёмке');
+        ->and($reports->event('review', 'XY-404'))->toStartWith('✅ Эпик XY-404 готов к приёмке')
+        ->and($reports->event('parked', 'XY-1'))->toContain('🗄 Идея XY-1 «Оплата» проанализирована и отложена', '«бери в работу XY-1»')
+        ->and($reports->event('paused', 'XY-2'))->toContain('⏸ Эпик XY-2 «Оплата заказов»: сессия остановилась на паузе', 'php artisan agentio:resume XY-2');
 
     app()->call([new NotifyDeveloper('review', 'XY-2', url: 'https://github.com/acme/app/pull/7'), 'handle']);
 

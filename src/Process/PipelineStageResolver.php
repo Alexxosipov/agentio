@@ -8,6 +8,7 @@ use Illuminate\Support\Str;
 use Obrazmisli\Agentio\YouTrack\Issue;
 use Obrazmisli\Agentio\YouTrack\IssueType;
 use Obrazmisli\Agentio\YouTrack\State;
+use Obrazmisli\Agentio\YouTrack\Tag;
 
 /**
  * Derives the pipeline stage of an idea or an epic from its Type / Stage, its agent comments and its issue tree.
@@ -25,7 +26,8 @@ use Obrazmisli\Agentio\YouTrack\State;
  *   or the architecture is being decided; Decomposition once the epic has stories or tasks;
  * - Ready / Review / Done => the earliest stage of the epics it led to (Done without epics).
  *
- * Blocked is not a stage: the status is flagged and carries the reason from the last [AGENT:BLOCKED].
+ * Blocked is not a stage: the status is flagged and carries the reason from the last [AGENT:BLOCKED]. Nor is On Hold:
+ * a paused epic keeps the stage it stopped at, a parked idea stays at its analysis; both are flagged onHold.
  */
 final readonly class PipelineStageResolver
 {
@@ -77,11 +79,12 @@ final readonly class PipelineStageResolver
         $stories = $this->ofType($epic->id, IssueType::Story);
         $storiesInReview = count(array_filter($stories, fn (Issue $story): bool => $story->hasState(State::Review, State::Done)));
         $waitingFor = $epic->hasState(State::Ready) ? $this->graph->unmetDependencies($epic->id) : [];
+        $onHold = $epic->hasState(State::OnHold);
 
         $stage = match (true) {
             $epic->hasState(State::Done) => PipelineStage::Done,
             $epic->hasState(State::Review) => PipelineStage::Acceptance,
-            ! $epic->hasState(State::Ready, State::InProgress, State::Blocked) => $tasks['total'] > 0 || $stories !== [] || $this->decided($comments, self::ARCHITECTURE, self::DECOMPOSITION)
+            ! $epic->hasState(State::Ready, State::InProgress, State::Blocked) && ! ($onHold && $tasks['total'] > 0) => $tasks['total'] > 0 || $stories !== [] || $this->decided($comments, self::ARCHITECTURE, self::DECOMPOSITION)
                 ? PipelineStage::Decomposition
                 : PipelineStage::Architecture,
             $tasks['total'] === 0 => PipelineStage::Decomposition,
@@ -90,6 +93,7 @@ final readonly class PipelineStageResolver
         };
 
         $note = match (true) {
+            $onHold => 'на паузе',
             $waitingFor !== [] => 'ждёт '.implode(', ', $waitingFor),
             $stage === PipelineStage::Development && $this->graph->isEpicReady($epic->id) => 'готов к запуску',
             $stage === PipelineStage::StoryReview && $stories !== [] => sprintf('историй принято: %d из %d', $storiesInReview, count($stories)),
@@ -105,6 +109,7 @@ final readonly class PipelineStageResolver
             tasks: $tasks,
             note: $note,
             waitingFor: $waitingFor,
+            onHold: $onHold,
         );
     }
 
@@ -122,7 +127,11 @@ final readonly class PipelineStageResolver
         }
 
         if ($idea->hasState(State::Backlog) && ! $idea->isClaimed() && $comments->activeClaim() === null) {
-            return new PipelineStatus($idea->id, PipelineStage::Idea, note: 'ждёт планирования');
+            return new PipelineStatus($idea->id, PipelineStage::Idea, note: $idea->hasTag(Tag::Parked) ? 'отложенная: ждёт системного анализа' : 'ждёт планирования');
+        }
+
+        if ($idea->hasState(State::OnHold) && $epics === []) {
+            return new PipelineStatus($idea->id, PipelineStage::Analysis, note: 'отложена: анализ в статье «Идеи», ждёт решения', onHold: true);
         }
 
         if ($idea->hasState(State::Ready, State::Review, State::Done) && $epics !== []) {

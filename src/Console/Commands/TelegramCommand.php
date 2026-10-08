@@ -29,7 +29,7 @@ final class TelegramCommand extends Command
      */
     protected $signature = 'agentio:telegram
         {action=status : listen, notify, assist, send or status}
-        {argument? : notify: the event (planned, review, blocked, limit, resumed); assist: the message key; send: the text}
+        {argument? : notify: the event (planned, parked, review, blocked, paused, limit, resumed); assist: the message key; send: the text}
         {id? : notify: the issue id (optional for limit and resumed)}
         {--name= : notify blocked: the name of the session (its log)}
         {--until= : notify limit: when the loop resumes (Unix time)}

@@ -24,15 +24,16 @@ final readonly class Messenger
      * refused it (reported, never thrown).
      *
      * @param  string  $kind  What it is: question, report, answer, help, error
+     * @param  array<string, mixed>|null  $markup  Buttons under the message or a request for a reply (Bot::send())
      */
-    public function send(string $text, string $kind = 'report', ?string $issue = null, ?string $stage = null, ?int $replyTo = null, ?string $chatId = null): bool
+    public function send(string $text, string $kind = 'report', ?string $issue = null, ?string $stage = null, ?int $replyTo = null, ?string $chatId = null, ?array $markup = null): bool
     {
         if (! $this->settings->isConfigured() || ($chatId ?? $this->settings->chatId) === null || trim($text) === '') {
             return false;
         }
 
         try {
-            $this->dispatcher->dispatch(new SendTelegramMessage($text, $kind, $issue, $stage, $replyTo, $chatId));
+            $this->dispatcher->dispatch(new SendTelegramMessage($text, $kind, $issue, $stage, $replyTo, $chatId, $markup));
         } catch (Throwable $exception) {
             report($exception);
 

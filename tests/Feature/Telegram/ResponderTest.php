@@ -120,6 +120,34 @@ it('creates an idea the developer described', function () {
     Queue::assertPushed(SendTelegramMessage::class, fn (SendTelegramMessage $job): bool => $job->issue === 'XY-30' && str_contains($job->text, '💡 Создал идею XY-30 «Оплата через СБП»'));
 });
 
+it('creates an idea for later and takes a parked idea into development', function () {
+    $mcp = respondingProject([
+        'reply' => 'Отложу.',
+        'actions' => [
+            ['type' => 'idea', 'summary' => 'Оплата частями', 'description' => 'Оплата в 3 части.', 'park' => true],
+            ['type' => 'promote', 'issue' => 'XY-7'],
+            ['type' => 'promote', 'issue' => 'XY-1'],
+        ],
+    ]);
+    $mcp->issue('XY-7', 'Idea', 'On Hold', tags: ['idea', 'parked'], summary: '[IDEA] Кэшбэк');
+    $mcp->on('create_issue', function (array $arguments) use ($mcp): array {
+        $mcp->issue('XY-30', 'Idea', 'Backlog', summary: (string) $arguments['summary']);
+
+        return ['createdIssue' => ['id' => 'XY-30', 'url' => FakeYouTrackMcp::URL.'/issue/XY-30']];
+    });
+
+    app(Responder::class)->answer(app(Conversation::class)->putInbox(new IncomingMessage(8, 1008, '42', 'Запиши на потом оплату частями и бери в работу кэшбэк')));
+
+    expect($mcp->issues['XY-30']['tags'])->toBe(['idea', 'parked'])
+        ->and($mcp->issues['XY-7']['tags'])->toBe(['idea'])
+        ->and($mcp->issues['XY-7']['fields']['Stage'])->toBe('Backlog')
+        ->and((string) end($mcp->comments['XY-7'])['text'])->toStartWith('Идея принята в разработку разработчиком (Telegram): метка parked снята.')
+        ->and($mcp->issues['XY-1']['fields']['Stage'])->toBe('Blocked');
+    Queue::assertPushed(SendTelegramMessage::class, fn (SendTelegramMessage $job): bool => str_contains($job->text, '🗄 Создал отложенную идею XY-30 «Оплата частями»')
+        && str_contains($job->text, '🚀 Идея XY-7 взята в работу')
+        && str_contains($job->text, 'XY-1 — не отложенная идея'));
+});
+
 it('transcribes a voice message before the assistant reads it', function () {
     $mcp = respondingProject(['reply' => 'Принято.', 'actions' => [['type' => 'answer', 'issue' => 'XY-1', 'comment' => 'Принимаю рекомендации', 'resume' => true]]]);
     fakeTelegram([

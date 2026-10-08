@@ -36,6 +36,8 @@ final class DashboardController
                     'diff' => route('agentio.api.diff', ['id' => '__ID__']),
                     'accept' => route('agentio.api.accept', ['id' => '__ID__']),
                     'rework' => route('agentio.api.rework', ['id' => '__ID__']),
+                    'pause' => route('agentio.api.pause', ['id' => '__ID__']),
+                    'resume' => route('agentio.api.resume', ['id' => '__ID__']),
                     'issueLog' => route('agentio.api.issue-log', ['id' => '__ID__']),
                 ],
             ],

@@ -10,8 +10,8 @@ it('reads the decision of the assistant from bare JSON or a json block', functio
 
     expect($decision->reply)->toBe('Понял.')
         ->and($decision->actions)->toBe([
-            ['type' => DecisionAction::Answer, 'issue' => 'XY-12', 'comment' => 'В1: б', 'resume' => true, 'summary' => '', 'description' => '', 'confirm' => false],
-            ['type' => DecisionAction::Idea, 'issue' => null, 'comment' => '', 'resume' => false, 'summary' => 'Оплата через СБП', 'description' => 'Нужно принимать СБП.', 'confirm' => false],
+            ['type' => DecisionAction::Answer, 'issue' => 'XY-12', 'comment' => 'В1: б', 'resume' => true, 'summary' => '', 'description' => '', 'confirm' => false, 'now' => false, 'park' => false],
+            ['type' => DecisionAction::Idea, 'issue' => null, 'comment' => '', 'resume' => false, 'summary' => 'Оплата через СБП', 'description' => 'Нужно принимать СБП.', 'confirm' => false, 'now' => false, 'park' => false],
         ]);
 })->with([
     'bare' => ['{"reply": "Понял.", "actions": [{"type": "answer", "issue": "xy-12", "comment": "В1: б", "resume": true}, {"type": "idea", "summary": "Оплата через СБП", "description": "Нужно принимать СБП."}]}'],
@@ -26,6 +26,19 @@ it('reads the merges and the releases the developer asks for', function () {
         [DecisionAction::Release, null, true],
         // Only a JSON true confirms a release.
         [DecisionAction::Release, null, false],
+    ]);
+});
+
+it('reads the pauses of epics, the parked ideas and the ideas taken into development', function () {
+    $decision = Decision::fromText('{"reply": "Ок.", "actions": [{"type": "pause", "issue": "xy-2", "now": true, "comment": "Сначала платежи"}, {"type": "resume", "issue": "XY-3"}, {"type": "idea", "summary": "СБП", "park": true}, {"type": "promote", "issue": "XY-7"}, {"type": "pause", "issue": "XY-4", "now": "yes"}]}');
+
+    expect(array_map(fn (array $action): array => [$action['type'], $action['issue'], $action['now'], $action['park'], $action['comment']], $decision->actions))->toBe([
+        [DecisionAction::Pause, 'XY-2', true, false, 'Сначала платежи'],
+        [DecisionAction::Resume, 'XY-3', false, false, ''],
+        [DecisionAction::Idea, null, false, true, ''],
+        [DecisionAction::Promote, 'XY-7', false, false, ''],
+        // Only a JSON true stops a session right away.
+        [DecisionAction::Pause, 'XY-4', false, false, ''],
     ]);
 });
 

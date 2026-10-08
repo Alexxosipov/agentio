@@ -30,6 +30,9 @@ allowed-tools: Bash(php artisan agentio:yt *) Bash(php artisan agentio:run --dry
   {{project}}-20 <summary>
     <причина из [AGENT:BLOCKED]>
 Ждут зависимостей:       {{project}}-16 ← {{project}}-14 (In Progress)
+На паузе / отложено:     {{project}}-12 (эпик на паузе: не запустится до agentio:resume) · {{project}}-7 (отложенная идея)
 ```
+
+Эпик в `On Hold` поставлен человеком на паузу (`[AGENT:PAUSE]`): цикл его не запускает, а его зависимые эпики ждут. Идея в `On Hold` с меткой `parked` проанализирована и отложена: в разработку её берёт только человек. Список — `php artisan agentio:status` (раздел «On hold»).
 
 Закончи одной строкой: что запустит следующий проход цикла (`php artisan agentio:run --dry-run`, с учётом `MAX_PARALLEL`).

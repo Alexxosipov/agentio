@@ -268,7 +268,7 @@ it('builds the Kanban board', function () {
     $response = $this->getJson('/agentio/api/board')->assertOk();
     $columns = collect($response->json('columns'))->keyBy('state');
 
-    expect($columns->keys()->all())->toBe(['Backlog', 'Analysis', 'Ready', 'In Progress', 'Review', 'Blocked', 'Done'])
+    expect($columns->keys()->all())->toBe(['Backlog', 'Analysis', 'Ready', 'In Progress', 'Review', 'Blocked', 'On Hold', 'Done'])
         ->and(collect($columns['Ready']['issues'])->keyBy('id')['TP-7'])->toMatchArray(['epicId' => 'TP-2', 'parentId' => 'TP-3', 'unmetDependencies' => ['TP-6']])
         ->and(collect($columns['In Progress']['issues'])->keyBy('id')['TP-6']['owner'])->toBe('host:/w/TP-2#TP-6')
         ->and(collect($columns['Done']['issues'])->pluck('id')->all())->toBe(['TP-1', 'TP-5'])
@@ -384,7 +384,7 @@ it('keeps working without YouTrack configured', function () {
     $this->getJson('/agentio/api/sessions')->assertOk()->assertJsonPath('sessions.0.issue', null)->assertJsonPath('sessions.0.name', 'TP-2')->assertJsonPath('youtrack', $notConfigured);
     $this->getJson('/agentio/api/pipeline')->assertOk()->assertJsonPath('items', [])->assertJsonPath('youtrack', $notConfigured);
     $this->getJson('/agentio/api/events')->assertOk()->assertJsonPath('events', []);
-    $this->getJson('/agentio/api/board')->assertOk()->assertJsonCount(7, 'columns')->assertJsonPath('epics', []);
+    $this->getJson('/agentio/api/board')->assertOk()->assertJsonCount(8, 'columns')->assertJsonPath('epics', []);
     $this->getJson('/agentio/api/epics/TP-2')->assertOk()->assertJsonPath('epic', null)->assertJsonPath('youtrack', $notConfigured);
 
     Http::assertNothingSent();

@@ -1,6 +1,24 @@
 # Release Notes
 
-## [Unreleased](https://github.com/Alexxosipov/agentio/compare/v0.10.0...main)
+## [Unreleased](https://github.com/Alexxosipov/agentio/compare/v0.11.0...main)
+
+## [v0.11.0](https://github.com/Alexxosipov/agentio/releases/tag/v0.11.0) - 2026-10-08
+
+Update with `composer require alexxosipov/agentio:^0.11 --dev`, run `php artisan agentio:setup-youtrack` (adds the `On Hold` value of Stage, the `parked` tag, two saved searches and the «Идеи» article, refreshes the automation guide) and `php artisan agentio:install` (refreshes the skills), add an `On Hold` column to the agile board of the project (`agentio:setup-youtrack` warns while it is missing), commit `.claude/skills/agentio-*` and `.agentio.json` to the development branch together with `composer.json` and `composer.lock`, and restart `agentio:run` (the bot starts receiving the presses of its buttons after the restart).
+
+### Added
+
+- **Pausing an epic.** `php artisan agentio:pause <EPIC> [--now] [--reason=…]`, the «⏸ Пауза после текущей волны» / «⏹ Остановить сейчас» buttons on the epic page of the dashboard (`POST /agentio/api/epics/{id}/pause`) and «останови TP-12» («…сейчас») to the Telegram bot put an epic `On Hold` with an `[AGENT:PAUSE]` comment (the reason, the mode, the Stage before the pause, the epics waiting for it). The claim stays with its owner — the `agent-claimed` tag, the `[AGENT:START]` owner, the worktree and the branch. By default the pause is soft: the orchestrator checks the Stage of its epic before every wave of tasks and ends its session after the current one, changing no status; `--now` stops the session right away (SIGTERM to its process group) and its tasks are resumed after the pause like after any break. The loop takes a session stopped at a pause for no failure and reports it to the bot. `php artisan agentio:resume <EPIC>`, «▶ Продолжить» (`POST …/resume`) and «продолжи TP-12» put a claimed epic back `In Progress`, so the loop of its owner resumes it in the same worktree (an epic without a claim returns to its Stage before the pause). Epics in `Review` or `Done` cannot be paused.
+- **The epics waiting for a paused one** — through a dependency of the epic, of one of its stories or tasks, or of another waiting epic — are named by the command, the dashboard (a «Ждут этот эпик» line on the epic page) and the bot, which tells the developer about every pause.
+- **Ideas for later.** An idea with the new `parked` tag (set in YouTrack, «идея на потом: …» to the bot, or `/agentio-plan --park <text>`) is planned only up to its system analysis: the requirements and the analysis go into a child article «Идея <ID>: <название>» of the new knowledge base article «Идеи» (the table of all ideas with their status), «Системная аналитика» is not touched, no epics are created, and the idea goes to `On Hold`; the bot reports it. Removing the tag and setting the Stage back to `Backlog` (or «бери в работу TP-7» to the bot) takes it into development: the analyst checks the analysis against the current product, moves it into the module and feature articles, marks the idea article «принята» and the planning goes on with the epics.
+- **Buttons under the questions in Telegram.** «✅ Принять рекомендации» records «Принимаю рекомендации» as the answer and returns the issue to work — only while the issue still waits in `Blocked` for exactly these questions; «✍️ Ответить» asks for the answer in a message the developer replies to. The bot now reads `callback_query` updates.
+- The questions about a parked idea come to the bot marked «🕊 Не срочно».
+- **Stage `On Hold`** for paused epics and parked ideas: on the Kanban board, in the pipeline of the dashboard (flagged at the stage they stopped at), in `agentio:status` («On hold»), and in the saved searches «KEY: на паузе и отложенные (On Hold)» and «KEY: отложенные идеи». Nobody claims an issue in `On Hold` or moves its Stage: `agentio:yt claim` and `release` answer `ON_HOLD` (exit 3); `release --state=OnHold` is accepted without the space. A team value «On hold» of the Stage bundle is renamed to `On Hold` instead of being added next to it.
+
+### Changed
+
+- **Questions in plain words.** The analyst, the architect and the project manager ask their questions so that somebody without any development experience can answer them: about the product rather than the code, without jargon (an unavoidable term explained in brackets), with an everyday example, options told by what users, money and time would feel, and the recommendation explained; the technical details go into a separate «Для разработчика:» line. The `[AGENT:BLOCKED]` template shows it, and the bot's assistant explains a question in the same words when asked.
+- The dashboard refuses its actions with «Нет права управлять эпиками (gate manageAgentio).» (it said «принимать»): the gate covers the pause too.
 
 ## [v0.10.0](https://github.com/Alexxosipov/agentio/releases/tag/v0.10.0) - 2026-10-08
 

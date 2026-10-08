@@ -148,6 +148,20 @@ it('keeps an unplanned idea at the idea stage', function () {
         ->and($status->note)->toBe('ждёт планирования');
 });
 
+it('flags a paused epic at the stage it stopped and a parked idea at its analysis', function () {
+    $paused = epicStatus(epicGraph('On Hold', ['Done' => 1, 'In Progress' => 1]), 'TP-2');
+    $early = epicStatus(epicGraph('On Hold', []), 'TP-2');
+    $graph = graphOf(['TP-1' => ['Idea', 'On Hold', null, [], ['idea', 'parked']], 'TP-5' => ['Idea', 'Backlog', null, [], ['idea', 'parked']]]);
+    $resolver = new PipelineStageResolver($graph);
+    $parked = $resolver->idea($graph->get('TP-1'), new AgentComments);
+
+    expect([$paused->stage, $paused->onHold, $paused->note])->toBe([PipelineStage::Development, true, 'на паузе'])
+        ->and([$early->stage, $early->onHold])->toBe([PipelineStage::Decomposition, true])
+        ->and([$parked->stage, $parked->onHold, $parked->note])->toBe([PipelineStage::Analysis, true, 'отложена: анализ в статье «Идеи», ждёт решения'])
+        ->and($parked->toArray()['onHold'])->toBeTrue()
+        ->and($resolver->idea($graph->get('TP-5'), new AgentComments)->note)->toBe('отложенная: ждёт системного анализа');
+});
+
 it('follows the planning of an idea through analysis, architecture and decomposition', function () {
     $graph = graphOf(['TP-1' => ['Idea', 'Analysis']]);
     $resolver = new PipelineStageResolver($graph);

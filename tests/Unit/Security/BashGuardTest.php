@@ -133,6 +133,8 @@ it('keeps the commands of humans and of the loop away from the agents', function
     'php artisan agentio:setup-youtrack --dry-run',
     'php artisan agentio:worktree XY-2 --remove',
     'php artisan agentio:accept XY-2',
+    'php artisan agentio:pause XY-2 --now',
+    'php artisan agentio:resume XY-2',
     'php artisan agentio:run --once',
     'php artisan agentio:run --dry-run --kill',
     'php artisan agentio:run --dry-run --stop',

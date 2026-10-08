@@ -15,6 +15,12 @@ enum AgentCommentKind: string
     case Done = 'DONE';
     case Release = 'RELEASE';
 
+    /** The developer paused the epic (Stage On Hold); the claim stays with its owner. */
+    case Pause = 'PAUSE';
+
+    /** The developer lifted the pause of the epic. */
+    case Resume = 'RESUME';
+
     /**
      * Whether a comment of this kind ends the active claim of an issue.
      */

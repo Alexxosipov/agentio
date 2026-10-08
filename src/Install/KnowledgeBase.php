@@ -23,6 +23,7 @@ final readonly class KnowledgeBase
         'overview' => ['Обзор продукта', null],
         'analysis' => ['Системная аналитика', null],
         'analysis.common' => ['Общие требования', 'analysis'],
+        'ideas' => ['Идеи', null],
         'architecture' => ['Архитектура', null],
         'architecture.overview' => ['Архитектура: обзор', 'architecture'],
         'adr' => ['ADR', 'architecture'],

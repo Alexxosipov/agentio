@@ -112,7 +112,7 @@ final readonly class PipelinePresenter
             'kind' => $kind,
             'issue' => [...$this->source->card($issue), ...$this->source->claim($issue)],
             'status' => $status->toArray(),
-            'active' => $status->stage !== PipelineStage::Done,
+            'active' => $status->stage !== PipelineStage::Done && ! $status->onHold,
             'updatedAt' => (string) $issue->updatedAt?->toIso8601String(),
             'epics' => $epics,
         ];

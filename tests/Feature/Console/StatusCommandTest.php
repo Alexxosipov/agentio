@@ -125,6 +125,24 @@ it('summarises the YouTrack project', function () {
         ->and(array_column($youTrack['awaitingHuman'], 'id'))->toBe(['XY-7']);
 });
 
+it('lists the paused epics and the parked ideas apart from the work in progress', function () {
+    fakeYouTrackProjectIssues([
+        apiIssue('XY-2', ['Type' => 'Epic', 'Stage' => 'On Hold'], tags: ['agent-claimed'], summary: '[EPIC] Аватар'),
+        apiIssue('XY-7', ['Type' => 'Idea', 'Stage' => 'On Hold'], tags: ['idea', 'parked'], summary: '[IDEA] Кэшбэк'),
+        apiIssue('XY-5', ['Type' => 'Epic', 'Stage' => 'In Progress'], tags: ['agent-claimed']),
+    ], []);
+
+    $this->artisan('agentio:status')
+        ->expectsOutputToContain('On hold (paused epics, parked ideas)')
+        ->assertSuccessful();
+
+    expect(Artisan::call('agentio:status', ['--json' => true]))->toBe(0);
+    $youTrack = json_decode(trim(Artisan::output()), true)['youtrack'];
+
+    expect(array_column($youTrack['onHold'], 'id'))->toBe(['XY-2', 'XY-7'])
+        ->and(array_column($youTrack['inProgress'], 'id'))->toBe(['XY-5']);
+});
+
 it('reports YouTrack problems without failing', function () {
     $this->artisan('agentio:status')
         ->expectsOutputToContain('YOUTRACK_URL / YOUTRACK_TOKEN are not set')

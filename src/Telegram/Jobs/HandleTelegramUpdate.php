@@ -9,11 +9,14 @@ use Illuminate\Contracts\Cache\Repository;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Queue\InteractsWithQueue;
 use Obrazmisli\Agentio\Telegram\BotSettings;
+use Obrazmisli\Agentio\Telegram\ButtonPress;
+use Obrazmisli\Agentio\Telegram\Buttons;
 use Obrazmisli\Agentio\Telegram\IncomingMessage;
 use Obrazmisli\Agentio\Telegram\MessageHandler;
 
 /**
- * An update the listener received: handled on the queue, so the listener only reads Telegram.
+ * An update the listener received (a message, or the press of a button under a message of the bot): handled on the
+ * queue, so the listener only reads Telegram.
  */
 final class HandleTelegramUpdate implements ShouldQueue
 {
@@ -38,11 +41,19 @@ final class HandleTelegramUpdate implements ShouldQueue
      * An update queued twice (the listener stopped before it confirmed it) is handled once: Telegram's update_id
      * is remembered for a day.
      */
-    public function handle(MessageHandler $handler, Repository $cache): void
+    public function handle(MessageHandler $handler, Buttons $buttons, Repository $cache): void
     {
         $id = $this->update['update_id'] ?? null;
 
         if (is_int($id) && ! $cache->add('agentio:telegram:update:'.$id, true, 86400)) {
+            return;
+        }
+
+        $press = ButtonPress::fromUpdate($this->update);
+
+        if ($press !== null) {
+            $buttons->press($press);
+
             return;
         }
 

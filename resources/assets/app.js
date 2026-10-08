@@ -7,7 +7,9 @@
     const statusSlot = document.querySelector('[data-slot="status"]');
     const projectSlot = document.querySelector('[data-slot="project"]');
 
-    const STATES = ['Backlog', 'Analysis', 'Ready', 'In Progress', 'Review', 'Blocked', 'Done'];
+    const STATES = ['Backlog', 'Analysis', 'Ready', 'In Progress', 'Review', 'Blocked', 'On Hold', 'Done'];
+    // The stages an epic may be paused in (EpicPause::PAUSABLE).
+    const PAUSABLE = ['Backlog', 'Analysis', 'Ready', 'In Progress', 'Blocked'];
     const TYPE_SHORT = { Idea: 'ИД', Epic: 'EP', Story: 'ST', Task: 'T' };
     const TYPE_LABEL = { Idea: 'Идея', Epic: 'Эпик', Story: 'История', Task: 'Задача' };
     const STAGE_FALLBACK = [
@@ -523,7 +525,17 @@
             + `<div class="pipe-meta">${meta.join('')}${status.note ? `<span class="pipe-note-desktop">${inline(status.note)}</span>` : ''}</div></div>`
             + segments(status, stages)
             + (status.blocked ? `<div class="pipe-blocked"><span><b>Заблокировано.</b> ${inline(status.blockedReason || 'Причина не указана.')}</span></div>` : '')
+            + holdLine(item.kind, status)
             + '</div>';
+    }
+
+    function holdLine(kind, status) {
+        if (!status || !status.onHold) {
+            return '';
+        }
+        return kind === 'idea'
+            ? '<div class="pipe-hold"><span><b>Отложенная идея.</b> Системный анализ — в статье «Идеи», в разработку не взята.</span></div>'
+            : '<div class="pipe-hold"><span><b>На паузе.</b> Агенты эпик не берут; захват и worktree сохранены.</span></div>';
     }
 
     function renderPipeline() {
@@ -705,7 +717,9 @@
             + `<div class="epic-facts">${status ? `<span>Этап: ${stageLine(status)}</span>` : ''}${e.owner ? `<span>Захвачен: ${ownerChip(e.owner, e.since)}</span>` : ''}</div>`
             + (status ? `<div class="pipe-row" style="padding:0;grid-template-columns:repeat(8,minmax(0,1fr))">${segments(status, stages)}</div><div class="pipe-row pipe-labels" style="padding:0;grid-template-columns:repeat(8,minmax(0,1fr))">${stages.map((s, i) => `<span class="small ${i === status.position ? '' : 'faint'}" style="text-align:center;line-height:1.2">${esc(s.label)}</span>`).join('')}</div>` : '')
             + (status && status.blocked ? `<div class="pipe-blocked"><span><b>Заблокировано.</b> ${inline(status.blockedReason || 'Причина не указана.')}</span></div>` : '')
+            + holdLine('epic', status)
             + (total ? `${progressBar(e.progress, total)}<div class="legend">${legend}</div>` : '')
+            + pauseControls(e)
             + '</div>');
 
         patchSlot('tree-count', total ? `${total} задач` : '');
@@ -714,6 +728,58 @@
         patchSlot('ready', e.readyTasks.length ? '<div class="list-rows">' + e.readyTasks.map((t) => `<div class="list-row">${typeBadge(t.type)}${idLink(t.id, t.url)}<span class="summary" title="${esc(t.summary)}">${esc(t.summary)}</span></div>`).join('') + '</div>' : empty('Готовых к взятию задач нет.'));
         patchSlot('waiting', e.waiting.length ? '<div class="list-rows">' + e.waiting.map((w) => `<div class="list-row">${idLink(w.id)}${stateBadge(w.state)}<span class="muted">ждёт</span> ${linkIds(esc(w.waitingFor.join(', ')))}</div>`).join('') + '</div>' : empty('Никто не ждёт зависимостей.'));
         patchSlot('epic-events', feed(e.events));
+    }
+
+    /* ---------- pause of an epic ---------- */
+
+    function pauseControls(e) {
+        const res = S.results['pause:' + e.id];
+        const dependents = e.dependents && e.dependents.length
+            ? `<div class="dependents">Ждут этот эпик: ${e.dependents.map((d) => `${idLink(d.id, d.url)} ${stateBadge(d.state)}${d.via ? ` <span class="faint">через ${esc(d.via)}</span>` : ''}`).join(', ')}</div>`
+            : '';
+        const review = S.data['review:' + e.id];
+        const allowed = cfg.actions && (!review || review.actions !== false);
+        let buttons = '';
+        if (allowed && e.state === 'On Hold') {
+            buttons = `<button type="button" class="btn primary" data-action="resume"${S.busy ? ' disabled' : ''}>${S.busy === 'resume' ? 'Снимаю паузу…' : '▶ Продолжить'}</button>`
+                + '<span class="small muted">Эпик на паузе: агенты его не берут, захват и worktree сохранены.</span>';
+        } else if (allowed && PAUSABLE.includes(e.state)) {
+            buttons = `<button type="button" class="btn" data-action="pause"${S.busy ? ' disabled' : ''}>${S.busy === 'pause' ? 'Ставлю на паузу…' : '⏸ Пауза после текущей волны'}</button>`
+                + `<button type="button" class="btn" data-action="pause-now"${S.busy ? ' disabled' : ''}>${S.busy === 'pause-now' ? 'Останавливаю…' : '⏹ Остановить сейчас'}</button>`;
+        }
+        const result = res ? `<div class="notice ${res.ok ? 'ok' : ''}"><div>${linkIds(esc(res.message)).replace(/\n/g, '<br>')}</div></div>` : '';
+        if (!buttons && !dependents && !result) {
+            return '';
+        }
+        return `<div class="epic-pause">${buttons ? `<div class="pause-buttons">${buttons}</div>` : ''}${dependents}${result}</div>`;
+    }
+
+    async function actPause(kind) {
+        const id = S.route.id;
+        const epic = (S.data['epic:' + id] || {}).epic;
+        if (!epic || S.busy !== null) {
+            return;
+        }
+        const waiting = epic.dependents && epic.dependents.length ? `\n\nПока он на паузе, стоят и зависимые эпики: ${epic.dependents.map((d) => d.id).join(', ')}.` : '';
+        const question = {
+            pause: `Поставить эпик ${id} на паузу? Агенты доделают текущую волну задач и остановятся.${waiting}`,
+            'pause-now': `Остановить эпик ${id} сейчас? Сессия по нему прервётся, незаконченные задачи продолжатся после паузы.${waiting}`,
+            resume: `Снять паузу с эпика ${id}?`,
+        }[kind];
+        if (!window.confirm(question)) {
+            return;
+        }
+        S.busy = kind;
+        delete S.results['pause:' + id];
+        render();
+        try {
+            const data = await postJson(cfg.endpoints[kind === 'resume' ? 'resume' : 'pause'].replace('__ID__', encodeURIComponent(id)), kind === 'resume' ? {} : { now: kind === 'pause-now' });
+            S.results['pause:' + id] = { ok: true, message: data.message };
+        } catch (e) {
+            S.results['pause:' + id] = { ok: false, message: e.message };
+        }
+        S.busy = null;
+        tick();
     }
 
     /* ---------- review & acceptance ---------- */
@@ -1263,6 +1329,10 @@
         const action = event.target.closest('[data-action="accept"], [data-action="rework"]');
         if (action && !action.disabled) {
             act(action.dataset.action);
+        }
+        const pause = event.target.closest('[data-action="pause"], [data-action="pause-now"], [data-action="resume"]');
+        if (pause && !pause.disabled) {
+            actPause(pause.dataset.action);
         }
     });
 

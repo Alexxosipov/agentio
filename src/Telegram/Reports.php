@@ -13,17 +13,19 @@ use Obrazmisli\Agentio\Settings;
 use Obrazmisli\Agentio\YouTrack\Comment;
 use Obrazmisli\Agentio\YouTrack\Issue;
 use Obrazmisli\Agentio\YouTrack\Mcp\Tools;
+use Obrazmisli\Agentio\YouTrack\Tag;
 use Throwable;
 
 /**
  * The messages of the bot, in Russian and short, like a project manager reporting to the developer: the questions
- * of the agents and the events of the loop (an idea planned, an epic ready for review with its pull request, a
- * session that gave up, the loop paused at the usage limit of Claude Code and resumed after it).
+ * of the agents and the events of the loop (an idea planned or analysed and parked, an epic ready for review with
+ * its pull request, a session that gave up or stopped at the pause of its epic, the loop paused at the usage limit
+ * of Claude Code and resumed after it).
  */
 final readonly class Reports
 {
     /** The events of the loop the bot reports (agentio:telegram notify <event> <id>). */
-    public const array EVENTS = ['planned', 'review', 'blocked', 'limit', 'resumed'];
+    public const array EVENTS = ['planned', 'parked', 'review', 'blocked', 'paused', 'limit', 'resumed'];
 
     /** The events about the loop as a whole: the id (the session that ran into the limit) is optional. */
     public const array LOOP_EVENTS = ['limit', 'resumed'];
@@ -34,16 +36,33 @@ final readonly class Reports
     ) {}
 
     /**
-     * The questions of an [AGENT:BLOCKED] comment, to be answered with a reply.
+     * The questions of an [AGENT:BLOCKED] comment, to be answered with the buttons or a reply; the questions about a
+     * parked idea are marked as not urgent.
      */
     public static function question(Comment $comment): string
     {
         $body = trim((string) preg_replace('/^\[AGENT:BLOCKED\]\s*/', '', ltrim($comment->text)));
         // How to answer in YouTrack is replaced by how to answer here.
         $body = trim((string) preg_replace('/^\*\*Как ответить:?\*\*.*?(?=\n\s*\n|\z)/msu', '', $body));
-        $title = '❓ **Вопросы по '.$comment->issueId.'**'.($comment->issueSummary === null ? '' : ' «'.$comment->issueSummary.'»');
+        $parked = in_array(Tag::Parked->value, $comment->issueTags, true);
+        $title = ($parked ? '🕊 **Не срочно · вопросы по ' : '❓ **Вопросы по ').$comment->issueId.'**'.($comment->issueSummary === null ? '' : ' «'.$comment->issueSummary.'»');
+        $note = $parked ? 'Это отложенная идея: после анализа она не пойдёт в разработку, так что ответить можно, когда будет время.'."\n\n" : '';
 
-        return $title."\n\n".$body."\n\n".'↩️ Ответьте на это сообщение (reply) текстом или голосовым: «В1: б; В2: а», «принимаю рекомендации» или своими словами. Ответ запишу комментарием в '.$comment->issueId.' и верну задачу в работу.';
+        return $title."\n\n".$note.$body."\n\n".'↩️ Нажмите «Принять рекомендации», если согласны со всеми рекомендациями, или ответьте на это сообщение (reply) текстом или голосовым: «В1: б; В2: а» или своими словами. Ответ запишу комментарием в '.$comment->issueId.' и верну задачу в работу.';
+    }
+
+    /**
+     * The buttons under the questions of an issue: accept every recommendation, or answer in own words (the bot
+     * asks for a reply). Telegram limits callback data to 64 bytes: "<action>:<issue id>".
+     *
+     * @return array{inline_keyboard: list<list<array{text: string, callback_data: string}>>}
+     */
+    public static function questionButtons(string $issueId): array
+    {
+        return ['inline_keyboard' => [[
+            ['text' => '✅ Принять рекомендации', 'callback_data' => Buttons::ACCEPT.':'.$issueId],
+            ['text' => '✍️ Ответить', 'callback_data' => Buttons::REPLY.':'.$issueId],
+        ]]];
     }
 
     /**
@@ -66,6 +85,10 @@ final readonly class Reports
 
         return match ($event) {
             'planned' => '🗂 Идея '.$title.' спланирована.'.$this->epicsOf($id),
+            'parked' => '🗄 Идея '.$title.' проанализирована и отложена: системный анализ записан в базу знаний (статья «Идеи»), в разработку она не пойдёт.'
+                ."\n\n↩️ Чтобы взять её в работу, напишите «бери в работу {$id}» (или снимите метку ".Tag::Parked->value.' и верните Stage в Backlog в YouTrack): цикл перенесёт анализ в «Системную аналитику» и спланирует эпики.',
+            'paused' => '⏸ Эпик '.$title.': сессия остановилась на паузе. Ветка, worktree и захват сохранены — после паузы работа продолжится с того же места.'
+                ."\n\n↩️ Продолжить: «продолжи {$id}», кнопка «Продолжить» на панели /agentio или php artisan agentio:resume {$id}.",
             'review' => '✅ Эпик '.$title.' готов к приёмке: '.($url === null ? 'ветка '.$id.' (pull request ещё не открыт: php artisan agentio:pr '.$id.')' : 'pull request в '.$base.' — '.$url).'.'.$this->done($id)
                 ."\n\n↩️ Чтобы слить его в {$base}, ответьте на это сообщение (reply) «мержи». Или смержите в панели /agentio, или php artisan agentio:accept {$id}.",
             'blocked' => '⛔ '.$title.': сессия '.($name !== null && str_starts_with($name, 'plan-') ? 'планирования' : 'эпика').' несколько раз подряд оборвалась без результата, задача в Blocked. Лог: php artisan agentio:log '.($name ?? $id).'.',

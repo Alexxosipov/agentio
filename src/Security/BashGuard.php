@@ -283,7 +283,7 @@ final readonly class BashGuard
         $command = $rest[0] ?? '';
 
         return match (true) {
-            in_array($command, ['agentio:install', 'agentio:setup-youtrack', 'agentio:worktree', 'agentio:accept', 'agentio:release', 'tinker'], true) => "php artisan {$command} is run by humans, not by agents.",
+            in_array($command, ['agentio:install', 'agentio:setup-youtrack', 'agentio:worktree', 'agentio:accept', 'agentio:pause', 'agentio:resume', 'agentio:release', 'tinker'], true) => "php artisan {$command} is run by humans, not by agents.",
             $command === 'agentio:run' && ! self::onlyDryRun(array_slice($rest, 1)) => 'php artisan agentio:run is run by humans; agents may only use --dry-run (with --epic= or --no-plan).',
             default => null,
         };

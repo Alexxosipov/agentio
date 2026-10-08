@@ -25,7 +25,7 @@ it('reads updates by long polling after the offset', function () {
 
     expect(bot()->updates(5, 10))->toBe([telegramUpdate(5)]);
     Http::assertSent(fn (Request $request): bool => $request->url() === 'https://telegram.test/bot123:SECRET/getUpdates'
-        && $request->data() === ['offset' => 5, 'timeout' => 10, 'allowed_updates' => ['message']]);
+        && $request->data() === ['offset' => 5, 'timeout' => 10, 'allowed_updates' => ['message', 'callback_query']]);
 });
 
 it('sends a long text in several HTML messages, the first one as a reply', function () {
@@ -43,6 +43,33 @@ it('sends a long text in several HTML messages, the first one as a reply', funct
     expect($bodies[0])->toMatchArray(['chat_id' => '42', 'parse_mode' => 'HTML', 'reply_parameters' => ['message_id' => 77, 'allow_sending_without_reply' => true]])
         ->and($bodies[0]['text'])->toStartWith('<b>Абзац</b> текста')
         ->and($bodies[1])->not->toHaveKey('reply_parameters');
+});
+
+it('puts the buttons under the last message of a long text', function () {
+    fakeTelegram(['sendMessage' => Http::sequence()
+        ->push(['ok' => true, 'result' => ['message_id' => 101]])
+        ->push(['ok' => true, 'result' => ['message_id' => 102]])]);
+    $buttons = ['inline_keyboard' => [[['text' => 'Да', 'callback_data' => 'accept:XY-1']]]];
+
+    bot()->send('42', str_repeat("Абзац текста\n\n", 400), markup: $buttons);
+
+    $bodies = Http::recorded()->map(fn (array $pair): array => $pair[0]->data())->values()->all();
+
+    expect($bodies)->toHaveCount(2)
+        ->and($bodies[0])->not->toHaveKey('reply_markup')
+        ->and($bodies[1]['reply_markup'])->toBe($buttons);
+});
+
+it('answers the press of a button and removes the buttons', function () {
+    fakeTelegram(['answerCallbackQuery' => ['ok' => true, 'result' => true], 'editMessageReplyMarkup' => ['ok' => true, 'result' => true]]);
+
+    bot()->answerButton('cb-1', 'Принято', alert: true);
+    bot()->removeButtons('42', 77);
+
+    Http::assertSent(fn (Request $request): bool => str_ends_with($request->url(), '/answerCallbackQuery')
+        && $request->data() === ['callback_query_id' => 'cb-1', 'text' => 'Принято', 'show_alert' => true]);
+    Http::assertSent(fn (Request $request): bool => str_ends_with($request->url(), '/editMessageReplyMarkup')
+        && $request->data() === ['chat_id' => '42', 'message_id' => 77, 'reply_markup' => ['inline_keyboard' => []]]);
 });
 
 it('sends plain text when Telegram cannot parse the HTML', function () {

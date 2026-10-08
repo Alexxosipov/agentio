@@ -30,6 +30,7 @@ final class SendTelegramMessage implements ShouldQueue
 
     /**
      * @param  string  $kind  question, report, answer, help or error
+     * @param  array<string, mixed>|null  $markup  Buttons under the message or a request for a reply
      */
     public function __construct(
         public string $text,
@@ -38,6 +39,7 @@ final class SendTelegramMessage implements ShouldQueue
         public ?string $stage = null,
         public ?int $replyTo = null,
         public ?string $chatId = null,
+        public ?array $markup = null,
     ) {
         $settings = BotSettings::fromConfig();
         $this->onConnection($settings->queueConnection)->onQueue($settings->queue);
@@ -68,7 +70,7 @@ final class SendTelegramMessage implements ShouldQueue
         }
 
         try {
-            $ids = $bot->send($chat, $this->text, $this->replyTo);
+            $ids = $bot->send($chat, $this->text, $this->replyTo, $this->markup);
         } catch (TelegramException $exception) {
             if ($exception->retryAfter !== null) {
                 $this->release($exception->retryAfter + 1);

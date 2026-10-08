@@ -166,7 +166,7 @@ final readonly class Client
             'categories' => 'CommentsCategory',
             'issueQuery' => $issueQuery,
             'reverse' => 'true',
-            'fields' => 'id,timestamp,author(login,fullName),added(id,text,created,issue(idReadable,summary))',
+            'fields' => 'id,timestamp,author(login,fullName),added(id,text,created,issue(idReadable,summary,tags(name)))',
             '$top' => $limit,
         ]);
 

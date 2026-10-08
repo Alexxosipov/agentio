@@ -11,6 +11,9 @@ use Carbon\CarbonImmutable;
  */
 final readonly class Comment
 {
+    /**
+     * @param  list<string>  $issueTags  The tags of the issue, when the payload names them
+     */
     public function __construct(
         public string $id,
         public string $issueId,
@@ -19,6 +22,7 @@ final readonly class Comment
         public ?string $authorName = null,
         public ?CarbonImmutable $createdAt = null,
         public ?string $issueSummary = null,
+        public array $issueTags = [],
     ) {}
 
     /**
@@ -40,6 +44,10 @@ final readonly class Comment
             authorName: is_string($author['fullName'] ?? null) ? $author['fullName'] : null,
             createdAt: is_int($created) ? CarbonImmutable::createFromTimestampMsUTC($created) : null,
             issueSummary: is_string($issue['summary'] ?? null) ? $issue['summary'] : null,
+            issueTags: array_values(array_filter(array_map(
+                fn (mixed $tag): ?string => is_array($tag) && is_string($tag['name'] ?? null) ? $tag['name'] : null,
+                is_array($issue['tags'] ?? null) ? $issue['tags'] : [],
+            ))),
         );
     }
 

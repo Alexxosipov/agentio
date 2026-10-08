@@ -234,6 +234,34 @@ final class ReadinessGraph
     }
 
     /**
+     * The unfinished epics that wait for the epic: one of them (the epic, a story or a task of it) depends on the
+     * epic or on an issue of it, directly or through another waiting epic ("via": the epic it waits for, null when
+     * it waits for this one), in the order they were found.
+     *
+     * @return list<array{id: string, via: string|null}>
+     */
+    public function dependents(string $epicId): array
+    {
+        $dependents = [];
+        $queue = [$epicId];
+
+        while ($queue !== []) {
+            $current = array_shift($queue);
+
+            foreach ($this->ofType(IssueType::Epic) as $epic) {
+                if ($epic->id === $epicId || isset($dependents[$epic->id]) || $epic->hasState(State::Done) || ! $this->waitsFor($epic->id, $current)) {
+                    continue;
+                }
+
+                $dependents[$epic->id] = ['id' => $epic->id, 'via' => $current === $epicId ? null : $current];
+                $queue[] = $epic->id;
+            }
+        }
+
+        return array_values($dependents);
+    }
+
+    /**
      * Dependency ("depends on") cycles, each as a path that ends with its first issue.
      *
      * @return list<list<string>>
@@ -323,5 +351,21 @@ final class ReadinessGraph
         };
 
         return new TreeNode($issue, $depth, $this->unmetDependencies($id), $ready, $children);
+    }
+
+    /**
+     * Whether the epic, one of its stories or one of its tasks depends on the other epic or on an issue of it.
+     */
+    private function waitsFor(string $epicId, string $otherEpicId): bool
+    {
+        foreach ([$epicId, ...$this->descendants($epicId)] as $holder) {
+            foreach ($this->find($holder)?->related(Relation::DependsOn) ?? [] as $dependency) {
+                if ($this->epicOf($dependency) === $otherEpicId) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
     }
 }

@@ -203,6 +203,32 @@ it('withdraws a claim that failed half-way', function () {
         ->and($server->issues['XY-6']['fields']['Stage'])->toBe('Ready');
 });
 
+it('neither claims nor moves an issue on hold', function () {
+    $server = epicProject();
+    $server->issues['XY-2']['fields']['Stage'] = 'On Hold';
+    $server->issues['XY-2']['tags'] = ['agent-claimed'];
+    $server->comment('XY-2', "[AGENT:START]\nowner: `me:/w/XY-2`");
+
+    expect(yt(['action' => 'claim', 'id' => 'XY-2', '--owner' => 'me:/w/XY-2', '--worktree' => '/w/XY-2', '--branch' => 'XY-2']))
+        ->toBe([3, "ON_HOLD: XY-2 is on hold (Stage On Hold): leave it as it is; the developer resumes it (php artisan agentio:resume XY-2)\n"])
+        ->and(yt(['action' => 'release', 'id' => 'XY-2', '--state' => 'Review'])[0])->toBe(3)
+        ->and($server->issues['XY-2']['fields']['Stage'])->toBe('On Hold')
+        ->and($server->issues['XY-2']['tags'])->toBe(['agent-claimed'])
+        ->and($server->comments['XY-2'])->toHaveCount(1);
+});
+
+it('parks an idea: release to On Hold, written as OnHold on the command line', function () {
+    $server = (new FakeYouTrackMcp)
+        ->issue('XY-7', 'Idea', 'Analysis', tags: ['idea', 'parked', 'agent-claimed'])
+        ->comment('XY-7', "[AGENT:START]\nowner: `me:/app#pm`")
+        ->fake();
+
+    expect(yt(['action' => 'release', 'id' => 'XY-7', '--state' => 'OnHold']))->toBe([0, "RELEASED XY-7 -> On Hold\n"])
+        ->and($server->issues['XY-7']['fields']['Stage'])->toBe('On Hold')
+        ->and($server->issues['XY-7']['tags'])->toBe(['idea', 'parked'])
+        ->and(yt(['action' => 'ideas'])[1])->toBe('');
+});
+
 it('lists the epics and ideas this machine left unfinished', function () {
     $project = hostProject();
     $worktrees = $project.'/worktrees';
@@ -221,11 +247,15 @@ it('lists the epics and ideas this machine left unfinished', function () {
         ->comment('XY-1', "[AGENT:START]\nowner: `{$host}:{$project}#pm`")
         ->issue('XY-3', 'Idea', 'Analysis', tags: ['agent-claimed'])
         ->comment('XY-3', "[AGENT:START]\nowner: `{$host}:/elsewhere#pm`")
+        ->issue('XY-43', 'Epic', 'On Hold', tags: ['agent-claimed'])
+        ->comment('XY-43', "[AGENT:START]\nowner: `{$host}:{$worktrees}/XY-43`")
         ->fake();
+    mkdir($worktrees.'/XY-43', 0777, true);
 
     [$status, $json] = yt(['action' => 'resumable', '--json' => true]);
 
-    // XY-41 is another machine's, the worktree of XY-42 is gone, XY-3 is planned from another checkout.
+    // XY-41 is another machine's, the worktree of XY-42 is gone, XY-3 is planned from another checkout, XY-43 is
+    // paused by the developer.
     expect($status)->toBe(0)
         ->and(json_decode($json, true))->toBe([
             ['id' => 'XY-40', 'kind' => 'epic', 'summary' => '[EPIC] Summary of XY-40'],
@@ -272,7 +302,7 @@ it('refuses an unknown Stage', function () {
     [$status, $output] = yt(['action' => 'release', 'id' => 'XY-6', '--state' => 'Stage']);
 
     expect($status)->toBe(1)
-        ->and($output)->toContain('Stage: Backlog, Analysis, Ready, In Progress, Review, Blocked, Done');
+        ->and($output)->toContain('Stage: Backlog, Analysis, Ready, In Progress, Review, Blocked, On Hold, Done');
 });
 
 it('lists claimed epics with their owners and blocked issues with their reasons', function () {

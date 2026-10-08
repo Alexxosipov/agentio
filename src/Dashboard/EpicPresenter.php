@@ -12,8 +12,8 @@ use Obrazmisli\Agentio\YouTrack\State;
 use Obrazmisli\Agentio\YouTrack\YouTrackException;
 
 /**
- * One epic in detail: its STORY -> TASK tree with claims, dependencies and readiness, progress by story
- * and the [AGENT:*] feed of the whole tree.
+ * One epic in detail: its STORY -> TASK tree with claims, dependencies and readiness, progress by story, the epics
+ * that wait for it and the [AGENT:*] feed of the whole tree.
  */
 final readonly class EpicPresenter
 {
@@ -90,6 +90,10 @@ final readonly class EpicPresenter
             'stories' => $stories,
             'readyTasks' => array_map(fn (string $id): array => $this->source->card($graph->get($id)), $graph->readyTasks($epic->id)),
             'waiting' => $waiting,
+            'dependents' => array_map(
+                fn (array $dependent): array => [...$this->source->card($graph->get($dependent['id'])), 'via' => $dependent['via']],
+                $graph->dependents($epic->id),
+            ),
             'events' => array_map(
                 fn (AgentComment $comment): array => $this->activity->event($comment, $summaries[$comment->issueId] ?? null),
                 $this->source->recentAgentComments(self::EVENTS, [$epic->id, ...$descendants]),

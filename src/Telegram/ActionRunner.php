@@ -7,6 +7,7 @@ namespace Obrazmisli\Agentio\Telegram;
 use Obrazmisli\Agentio\Process\AgentCommentKind;
 use Obrazmisli\Agentio\Process\AgentComments;
 use Obrazmisli\Agentio\Review\EpicAcceptance;
+use Obrazmisli\Agentio\Review\EpicPause;
 use Obrazmisli\Agentio\Review\Release;
 use Obrazmisli\Agentio\Review\ReviewException;
 use Obrazmisli\Agentio\Settings;
@@ -22,7 +23,8 @@ use Obrazmisli\Agentio\YouTrack\YouTrackException;
  * start with [AGENT:, so the resumed agent reads it as the human's answer (see the «Вопросы к человеку» section of
  * agentio-youtrack-workflow); with resume, an issue in Blocked goes back to the Stage its [AGENT:BLOCKED] names.
  * Merges go through pull requests on GitHub and never create a YouTrack issue: an epic is accepted the way the
- * dashboard does it, a release is merged only after the developer confirmed the question the bot asked.
+ * dashboard does it, a release is merged only after the developer confirmed the question the bot asked. An epic is
+ * paused and resumed the way agentio:pause and agentio:resume do it.
  */
 final readonly class ActionRunner
 {
@@ -30,6 +32,7 @@ final readonly class ActionRunner
         private Tools $tools,
         private Settings $settings,
         private EpicAcceptance $acceptance,
+        private EpicPause $pause,
         private Release $release,
         private Conversation $conversation,
     ) {}
@@ -50,7 +53,10 @@ final readonly class ActionRunner
                 [$line, $issue] = match ($action['type']) {
                     DecisionAction::Answer => $this->answer($action['issue'], $action['comment'] !== '' ? $action['comment'] : $text, $action['resume'], $message, $text),
                     DecisionAction::Comment => $this->comment($action['issue'], $action['comment'] !== '' ? $action['comment'] : $text, $message, $text),
-                    DecisionAction::Idea => $this->idea($action['summary'], $action['description'] !== '' ? $action['description'] : $text, $message),
+                    DecisionAction::Idea => $this->idea($action['summary'], $action['description'] !== '' ? $action['description'] : $text, $message, $action['park']),
+                    DecisionAction::Promote => $this->promote($action['issue'], $message),
+                    DecisionAction::Pause => $this->pause($action['issue'], $action['now'], $action['comment']),
+                    DecisionAction::Resume => $this->resume($action['issue']),
                     DecisionAction::Merge => $this->merge($action['issue']),
                     DecisionAction::Release => $this->release($action['confirm']),
                 };
@@ -223,13 +229,82 @@ final readonly class ActionRunner
     }
 
     /**
-     * A new idea for the planning loop (Type Idea, Stage Backlog, tag idea).
+     * The developer pauses an epic: after its current wave of tasks, or with now right away (EpicPause).
+     *
+     * @return array{0: string, 1: string|null}
+     */
+    public function pause(?string $id, bool $now, string $reason): array
+    {
+        if ($id === null) {
+            return ['⚠️ Не понял, какой эпик поставить на паузу: напишите его ID.', null];
+        }
+
+        try {
+            return [EpicPause::pausedMessage($this->pause->pause($id, $now, $reason === '' ? null : $reason, 'Telegram')), $id];
+        } catch (ReviewException $exception) {
+            return ['⚠️ Не поставил '.$id.' на паузу: '.self::reason($exception), $id];
+        }
+    }
+
+    /**
+     * The developer lifts the pause of an epic.
+     *
+     * @return array{0: string, 1: string|null}
+     */
+    public function resume(?string $id): array
+    {
+        if ($id === null) {
+            return ['⚠️ Не понял, какой эпик продолжить: напишите его ID.', null];
+        }
+
+        try {
+            return [EpicPause::resumedMessage($this->pause->resume($id, 'Telegram')), $id];
+        } catch (ReviewException $exception) {
+            return ['⚠️ Не снял паузу с '.$id.': '.self::reason($exception), $id];
+        }
+    }
+
+    /**
+     * The developer takes a parked idea into development: the parked tag goes, a parked idea On Hold goes back to
+     * Backlog, and the planning loop moves its analysis into the system analysis and plans its epics.
      *
      * @return array{0: string, 1: string|null}
      *
      * @throws YouTrackException
      */
-    public function idea(string $summary, string $description, IncomingMessage $message): array
+    public function promote(?string $id, IncomingMessage $message): array
+    {
+        $issue = $id === null ? null : $this->tools->issueWithLinks($id);
+
+        if ($issue === null) {
+            return ['⚠️ Не нашёл идею '.($id ?? '(не указана)').'.', null];
+        }
+
+        if (! $issue->isIdea() || ! $issue->hasTag(Tag::Parked)) {
+            return ["⚠️ {$issue->id} — не отложенная идея (нет метки ".Tag::Parked->value.'): брать в работу нечего.', $issue->id];
+        }
+
+        $this->tools->addComment($issue->id, 'Идея принята в разработку разработчиком (Telegram'.($message->isVoice() ? ', голосовое сообщение' : '').'): метка '.Tag::Parked->value.' снята. Планирование переносит анализ из статьи «Идеи» в «Системную аналитику» и планирует эпики.');
+        $this->tools->removeTag($issue->id, Tag::Parked->value);
+
+        if (! $issue->hasState(State::OnHold)) {
+            return ["🚀 {$issue->id} больше не отложена: после анализа её спланируют целиком (сейчас ".($issue->state() ?? 'без статуса').').', $issue->id];
+        }
+
+        $this->tools->updateFields($issue->id, [State::FIELD => State::Backlog->value]);
+
+        return ["🚀 Идея {$issue->id} взята в работу: цикл перенесёт её анализ в «Системную аналитику» и спланирует эпики.", $issue->id];
+    }
+
+    /**
+     * A new idea for the planning loop (Type Idea, Stage Backlog, tag idea); with park also the parked tag: only the
+     * system analysis, nothing goes to development until the developer takes it.
+     *
+     * @return array{0: string, 1: string|null}
+     *
+     * @throws YouTrackException
+     */
+    public function idea(string $summary, string $description, IncomingMessage $message, bool $park = false): array
     {
         $summary = trim((string) preg_replace('/^\[(IDEA|ИДЕЯ)\]\s*/iu', '', $summary));
         $summary = $summary === '' ? TelegramText::limit(str_replace("\n", ' ', $description), 80) : TelegramText::limit($summary, 120);
@@ -242,6 +317,12 @@ final readonly class ActionRunner
             [IssueType::FIELD => IssueType::Idea->value, State::FIELD => State::Backlog->value],
         );
         $this->tools->addTag($id, Tag::Idea->value);
+
+        if ($park) {
+            $this->tools->addTag($id, Tag::Parked->value);
+
+            return ["🗄 Создал отложенную идею {$id} «{$summary}»: цикл проведёт только системный анализ и сложит его в статью «Идеи»; в разработку она пойдёт, когда скажете «бери в работу {$id}».", $id];
+        }
 
         return ["💡 Создал идею {$id} «{$summary}» — цикл спланирует её.", $id];
     }

@@ -55,6 +55,7 @@ final class YouTrackSetup
         'In Progress' => ['В работе', 'В обработке', 'В процессе'],
         'Review' => ['Ревью', 'На ревью', 'На проверке'],
         'Blocked' => ['Заблокирована', 'Заблокировано', 'Заблокирован'],
+        'On Hold' => ['On hold', 'Отложено', 'Отложена', 'На паузе', 'Приостановлено'],
         'Done' => ['Готово', 'Выполнено', 'Сделано'],
         'Idea' => ['Идея'],
         'Epic' => ['Эпик', 'Веха'],
@@ -69,7 +70,7 @@ final class YouTrackSetup
     public const array DEFAULT_STAGES = ['Develop', 'Test', 'Staging'];
 
     /** How to set up the board the cycle requires, for the human. */
-    public const string BOARD_HINT = 'create an agile board for the project in YouTrack (or change one): in the board settings, Columns and rows → columns by the Stage field, a column per value (Backlog, Analysis, Ready, In Progress, Review, Blocked, Done), and swimlanes by the Type field (Idea, Epic, Story, Task); then run php artisan agentio:setup-youtrack again';
+    public const string BOARD_HINT = 'create an agile board for the project in YouTrack (or change one): in the board settings, Columns and rows → columns by the Stage field, a column per value (Backlog, Analysis, Ready, In Progress, Review, Blocked, On Hold, Done), and swimlanes by the Type field (Idea, Epic, Story, Task); then run php artisan agentio:setup-youtrack again';
 
     /** @var list<SetupAction> */
     private array $actions = [];
@@ -103,6 +104,8 @@ final class YouTrackSetup
             $project.': заблокированные (причина в [AGENT:BLOCKED])' => "project: {$project} Stage: Blocked",
             $project.': в работе у агентов' => "project: {$project} tag: {{$claimed}}",
             $project.': эпики на приёмке' => "project: {$project} Type: Epic Stage: Review",
+            $project.': на паузе и отложенные (On Hold)' => "project: {$project} Stage: {On Hold}",
+            $project.': отложенные идеи' => "project: {$project} tag: ".Tag::Parked->value,
         ];
     }
 
@@ -128,7 +131,7 @@ final class YouTrackSetup
         $this->unusedState($fields);
         $this->checkBoard($project);
 
-        $this->ensureTags([Tag::Idea->value, Tag::Claimed->value]);
+        $this->ensureTags([Tag::Idea->value, Tag::Parked->value, Tag::Claimed->value]);
         $this->ensureSavedSearches(self::savedSearches($project));
 
         return $this->ensureArticles($project, $placeholders);

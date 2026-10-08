@@ -32,6 +32,8 @@ Route::prefix('api')->name('agentio.api.')->group(function (): void {
         Route::get('epics/{id}/diff', [ApiController::class, 'diff'])->name('diff');
         Route::post('epics/{id}/accept', [ApiController::class, 'accept'])->name('accept');
         Route::post('epics/{id}/rework', [ApiController::class, 'rework'])->name('rework');
+        Route::post('epics/{id}/pause', [ApiController::class, 'pause'])->name('pause');
+        Route::post('epics/{id}/resume', [ApiController::class, 'resume'])->name('resume');
         Route::get('issues/{id}/log', [ApiController::class, 'issueLog'])->name('issue-log');
     });
 });

@@ -16,7 +16,7 @@ use Obrazmisli\Agentio\YouTrack\Comment;
 /**
  * The comment activities of the YouTrack REST API, newest first.
  *
- * @param  list<array{0: string, 1: string, 2: int}>  $comments  Issue, text, created (ms)
+ * @param  list<array{0: string, 1: string, 2: int, 3?: list<string>}>  $comments  Issue, text, created (ms), tags of the issue
  */
 function fakeCommentActivities(array $comments): void
 {
@@ -32,7 +32,7 @@ function fakeCommentActivities(array $comments): void
                 'id' => 'a-'.$comment[2],
                 'timestamp' => $comment[2],
                 'author' => ['login' => 'agent', 'fullName' => 'Agent'],
-                'added' => [['id' => 'c-'.$comment[2], 'text' => $comment[1], 'created' => $comment[2], 'issue' => ['idReadable' => $comment[0], 'summary' => '[IDEA] Оплата']]],
+                'added' => [['id' => 'c-'.$comment[2], 'text' => $comment[1], 'created' => $comment[2], 'issue' => ['idReadable' => $comment[0], 'summary' => '[IDEA] Оплата', 'tags' => array_map(fn (string $tag): array => ['name' => $tag], $comment[3] ?? [])]]],
             ], $current));
         }]);
     }
@@ -98,7 +98,8 @@ it('sends the questions the agents asked since the last look', function () {
     expect($watcher->poll($send))->toBe(2)
         ->and(array_column($sent, 0))->toBe(['XY-2', 'XY-3'])
         ->and($sent[1][1])->toStartWith('❓ **Вопросы по XY-3** «[IDEA] Оплата»')
-        ->and($sent[1][1])->toContain('**В1. Как?**', 'Ответьте на это сообщение (reply)')
+        ->and($sent[1][1])->toContain('**В1. Как?**', 'Нажмите «Принять рекомендации»', 'ответьте на это сообщение (reply)')
+        ->and($sent[1][1])->not->toContain('Не срочно')
         ->and($sent[1][1])->not->toContain('Как ответить:')
         ->and($conversation->watermark())->toBe(1_791_000_003_000);
 
@@ -114,5 +115,25 @@ it('queues the questions it finds as messages tied to their issue', function () 
 
     app(Listener::class)->run(fn (): bool => false, fn (string $line) => null, passes: 1, pollTimeout: 0);
 
-    Queue::assertPushed(SendTelegramMessage::class, fn (SendTelegramMessage $job): bool => $job->kind === 'question' && $job->issue === 'XY-1' && $job->stage === 'Backlog');
+    Queue::assertPushed(SendTelegramMessage::class, fn (SendTelegramMessage $job): bool => $job->kind === 'question' && $job->issue === 'XY-1' && $job->stage === 'Backlog'
+        && $job->markup === ['inline_keyboard' => [[
+            ['text' => '✅ Принять рекомендации', 'callback_data' => 'accept:XY-1'],
+            ['text' => '✍️ Ответить', 'callback_data' => 'reply:XY-1'],
+        ]]]);
+});
+
+it('marks the questions about a parked idea as not urgent', function () {
+    projectWithBot();
+    Queue::fake();
+    app(Conversation::class)->setWatermark(1_791_000_000_000);
+    fakeCommentActivities([['XY-7', "[AGENT:BLOCKED]\n**Нужен ответ:** 1 вопрос, затем Stage → Backlog.\n\n**В1. Сколько частей?**", 1_791_000_001_000, ['idea', 'parked']]]);
+    $sent = [];
+
+    app(QuestionWatcher::class)->poll(function (Comment $comment, string $text) use (&$sent): void {
+        $sent[] = $text;
+    });
+
+    expect($sent)->toHaveCount(1)
+        ->and($sent[0])->toStartWith('🕊 **Не срочно · вопросы по XY-7**')
+        ->and($sent[0])->toContain('Это отложенная идея', '**В1. Сколько частей?**');
 });

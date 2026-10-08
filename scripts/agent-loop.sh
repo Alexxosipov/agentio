@@ -8,6 +8,8 @@
 #   php artisan agentio:run --dry-run       only show what would be started (changes nothing)
 #   php artisan agentio:run --kill          stop running agent sessions (claims stay; the next run resumes them)
 #   php artisan agentio:run --stop          the loop exits after its current step (AGENTIO_STOP_FILE)
+# One epic is paused with php artisan agentio:pause <EPIC> [--now] (Stage On Hold, the claim kept): the loop never
+# starts it and does not count its stopped session as a failure; agentio:resume <EPIC> lets the loop resume it.
 #
 # Options: --interval=SEC  --max-parallel=N  --max-parallel-tasks=N  --epic=<ID> (only this epic)  --no-plan  --no-wait
 #
@@ -258,6 +260,13 @@ finish_epic() {
             fi
             ;;
         Blocked|Done) rm -f "$LOG_DIR/$epic.restarts" ;;
+        "On Hold")
+            # Paused by the developer (agentio:pause): not a failure; the claim and the worktree stay, and the loop
+            # resumes the epic once the pause is lifted (agentio:resume puts it back In Progress).
+            rm -f "$LOG_DIR/$epic.restarts"
+            log "$epic: paused (On Hold): the session stopped, claim and worktree kept (resume: php artisan agentio:resume $epic)"
+            notify paused "$epic"
+            ;;
         "") log "$epic: YouTrack did not answer, the session is judged on the next pass" ;;
         *)
             # In Progress: the session broke off; Ready or Backlog: it ended before it could claim the epic.
@@ -279,6 +288,8 @@ finish_plan() {
     case "$state" in
         Done) rm -f "$LOG_DIR/plan-$idea.restarts"; log "$idea: planning finished, idea state: $state"; notify planned "$idea" ;;
         Blocked) rm -f "$LOG_DIR/plan-$idea.restarts"; log "$idea: planning finished, idea state: $state" ;;
+        # A parked idea: analysed (the «Идеи» article), not planned into development until a human takes it.
+        "On Hold") rm -f "$LOG_DIR/plan-$idea.restarts"; log "$idea: analysed and parked (On Hold), nothing goes to development"; notify parked "$idea" ;;
         "") log "$idea: planning finished, YouTrack did not answer" ;;
         Backlog|Analysis|"In Progress")
             hit_limit "$idea" "plan-$idea" && return 0

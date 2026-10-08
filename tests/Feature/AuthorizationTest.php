@@ -85,5 +85,5 @@ it('needs the manageAgentio gate to act from the dashboard', function () {
         ->assertJsonPath('actions', false);
     $this->actingAs(user('dev@example.com'))->postJson('/agentio/api/epics/XY-2/accept')
         ->assertForbidden()
-        ->assertJsonPath('message', 'Нет права принимать эпики (gate manageAgentio).');
+        ->assertJsonPath('message', 'Нет права управлять эпиками (gate manageAgentio).');
 });

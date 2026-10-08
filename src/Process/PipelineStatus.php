@@ -12,6 +12,7 @@ final readonly class PipelineStatus
     /**
      * @param  array{done: int, total: int, inProgress: int, blocked: int}  $tasks  Tasks of the epic(s) by progress
      * @param  list<string>  $waitingFor  Unmet dependencies of a Ready epic
+     * @param  bool  $onHold  A paused epic or a parked idea (Stage On Hold): nobody works on it until a human decides
      */
     public function __construct(
         public string $issueId,
@@ -21,10 +22,11 @@ final readonly class PipelineStatus
         public array $tasks = ['done' => 0, 'total' => 0, 'inProgress' => 0, 'blocked' => 0],
         public ?string $note = null,
         public array $waitingFor = [],
+        public bool $onHold = false,
     ) {}
 
     /**
-     * @return array{issueId: string, stage: string, stageLabel: string, position: int, blocked: bool, blockedReason: string|null, tasks: array{done: int, total: int, inProgress: int, blocked: int}, note: string|null, waitingFor: list<string>}
+     * @return array{issueId: string, stage: string, stageLabel: string, position: int, blocked: bool, blockedReason: string|null, tasks: array{done: int, total: int, inProgress: int, blocked: int}, note: string|null, waitingFor: list<string>, onHold: bool}
      */
     public function toArray(): array
     {
@@ -38,6 +40,7 @@ final readonly class PipelineStatus
             'tasks' => $this->tasks,
             'note' => $this->note,
             'waitingFor' => $this->waitingFor,
+            'onHold' => $this->onHold,
         ];
     }
 }
