@@ -1,6 +1,14 @@
 # Release Notes
 
-## [Unreleased](https://github.com/Alexxosipov/agentio/compare/v0.11.0...main)
+## [Unreleased](https://github.com/Alexxosipov/agentio/compare/v0.11.1...main)
+
+## [v0.11.1](https://github.com/Alexxosipov/agentio/releases/tag/v0.11.1) - 2026-10-11
+
+Update with `composer update alexxosipov/agentio`, run `php artisan agentio:install` (refreshes the skills) and commit `.claude/skills/agentio-*` to the development branch together with `composer.lock`.
+
+### Fixed
+
+- The `[TASK]` template of the `agentio-youtrack-workflow` skill still listed the code areas of a task by a top-level domain (`app/<Домен>/Actions/...`, `tests/Feature/<Домен>/Actions/...Test.php`), against the layout of ADR-001: it now shows the Laravel directory of the kind of class with the domain inside it (`app/Actions/<Домен>/...`, `tests/Feature/Actions/<Домен>/...Test.php`).
 
 ## [v0.11.0](https://github.com/Alexxosipov/agentio/releases/tag/v0.11.0) - 2026-10-08
 
