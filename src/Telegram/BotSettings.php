@@ -30,6 +30,9 @@ final readonly class BotSettings
         public string $queue = 'default',
         public int $watchInterval = 60,
         public int $assistantTimeout = 600,
+        public bool $godmode = false,
+        public int $godmodeTimeout = 3600,
+        public int $godmodeIdle = 3600,
     ) {}
 
     public static function fromConfig(): self
@@ -42,6 +45,9 @@ final readonly class BotSettings
             queue: Settings::string('agentio.telegram.queue') ?? 'default',
             watchInterval: max(10, (int) config('agentio.telegram.watch_interval', 60)),
             assistantTimeout: max(60, (int) config('agentio.telegram.assistant_timeout', 600)),
+            godmode: config('agentio.telegram.godmode.enabled', false) === true,
+            godmodeTimeout: max(60, (int) config('agentio.telegram.godmode.timeout', 3600)),
+            godmodeIdle: max(60, (int) config('agentio.telegram.godmode.idle', 3600)),
         );
     }
 

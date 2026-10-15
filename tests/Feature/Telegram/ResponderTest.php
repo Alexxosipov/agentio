@@ -2,6 +2,8 @@
 
 declare(strict_types=1);
 
+use Illuminate\Process\Exceptions\ProcessTimedOutException;
+use Illuminate\Process\FakeProcessResult;
 use Illuminate\Process\PendingProcess;
 use Illuminate\Support\Facades\Process;
 use Illuminate\Support\Facades\Queue;
@@ -11,6 +13,8 @@ use Obrazmisli\Agentio\Telegram\Jobs\SendTelegramMessage;
 use Obrazmisli\Agentio\Telegram\Responder;
 use Obrazmisli\Agentio\Telegram\Transcription\Transcriber;
 use Obrazmisli\Agentio\Tests\Fakes\FakeYouTrackMcp;
+use Symfony\Component\Process\Exception\ProcessTimedOutException as SymfonyProcessTimedOutException;
+use Symfony\Component\Process\Process as SymfonyProcess;
 
 const BLOCKED_QUESTIONS = "[AGENT:BLOCKED]\n**Что остановлено:** планирование идеи XY-1.\n**Нужен ответ:** 2 вопроса (В1–В2) — комментарием в этой задаче, затем Stage → Backlog.\n\n**В1. Оплата частями?**\n- **Рекомендация: б**";
 
@@ -200,4 +204,105 @@ it('answers every waiting message in order and only once', function () {
         ->and(app(Responder::class)->answer('3'))->toBeFalse()
         ->and(array_column($conversation->history(), 'text'))->toBe(['Первое', 'Второе']);
     Queue::assertPushed(SendTelegramMessage::class, 2);
+});
+
+/**
+ * A project whose bot is in godmode, with the Claude Code session answering as $results say (in order).
+ *
+ * @param  list<array{0: array<string, mixed>|string, 1?: int}>  $results  The JSON output (or the error output) and the exit code
+ */
+function godmodeProject(array $results): Conversation
+{
+    projectWithBot();
+    Queue::fake();
+    config(['agentio.telegram.godmode.enabled' => true, 'agentio.telegram.godmode.timeout' => 1200]);
+
+    $sequence = Process::sequence();
+
+    foreach ($results as $result) {
+        $sequence->push(is_array($result[0])
+            ? Process::result((string) json_encode(['type' => 'result', 'is_error' => false, ...$result[0]], JSON_UNESCAPED_UNICODE), exitCode: $result[1] ?? 0)
+            : Process::result(errorOutput: $result[0], exitCode: $result[1] ?? 1));
+    }
+
+    Process::fake(['*--output-format*' => $sequence]);
+
+    $conversation = app(Conversation::class);
+    $conversation->startGodmode();
+
+    return $conversation;
+}
+
+it('does a task of godmode in a full-access session and continues it with the next one', function () {
+    $conversation = godmodeProject([
+        [['result' => 'Поставил **spatie/laravel-data**, тесты зелёные.', 'session_id' => 'abc-1']],
+        [['result' => 'Закоммитил.', 'session_id' => 'abc-1']],
+    ]);
+    $project = base_path();
+
+    expect(app(Responder::class)->answer($conversation->putInbox(new IncomingMessage(8, 1008, '42', 'Поставь spatie/laravel-data', godmode: true))))->toBeTrue();
+
+    Process::assertRan(fn (PendingProcess $process): bool => is_array($process->command)
+        && array_slice($process->command, 0, 6) === ['claude', '-p', 'Поставь spatie/laravel-data', '--output-format', 'json', '--dangerously-skip-permissions']
+        && ! in_array('dontAsk', $process->command, true)
+        && ! in_array('--settings', $process->command, true)
+        && ! in_array('--resume', $process->command, true)
+        && str_contains($process->command[array_search('--append-system-prompt', $process->command, true) + 1], 'проектом XY по сообщениям разработчика из Telegram-бота')
+        && $process->path === $project
+        && $process->timeout === 1200
+        && $process->environment['YOUTRACK_TOKEN'] === 'secret-token'
+        // The variables of the project's .env stay out of the session, as in the sessions of the loop.
+        && $process->environment['APP_ENV'] === false);
+    Queue::assertPushed(SendTelegramMessage::class, fn (SendTelegramMessage $job): bool => $job->kind === 'godmode'
+        && $job->replyTo === 1008
+        && $job->text === '⚡ Поставил **spatie/laravel-data**, тесты зелёные.');
+
+    expect($conversation->godmodeSession())->toBe('abc-1')
+        ->and($conversation->inboxKeys())->toBe([])
+        ->and($conversation->history()[0]['text'])->toBe('(godmode) Поставь spatie/laravel-data');
+
+    app(Responder::class)->answer($conversation->putInbox(new IncomingMessage(9, 1009, '42', 'Закоммить', godmode: true)));
+
+    Process::assertRan(fn (PendingProcess $process): bool => is_array($process->command)
+        && $process->command[2] === 'Закоммить'
+        && array_slice($process->command, array_search('--resume', $process->command, true), 2) === ['--resume', 'abc-1']);
+    Queue::assertPushed(SendTelegramMessage::class, fn (SendTelegramMessage $job): bool => $job->replyTo === 1009 && $job->text === '⚡ Закоммитил.');
+});
+
+it('starts a new session when the session of godmode is gone', function () {
+    $conversation = godmodeProject([
+        ['No conversation found with session ID: abc-1'],
+        [['result' => 'Готово.', 'session_id' => 'def-2']],
+    ]);
+    $conversation->continueGodmode('abc-1');
+
+    app(Responder::class)->answer($conversation->putInbox(new IncomingMessage(8, 1008, '42', 'Прогони тесты', godmode: true)));
+
+    Process::assertRanTimes(fn (PendingProcess $process): bool => is_array($process->command) && $process->command[2] === 'Прогони тесты', 2);
+    Queue::assertPushed(SendTelegramMessage::class, fn (SendTelegramMessage $job): bool => $job->text === '⚡ Готово.');
+    expect($conversation->godmodeSession())->toBe('def-2');
+});
+
+it('reports a task of godmode that failed and stays in godmode', function () {
+    $conversation = godmodeProject([['Credit balance is too low']]);
+
+    app(Responder::class)->answer($conversation->putInbox(new IncomingMessage(8, 1008, '42', 'Прогони тесты', godmode: true)));
+
+    Queue::assertPushed(SendTelegramMessage::class, fn (SendTelegramMessage $job): bool => $job->kind === 'error'
+        && $job->replyTo === 1008
+        && str_contains($job->text, 'Задача не выполнена: Claude Code failed (exit 1): Credit balance is too low'));
+    expect($conversation->inGodmode(3600))->toBeTrue()->and($conversation->godmodeSession())->toBeNull();
+});
+
+it('reports a task of godmode that did not finish in time', function () {
+    $conversation = godmodeProject([]);
+    Process::fake(['*--output-format*' => fn () => throw new ProcessTimedOutException(
+        new SymfonyProcessTimedOutException(new SymfonyProcess(['claude']), SymfonyProcessTimedOutException::TYPE_GENERAL),
+        new FakeProcessResult,
+    )]);
+
+    app(Responder::class)->answer($conversation->putInbox(new IncomingMessage(8, 1008, '42', 'Перепиши всё', godmode: true)));
+
+    Queue::assertPushed(SendTelegramMessage::class, fn (SendTelegramMessage $job): bool => $job->kind === 'error'
+        && str_contains($job->text, 'Claude Code did not finish in 1200 seconds (AGENTIO_TELEGRAM_GODMODE_TIMEOUT)'));
 });

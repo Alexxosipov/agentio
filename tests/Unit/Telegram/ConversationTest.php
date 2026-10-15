@@ -63,3 +63,37 @@ it('keeps the messages waiting for the assistant in order', function () {
 
     expect($conversation->inboxKeys())->toBe(['3', '12']);
 });
+
+it('keeps godmode on with the session its tasks continue', function () {
+    $conversation = new Conversation(temporaryDirectory().'/telegram');
+
+    expect($conversation->inGodmode(600))->toBeFalse()
+        ->and($conversation->godmodeExpired(600))->toBeFalse()
+        ->and($conversation->godmodeSession())->toBeNull();
+
+    // Nothing to continue while godmode is off.
+    $conversation->continueGodmode('abc-0');
+    expect($conversation->inGodmode(600))->toBeFalse();
+
+    $conversation->startGodmode();
+    $conversation->continueGodmode('abc-1');
+
+    expect($conversation->inGodmode(600))->toBeTrue()->and($conversation->godmodeSession())->toBe('abc-1');
+
+    // A task that started in the session abc-1 hands over its (same) session; one of a godmode before a restart does not.
+    $conversation->continueGodmode('abc-2', 'abc-1');
+    $conversation->continueGodmode('old-9', 'old-8');
+    $conversation->continueGodmode();
+
+    expect($conversation->godmodeSession())->toBe('abc-2');
+
+    file_put_contents($conversation->directory().'/state.json', (string) json_encode(['offset' => 3, 'godmode' => ['session' => 'abc-2', 'at' => time() - 601]]));
+
+    expect($conversation->inGodmode(600))->toBeFalse()->and($conversation->godmodeExpired(600))->toBeTrue();
+
+    $conversation->stopGodmode();
+
+    expect($conversation->godmodeExpired(600))->toBeFalse()
+        ->and($conversation->godmodeSession())->toBeNull()
+        ->and($conversation->offset())->toBe(3);
+});

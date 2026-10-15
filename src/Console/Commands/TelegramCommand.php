@@ -151,6 +151,7 @@ final class TelegramCommand extends Command
         $this->components->twoColumnDetail('Token (AGENTIO_TELEGRAM_BOT_TOKEN)', $settings->isConfigured() ? '<fg=green>set</>' : '<fg=yellow>not set</>');
         $this->components->twoColumnDetail('Chat (AGENTIO_TELEGRAM_CHAT_ID)', $settings->chatId ?? '<fg=yellow>not paired</>');
         $this->components->twoColumnDetail('Voice messages (AGENTIO_TRANSCRIPTION_DRIVER)', (string) (config('agentio.telegram.transcription.driver') ?? 'none'));
+        $this->components->twoColumnDetail('Godmode (AGENTIO_TELEGRAM_GODMODE)', $settings->godmode ? '<fg=yellow>allowed</>' : 'off');
         $this->components->twoColumnDetail('Queue', $settings->queueConnection.' / '.$settings->queue);
         $this->components->twoColumnDetail('Horizon', $horizon->status()->value);
         $this->components->twoColumnDetail('State', $conversation->directory());

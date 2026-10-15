@@ -11,7 +11,8 @@ use Throwable;
 /**
  * Answers a message of the developer (php artisan agentio:telegram assist <key>, one at a time): transcribes a
  * voice message, asks the assistant, makes the changes it decided on (YouTrack, merges of pull requests) and
- * replies with what was done.
+ * replies with what was done. A message received in godmode is a task instead: the full-access session of Godmode
+ * does it and its final text is the reply.
  * When the assistant is unavailable, a reply to a question is still recorded in its issue as a comment.
  */
 final readonly class Responder
@@ -23,6 +24,7 @@ final readonly class Responder
         private Assistant $assistant,
         private ActionRunner $actions,
         private Messenger $messenger,
+        private Godmode $godmode,
     ) {}
 
     /**
@@ -87,6 +89,12 @@ final readonly class Responder
             return;
         }
 
+        if ($message->godmode) {
+            $this->work($message, $text, $heard);
+
+            return;
+        }
+
         $about = $message->replyToId === null ? null : $this->conversation->about($message->replyToId);
         $history = $this->conversation->history();
         $this->conversation->addHistory('developer', $text, $about['issue'] ?? null);
@@ -105,6 +113,31 @@ final readonly class Responder
         ])));
 
         $this->messenger->send($reply !== '' ? $reply : 'Принял.', $result['kind'] ?? 'answer', $result['issues'][0] ?? $about['issue'] ?? null, replyTo: $message->messageId);
+    }
+
+    /**
+     * A task of godmode: the session of the previous task goes on with it, and its final text is the reply.
+     */
+    private function work(IncomingMessage $message, string $text, ?string $heard): void
+    {
+        $this->conversation->addHistory('developer', '(godmode) '.$text);
+        $previous = $this->conversation->godmodeSession();
+
+        try {
+            $result = $this->godmode->run($text, $previous);
+        } catch (Throwable $exception) {
+            $this->conversation->continueGodmode();
+            $this->messenger->send('⚡ ⚠️ Задача не выполнена: '.TelegramText::limit($exception->getMessage(), 600)."\n\nПовторите сообщение или выйдите из godmode: /exit.", 'error', replyTo: $message->messageId);
+
+            return;
+        }
+
+        $this->conversation->continueGodmode($result['session'], $previous);
+
+        $this->messenger->send(trim(implode("\n\n", array_filter([
+            $heard === null ? null : '🎙 «'.TelegramText::limit($heard, 300).'»',
+            '⚡ '.($result['reply'] !== '' ? $result['reply'] : 'Готово.'),
+        ]))), 'godmode', replyTo: $message->messageId);
     }
 
     /**

@@ -41,3 +41,15 @@ it('fingerprints the .env keys the bot processes use', function () {
     expect(BotSettings::isBotKey('AGENTIO_TRANSCRIPTION_KEY'))->toBeTrue()
         ->and(BotSettings::isBotKey('AGENTIO_PROJECT'))->toBeFalse();
 });
+
+it('keeps godmode off unless the config allows it', function () {
+    expect(BotSettings::fromConfig()->godmode)->toBeFalse()
+        ->and(BotSettings::fromConfig()->godmodeTimeout)->toBe(3600)
+        ->and(BotSettings::fromConfig()->godmodeIdle)->toBe(3600);
+
+    config(['agentio.telegram.godmode' => ['enabled' => true, 'timeout' => 5, 'idle' => 900]]);
+
+    expect(BotSettings::fromConfig()->godmode)->toBeTrue()
+        ->and(BotSettings::fromConfig()->godmodeTimeout)->toBe(60)
+        ->and(BotSettings::fromConfig()->godmodeIdle)->toBe(900);
+});

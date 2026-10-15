@@ -11,7 +11,8 @@ use JsonException;
  * The memory of the bot, in <logs>/telegram (local to the machine that runs agentio:run, like the loop's files):
  *
  * - state.json: the update offset of getUpdates, the time of the last agent comment the watcher saw, a pending
- *   pairing code, the release pull request waiting for the developer's confirmation;
+ *   pairing code, the release pull request waiting for the developer's confirmation, the godmode the developer
+ *   switched on (the Claude Code session its tasks continue and the time of its last message);
  * - messages.json: what every message the bot sent is about (the issue, the kind — question, report, answer —
  *   and the Stage the issue returns to), so a reply of the developer is tied to its issue;
  * - history.json: the last messages of the conversation, the context of the assistant;
@@ -126,6 +127,69 @@ final readonly class Conversation
     {
         $this->update('state', function (array $state): array {
             unset($state['release']);
+
+            return $state;
+        });
+    }
+
+    /**
+     * Switch godmode on, with a new session of Claude Code.
+     */
+    public function startGodmode(): void
+    {
+        $this->update('state', fn (array $state): array => [...$state, 'godmode' => ['session' => null, 'at' => time()]]);
+    }
+
+    /**
+     * Whether godmode is on: switched on and not left without a message for $idle seconds.
+     */
+    public function inGodmode(int $idle): bool
+    {
+        $at = $this->godmodeState()['at'] ?? null;
+
+        return $at !== null && $at + $idle >= time();
+    }
+
+    /**
+     * Whether godmode was left on for longer than $idle seconds without a message.
+     */
+    public function godmodeExpired(int $idle): bool
+    {
+        $at = $this->godmodeState()['at'] ?? null;
+
+        return $at !== null && $at + $idle < time();
+    }
+
+    /**
+     * The Claude Code session the tasks of godmode continue, null before its first task (and when it is off).
+     */
+    public function godmodeSession(): ?string
+    {
+        return $this->godmodeState()['session'] ?? null;
+    }
+
+    /**
+     * A message of godmode came, or a task of it was answered: the idle time starts again. With $session, the
+     * session the next task continues — unless godmode was restarted since the task took $previous.
+     */
+    public function continueGodmode(?string $session = null, ?string $previous = null): void
+    {
+        $this->update('state', function (array $state) use ($session, $previous): array {
+            if (! is_array($state['godmode'] ?? null)) {
+                return $state;
+            }
+
+            $current = is_string($state['godmode']['session'] ?? null) ? $state['godmode']['session'] : null;
+            $state['godmode'] = ['session' => $session !== null && $current === $previous ? $session : $current, 'at' => time()];
+
+            return $state;
+        });
+    }
+
+    public function stopGodmode(): void
+    {
+        $this->update('state', function (array $state): array {
+            unset($state['godmode']);
 
             return $state;
         });
@@ -256,6 +320,20 @@ final readonly class Conversation
         $this->ensureDirectory($this->directory);
 
         return $this->directory.'/assistant.lock';
+    }
+
+    /**
+     * @return array{session: string|null, at: int}|null
+     */
+    private function godmodeState(): ?array
+    {
+        $godmode = $this->read('state')['godmode'] ?? null;
+
+        if (! is_array($godmode) || ! is_int($godmode['at'] ?? null)) {
+            return null;
+        }
+
+        return ['session' => is_string($godmode['session'] ?? null) ? $godmode['session'] : null, 'at' => $godmode['at']];
     }
 
     private function inboxPath(string $key): string

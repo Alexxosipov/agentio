@@ -14,7 +14,9 @@ use Symfony\Component\Process\Process;
  * history rewrites, git subcommands agents have no use for (aliases included), every GitHub CLI command that is
  * not a read (merging and opening pull requests is the business of agentio and of the developer), destructive
  * commands and writes outside the project, writes to the agents' own settings and skills, access to secrets and
- * to the YouTrack token, and the agentio commands that only humans and the loop run.
+ * to the YouTrack token, the agentio commands that only humans and the loop run, and the package manager commands
+ * that reach beyond the project (global packages) or change agentio itself — the packages of the project the
+ * agents install, update and remove themselves.
  *
  * The command line is split into simple commands by a small shell lexer (quotes, escapes, command substitution,
  * lists and pipes), and a `cd` moves the directory the following commands are resolved against. It is not a
@@ -44,6 +46,9 @@ final readonly class BashGuard
 
     /** Commands that write only to their last argument (or to the directory of -t). */
     private const array COPYING = ['cp', 'ln', 'install', 'rsync'];
+
+    /** The package managers of the frontend. */
+    private const array JS_MANAGERS = ['npm', 'bun', 'pnpm', 'yarn'];
 
     /** Files that configure the agents themselves (relative to the project): read, never changed by agents. */
     private const string OWN_FILES = '#^(\.agentio\.json|\.claude/settings(\.local)?\.json|\.claude/skills/agentio-[^/]*(/|$)|vendor(/|$))#';
@@ -79,6 +84,7 @@ final readonly class BashGuard
                     $words[0] === 'php' => $this->php(array_slice($words, 1)),
                     $words[0] === 'gh' => self::gh(array_slice($words, 1)),
                     in_array($words[0], ['composer', 'composer.phar'], true) => self::composer(array_slice($words, 1)),
+                    in_array($words[0], self::JS_MANAGERS, true) => self::javascript($words[0], array_slice($words, 1)),
                     $words[0] === 'find' => $this->find($words, $cwd),
                     in_array($words[0], ['sed', 'perl'], true) => $this->inPlaceEdit($words, $cwd),
                     in_array($words[0], self::WRITING, true) => $this->writing($words[0], array_slice($words, 1), $cwd),
@@ -306,40 +312,62 @@ final readonly class BashGuard
     }
 
     /**
-     * Agents change the dependencies of the project only to add Saloon (saloonphp/*), the HTTP client of the
-     * integrations without an SDK; everything else is a decision of the human.
+     * Agents install, update and remove the packages of the project (which ones is decided by the architect or
+     * the task). Refused is what reaches beyond the project — global packages and settings, a new project,
+     * Composer itself —, an update of every dependency at once, and any change of agentio, whose guard and skills
+     * the agents run under.
      *
      * @param  list<string>  $args
      */
     private static function composer(array $args): ?string
     {
+        if (array_intersect(self::flags($args), ['-g', '--global']) !== []) {
+            return 'composer --global changes the setup of the machine, not of the project: that is a decision of the human (ask in [AGENT:BLOCKED]).';
+        }
+
         while ($args !== [] && str_starts_with($args[0], '-')) {
             $args = array_slice($args, 1);
         }
 
         $command = $args[0] ?? '';
+        $options = self::flags(array_slice($args, 1));
+        $packages = array_values(array_filter(array_slice($args, 1), fn (string $arg): bool => ! str_starts_with($arg, '-')));
 
-        if (in_array($command, ['remove', 'rm', 'uninstall', 'update', 'u', 'upgrade', 'bump', 'global', 'create-project', 'config'], true)) {
-            return "composer {$command} changes the dependencies or the setup of the project: that is a decision of the human (ask in [AGENT:BLOCKED]).";
+        if (in_array($command, ['global', 'create-project', 'self-update', 'selfupdate'], true)) {
+            return "composer {$command} changes the setup of the machine, not of the project: that is a decision of the human (ask in [AGENT:BLOCKED]).";
         }
 
-        if (! in_array($command, ['require', 'req', 'r'], true)) {
+        if (! in_array($command, ['require', 'req', 'r', 'remove', 'rm', 'uninstall', 'update', 'u', 'upgrade', 'bump'], true)) {
             return null;
         }
 
-        $packages = array_values(array_filter(array_slice($args, 1), fn (string $arg): bool => ! str_starts_with($arg, '-')));
-
         foreach ($packages as $package) {
-            if (preg_match('#^saloonphp/[a-z0-9-]+(:[^\s]+)?$#', $package) !== 1) {
-                return "composer require {$package}: agents may only add saloonphp/* packages (Saloon, skill agentio-saloon); any other dependency is a decision of the human (ask in [AGENT:BLOCKED]).";
+            if (preg_match('#^(alexxosipov|obrazmisli)/agentio(:|$)#i', $package) === 1) {
+                return "composer {$command} {$package}: agentio is installed and updated by the human, not by agents.";
             }
         }
 
-        if ($packages === [] || array_intersect(array_slice($args, 1), ['--dev', '-D']) !== []) {
-            return 'composer require: name the saloonphp/* packages, as dependencies of the application (not --dev).';
+        if (in_array($command, ['require', 'req', 'r'], true) && $packages === []) {
+            return 'composer require: name the packages (composer require vendor/package --no-interaction).';
+        }
+
+        if (in_array($command, ['update', 'u', 'upgrade'], true) && $packages === [] && array_intersect($options, ['--lock', '--dry-run']) === []) {
+            return 'composer update without package names updates every dependency: name the packages (composer update vendor/package); a full update is a decision of the human (ask in [AGENT:BLOCKED]).';
         }
 
         return null;
+    }
+
+    /**
+     * npm, bun, pnpm and yarn change the packages of the project, never the global ones.
+     *
+     * @param  list<string>  $args
+     */
+    private static function javascript(string $manager, array $args): ?string
+    {
+        return array_intersect(self::flags($args), ['-g', '--global']) !== [] || ($args[0] ?? '') === 'global'
+            ? "{$manager}: global packages change the setup of the machine, not of the project: that is a decision of the human (ask in [AGENT:BLOCKED])."
+            : null;
     }
 
     /**

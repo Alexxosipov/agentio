@@ -150,19 +150,37 @@ it('ignores the root and empty directories among the roots', function () {
     expect($guard->reason('rm -rf /home/user', '/srv/app'))->toContain('outside of the project directory');
 });
 
-it('lets agents add only Saloon to the dependencies', function (string $command, ?string $reason) {
+it('lets agents change the packages of the project, not of the machine and not agentio', function (string $command, ?string $reason) {
     $refused = guard()->reason($command, '/srv/app');
 
     $reason === null ? expect($refused)->toBeNull($command) : expect($refused)->toContain($reason);
 })->with([
     ['composer require saloonphp/saloon --no-interaction', null],
-    ['composer require saloonphp/saloon:^4.5 saloonphp/pagination-plugin -W', null],
+    ['composer require spatie/laravel-data:^4.5 saloonphp/pagination-plugin -W', null],
+    ['composer req --dev larastan/larastan', null],
     ['composer show saloonphp/saloon', null],
-    ['composer require saloonphp/saloon evil/package', 'composer require evil/package: agents may only add saloonphp/* packages'],
-    ['composer req guzzlehttp/guzzle', 'agents may only add saloonphp/* packages'],
-    ['composer require --dev saloonphp/saloon', 'as dependencies of the application (not --dev)'],
-    ['composer require', 'name the saloonphp/* packages'],
-    ['composer remove saloonphp/saloon', 'composer remove changes the dependencies'],
-    ['composer update', 'composer update changes the dependencies'],
-    ['composer -n global require laravel/installer', 'composer global changes'],
+    ['composer remove guzzlehttp/guzzle', null],
+    ['composer update laravel/framework -W', null],
+    ['composer update --lock', null],
+    ['composer bump', null],
+    ['composer config allow-plugins.pestphp/pest-plugin true', null],
+    ['composer require', 'composer require: name the packages'],
+    ['composer update', 'composer update without package names updates every dependency'],
+    ['composer upgrade --no-interaction', 'composer update without package names updates every dependency'],
+    ['composer update alexxosipov/agentio', 'agentio is installed and updated by the human'],
+    ['composer remove --dev alexxosipov/agentio', 'agentio is installed and updated by the human'],
+    ['composer require alexxosipov/agentio:^1.0 --dev', 'agentio is installed and updated by the human'],
+    ['composer -n global require laravel/installer', 'composer global changes the setup of the machine'],
+    ['composer config --global github-oauth.github.com token', 'composer --global changes the setup of the machine'],
+    ['composer create-project laravel/laravel other', 'composer create-project changes the setup of the machine'],
+    ['composer self-update', 'composer self-update changes the setup of the machine'],
+    ['npm install axios', null],
+    ['npm install', null],
+    ['npm uninstall lodash && npm run build', null],
+    ['bun add -d @types/node', null],
+    ['bun remove lodash', null],
+    ['npx shadcn@latest add button', null],
+    ['npm install -g pnpm', 'npm: global packages change the setup of the machine'],
+    ['bun add --global typescript', 'bun: global packages change the setup of the machine'],
+    ['yarn global add typescript', 'yarn: global packages change the setup of the machine'],
 ]);

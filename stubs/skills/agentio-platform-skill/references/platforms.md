@@ -24,7 +24,7 @@
 ## Telegram-бот
 Документация: https://core.telegram.org/bots/api.
 
-- HTTP API `https://api.telegram.org/bot<token>/<method>`, JSON, ответ `{"ok": true, "result": …}` или `{"ok": false, "error_code": …, "description": …, "parameters": {"retry_after": …}}` при HTTP 200/4xx. Официального PHP SDK нет; пакет сообщества — только если человек его одобрил (правило «SDK или Saloon» скилла agentio-saloon), по умолчанию — Saloon-коннектор `App\Integrations\Telegram\TelegramConnector`: токен — в `resolveBaseUrl()`, `ok=false` → исключение (`hasRequestFailed`).
+- HTTP API `https://api.telegram.org/bot<token>/<method>`, JSON, ответ `{"ok": true, "result": …}` или `{"ok": false, "error_code": …, "description": …, "parameters": {"retry_after": …}}` при HTTP 200/4xx. Официального PHP SDK нет; пакет сообщества — по правилу «SDK или Saloon» скилла agentio-saloon (решение архитектора), по умолчанию — Saloon-коннектор `App\Integrations\Telegram\TelegramConnector`: токен — в `resolveBaseUrl()`, `ok=false` → исключение (`hasRequestFailed`).
 - Получение обновлений: вебхук (`setWebhook` с `secret_token` → заголовок `X-Telegram-Bot-Api-Secret-Token` в каждом запросе, проверять `hash_equals`; HTTPS) или `getUpdates` (long polling; одно соединение на токен — иначе 409). Обработка в джобе, идемпотентность по `update_id`; быстрый 200 на вебхук.
 - Лимиты: сообщение до 4096 символов (подпись к медиа — 1024), примерно 30 сообщений в секунду всем и 1 в секунду в один чат (ориентир — проверь), 429 с `retry_after` → повтор после паузы. Форматирование — `parse_mode` HTML или MarkdownV2 (экранирование!).
 - Файлы: `getFile` → `https://api.telegram.org/file/bot<token>/<file_path>` (до 20 МБ для бота).
@@ -33,7 +33,7 @@
 ## VK Mini App
 Документация: https://dev.vk.com/ru/mini-apps/overview.
 
-- Веб-приложение во ВКонтакте; связь с клиентом — VK Bridge (`@vkontakte/vk-bridge`, `bridge.send('VKWebAppInit')`), интерфейс — VKUI (`@vkontakte/vkui`); установка npm-пакетов — решение человека.
+- Веб-приложение во ВКонтакте; связь с клиентом — VK Bridge (`@vkontakte/vk-bridge`, `bridge.send('VKWebAppInit')`), интерфейс — VKUI (`@vkontakte/vkui`); npm-пакеты ставит отдельная задача по решению архитектора.
 - **Подлинность**: параметры запуска (`vk_user_id`, `vk_app_id`, `vk_ts`, … и `sign`) приходят в URL. Сервер проверяет: параметры с префиксом `vk_`, отсортированные по ключу, как query-строка; `HMAC_SHA256(query, защищённый_ключ_приложения)` → base64 url-safe без `=` должно совпасть с `sign`; проверить свежесть `vk_ts`. Сверь алгоритм с документацией «Параметры запуска».
 - Вызовы API VK (`https://api.vk.com/method/<метод>?v=<версия>`) — Saloon-коннектор `App\Integrations\Vk\VkConnector`; токены сервисный/пользователя — по задаче; ошибки в теле `{"error": {…}}` при HTTP 200 → `hasRequestFailed`.
 - Тесты: фабрика подписанных параметров запуска, подделка `sign`.
@@ -42,10 +42,10 @@
 Документация: https://web.dev/learn/pwa, https://developer.mozilla.org/docs/Web/Progressive_web_apps.
 
 - Манифест (`manifest.webmanifest`: name, icons 192/512, start_url, display, theme_color), service worker (область действия, стратегия кэша: network-first для HTML/API, cache-first для статики с версионированием), HTTPS.
-- Сборка: в проектах на Vite — плагин PWA (npm-зависимость — решение человека) или свой service worker; не кэшировать ответы с персональными данными и CSRF-токены.
+- Сборка: в проектах на Vite — плагин PWA (npm-зависимость — по решению архитектора) или свой service worker; не кэшировать ответы с персональными данными и CSRF-токены.
 - Push: Web Push (VAPID) — на сервере пакет или свой Saloon-клиент; подписки хранить по пользователю, удалять при 404/410.
 - Тесты: манифест и маршруты отдаются; ручная проверка — Lighthouse, офлайн-режим в DevTools.
 
 ## Платёжные и прочие сервисы
-- Сначала: есть ли официальный поддерживаемый PHP SDK (решение человека об установке) — иначе Saloon.
+- Сначала: есть ли официальный поддерживаемый PHP SDK (установка — по решению архитектора) — иначе Saloon.
 - Обязательно в скилле: суммы в минимальных единицах, ключи идемпотентности, статусы платежа и переходы, вебхуки (подпись, дубли, порядок), сверка, возвраты — по `../../agentio-laravel-architect/references/payments.md`.

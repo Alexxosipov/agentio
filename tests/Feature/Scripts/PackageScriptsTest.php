@@ -78,7 +78,7 @@ it('gives planning sessions read-only settings and the MCP configs', function ()
         ->and($arguments)->toContain('--permission-mode dontAsk --strict-mcp-config --mcp-config '.$package.'/resources/claude/mcp/youtrack.json --settings')
         ->and($settings['permissions']['allow'])->toContain('Bash(php artisan agentio:yt *)', 'mcp__youtrack__*', 'Skill', 'Read')
         // Planning runs in the developer's main checkout: it changes no file and runs no project command.
-        ->and($settings['permissions']['allow'])->not->toContain('Edit(./**)', 'Bash(php artisan *)', 'Bash(git commit *)', 'Bash(make lint)')
+        ->and($settings['permissions']['allow'])->not->toContain('Edit(./**)', 'Bash(php artisan *)', 'Bash(git commit *)', 'Bash(make lint)', 'Bash(composer require *)', 'Bash(npm install*)')
         ->and($settings['permissions']['deny'])->toContain('Edit', 'Write', 'Bash(git commit *)', 'Read(./.env)', 'Read(./secrets/**)', 'Bash(git push origin develop*)')
         ->and($settings['hooks']['PreToolUse'][0]['hooks'][0]['command'])->toBe("php '{$package}/bin/agentio-guard' '--protected=develop,main,master'");
 });
@@ -93,6 +93,10 @@ it('gives epic sessions the session settings of the package and the project rule
     expect($settings['permissions']['allow'])->toContain('Bash(php artisan agentio:yt *)', 'Bash(php artisan agentio:commit *)', 'Bash(composer test*)', 'Bash(vendor/bin/pest*)', 'mcp__youtrack__*', 'Skill', 'Edit(./**)', 'Bash(make lint)', 'Bash(git push -u origin XY-*)', 'Bash(git merge --no-edit develop)', 'Bash(git merge --abort)')
         // "/**" is relative to the main checkout in a git worktree: it would not let the agents edit the epic worktree.
         ->and($settings['permissions']['allow'])->not->toContain('Edit(/**)', 'Bash(php -i)')
+        // The agents install, update and remove the packages of the project, never the global ones.
+        ->and($settings['permissions']['allow'])->toContain('Bash(composer require *)', 'Bash(composer remove *)', 'Bash(composer update *)', 'Bash(bun add *)', 'Bash(npm install*)', 'Bash(npx *)')
+        ->and($settings['permissions']['deny'])->toContain('Bash(composer global*)', 'Bash(npm install -g*)', 'Bash(sudo *)')
+        ->and($settings['permissions']['deny'])->not->toContain('Bash(composer update*)', 'Bash(composer remove *)', 'Bash(bun add *)', 'Bash(npm install *)')
         ->and($settings['permissions']['deny'])->toContain('Bash(git push --force*)', 'Bash(git push origin develop*)', 'Bash(git checkout develop*)', 'Bash(git push origin main*)', 'Bash(php artisan agentio:accept*)', 'Bash(php artisan agentio:pause*)', 'Bash(php artisan agentio:resume*)', 'Read(./.env)', 'Read(**/.env)', 'Edit(.claude/skills/agentio-*/**)', 'Read(./secrets/**)', 'mcp__laravel-boost__tinker', 'mcp__laravel-boost__record-rule', 'Bash(php artisan config:show*)', 'Edit(CLAUDE.md)')
         ->and($settings['hooks']['PreToolUse'][0]['hooks'][0]['command'])->toBe("php '{$package}/bin/agentio-guard' '--protected=develop,main,master' '--root=/srv/shared'");
 });

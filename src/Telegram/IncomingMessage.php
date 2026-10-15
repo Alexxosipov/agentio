@@ -6,7 +6,8 @@ namespace Obrazmisli\Agentio\Telegram;
 
 /**
  * A message the developer sent the bot: text or voice (a voice message or an audio file), and the message it
- * replies to, if any.
+ * replies to, if any. A message received in godmode is a task for the full-access session (Godmode) instead of
+ * the assistant.
  */
 final readonly class IncomingMessage
 {
@@ -22,6 +23,7 @@ final readonly class IncomingMessage
         public ?string $replyToText = null,
         public bool $replyToBot = false,
         public int $date = 0,
+        public bool $godmode = false,
     ) {}
 
     /**
@@ -85,7 +87,16 @@ final readonly class IncomingMessage
             replyToText: is_string($data['replyToText'] ?? null) ? $data['replyToText'] : null,
             replyToBot: ($data['replyToBot'] ?? false) === true,
             date: is_int($data['date'] ?? null) ? $data['date'] : 0,
+            godmode: ($data['godmode'] ?? false) === true,
         );
+    }
+
+    /**
+     * The message as a task of godmode, with the text of the task (the command that started godmode cut off).
+     */
+    public function forGodmode(string $text): self
+    {
+        return new self(...[...$this->toArray(), 'text' => $text, 'godmode' => true]);
     }
 
     public function isVoice(): bool
@@ -110,7 +121,7 @@ final readonly class IncomingMessage
     }
 
     /**
-     * @return array{updateId: int, messageId: int, chatId: string, text: string, from: string|null, voiceFileId: string|null, voiceDuration: int|null, replyToId: int|null, replyToText: string|null, replyToBot: bool, date: int}
+     * @return array{updateId: int, messageId: int, chatId: string, text: string, from: string|null, voiceFileId: string|null, voiceDuration: int|null, replyToId: int|null, replyToText: string|null, replyToBot: bool, date: int, godmode: bool}
      */
     public function toArray(): array
     {
@@ -126,6 +137,7 @@ final readonly class IncomingMessage
             'replyToText' => $this->replyToText,
             'replyToBot' => $this->replyToBot,
             'date' => $this->date,
+            'godmode' => $this->godmode,
         ];
     }
 }

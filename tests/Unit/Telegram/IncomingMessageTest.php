@@ -51,3 +51,15 @@ it('parses bot commands', function () {
         ->and($start?->commandArgument())->toBe('a1b2c3d4')
         ->and($plain?->command())->toBeNull();
 });
+
+it('turns a message into a task of godmode', function () {
+    $message = IncomingMessage::fromUpdate(telegramUpdate(7, ['text' => '/godmode Поставь пакет']));
+    $task = $message?->forGodmode((string) $message->commandArgument());
+
+    expect($message?->godmode)->toBeFalse()
+        ->and($message?->command())->toBe('godmode')
+        ->and($task?->godmode)->toBeTrue()
+        ->and($task?->text)->toBe('Поставь пакет')
+        ->and($task?->messageId)->toBe(1007)
+        ->and(IncomingMessage::fromArray((array) $task?->toArray()))->toEqual($task);
+});

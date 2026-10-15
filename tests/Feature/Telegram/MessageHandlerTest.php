@@ -18,9 +18,9 @@ beforeEach(function () {
     fakeTelegram(['sendChatAction' => ['ok' => true, 'result' => true]]);
 });
 
-function receive(array $message = [], string $chatId = '42'): void
+function receive(array $message = [], string $chatId = '42', int $update = 7): void
 {
-    app(MessageHandler::class)->receive((IncomingMessage::fromUpdate(telegramUpdate(7, $message, $chatId))));
+    app(MessageHandler::class)->receive((IncomingMessage::fromUpdate(telegramUpdate($update, $message, $chatId))));
 }
 
 it('pairs the chat that sends the code of agentio:setup-telegram', function () {
@@ -90,4 +90,90 @@ it('handles an update once even when it is queued twice', function () {
     app()->call([new HandleTelegramUpdate(telegramUpdate(7, ['text' => '/help'])), 'handle']);
 
     Queue::assertPushed(SendTelegramMessage::class, 1);
+});
+
+it('says how to allow godmode while the settings keep it off', function () {
+    projectWithBot();
+
+    receive(['text' => '/godmode composer require spatie/laravel-data']);
+    receive(['text' => 'Удали всё'], update: 8);
+
+    Queue::assertPushed(SendTelegramMessage::class, fn (SendTelegramMessage $job): bool => $job->kind === 'help' && $job->replyTo === 1007 && str_contains($job->text, 'AGENTIO_TELEGRAM_GODMODE=true'));
+    expect(app(Conversation::class)->inGodmode(3600))->toBeFalse()
+        ->and(app(Conversation::class)->inbox('7'))->toBeNull()
+        ->and(app(Conversation::class)->inbox('8')?->godmode)->toBeFalse();
+});
+
+it('switches godmode on and off and hands its messages over as tasks', function () {
+    projectWithBot();
+    config(['agentio.telegram.godmode.enabled' => true, 'agentio.telegram.godmode.idle' => 1800]);
+    $conversation = app(Conversation::class);
+
+    receive(['text' => '/godmode']);
+
+    expect($conversation->inGodmode(1800))->toBeTrue()->and($conversation->inboxKeys())->toBe([]);
+    Process::assertNothingRan();
+    Queue::assertPushed(SendTelegramMessage::class, fn (SendTelegramMessage $job): bool => str_contains($job->text, 'Godmode включён') && str_contains($job->text, 'через 30 мин'));
+
+    receive(['text' => 'Поставь spatie/laravel-data'], update: 8);
+
+    expect($conversation->inbox('8')?->godmode)->toBeTrue()
+        ->and($conversation->inbox('8')?->text)->toBe('Поставь spatie/laravel-data');
+    Process::assertRan(fn (PendingProcess $process): bool => is_array($process->command) && array_slice($process->command, -3) === ['agentio:telegram', 'assist', '8']);
+    Queue::assertPushed(SendTelegramMessage::class, fn (SendTelegramMessage $job): bool => $job->replyTo === 1008 && str_contains($job->text, 'Принял задачу'));
+
+    receive(['text' => '/exit'], update: 9);
+    receive(['text' => 'Что в работе?'], update: 10);
+
+    expect($conversation->inGodmode(1800))->toBeFalse()
+        ->and($conversation->inbox('9'))->toBeNull()
+        ->and($conversation->inbox('10')?->godmode)->toBeFalse();
+    Queue::assertPushed(SendTelegramMessage::class, fn (SendTelegramMessage $job): bool => $job->replyTo === 1009 && str_contains($job->text, 'Godmode выключен: дальше отвечает ассистент'));
+});
+
+it('runs the task given with /godmode right away', function () {
+    projectWithBot();
+    config(['agentio.telegram.godmode.enabled' => true]);
+
+    receive(['text' => '/godmode Обнови README и закоммить']);
+
+    expect(app(Conversation::class)->inbox('7')?->godmode)->toBeTrue()
+        ->and(app(Conversation::class)->inbox('7')?->text)->toBe('Обнови README и закоммить')
+        ->and(app(Conversation::class)->inGodmode(3600))->toBeTrue();
+});
+
+it('leaves a reply to the questions of the agents to the assistant in godmode', function () {
+    projectWithBot();
+    config(['agentio.telegram.godmode.enabled' => true]);
+    $conversation = app(Conversation::class);
+    $conversation->startGodmode();
+    $conversation->remember([500], 'question', 'XY-1', 'Backlog');
+
+    receive(['text' => 'В1: б', 'reply_to_message' => ['message_id' => 500, 'from' => ['id' => 1, 'is_bot' => true], 'text' => '❓ Вопросы по XY-1']]);
+
+    expect($conversation->inbox('7')?->godmode)->toBeFalse()->and($conversation->inGodmode(3600))->toBeTrue();
+});
+
+it('switches godmode off when it was left without messages', function () {
+    projectWithBot();
+    config(['agentio.telegram.godmode.enabled' => true, 'agentio.telegram.godmode.idle' => 600]);
+    $conversation = app(Conversation::class);
+    $conversation->startGodmode();
+    file_put_contents($conversation->directory().'/state.json', (string) json_encode(['godmode' => ['session' => 'abc-1', 'at' => time() - 601]]));
+
+    receive(['text' => 'Удали ветку']);
+
+    expect($conversation->inbox('7')?->godmode)->toBeFalse()
+        ->and($conversation->godmodeExpired(600))->toBeFalse()
+        ->and($conversation->godmodeSession())->toBeNull();
+    Queue::assertPushed(SendTelegramMessage::class, fn (SendTelegramMessage $job): bool => str_contains($job->text, 'Godmode выключился'));
+});
+
+it('says that godmode is not on when asked to leave it', function () {
+    projectWithBot();
+
+    receive(['text' => '/godmode off']);
+
+    Queue::assertPushed(SendTelegramMessage::class, fn (SendTelegramMessage $job): bool => $job->text === 'Godmode не включён.');
+    Process::assertNothingRan();
 });

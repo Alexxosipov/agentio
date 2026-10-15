@@ -103,6 +103,12 @@ return [
     | "transcription" turns voice messages into text: "openai" (any
     | OpenAI-compatible /audio/transcriptions endpoint at "url") or "whisper"
     | (the local whisper.cpp CLI with ffmpeg); null leaves voice unanswered.
+    | "godmode" lets the developer work on the project from the chat: after
+    | /godmode every message is a task for a Claude Code session with full
+    | access to the main checkout (no permission rules, no agentio guard),
+    | until /exit or "idle" seconds without a message; a task may take
+    | "timeout" seconds. Off by default: whoever can write to the paired chat
+    | can then run any command on this machine.
     |
     */
 
@@ -114,6 +120,11 @@ return [
         'queue' => env('AGENTIO_TELEGRAM_QUEUE', 'default'),
         'watch_interval' => (int) env('AGENTIO_TELEGRAM_WATCH_INTERVAL', 60),
         'assistant_timeout' => (int) env('AGENTIO_TELEGRAM_ASSISTANT_TIMEOUT', 600),
+        'godmode' => [
+            'enabled' => (bool) env('AGENTIO_TELEGRAM_GODMODE', false),
+            'timeout' => (int) env('AGENTIO_TELEGRAM_GODMODE_TIMEOUT', 3600),
+            'idle' => (int) env('AGENTIO_TELEGRAM_GODMODE_IDLE', 3600),
+        ],
         'transcription' => [
             'driver' => env('AGENTIO_TRANSCRIPTION_DRIVER'),
             'url' => env('AGENTIO_TRANSCRIPTION_URL', 'https://api.openai.com/v1'),

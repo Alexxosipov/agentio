@@ -29,7 +29,7 @@ final class SendTelegramMessage implements ShouldQueue
     public int $timeout = 50;
 
     /**
-     * @param  string  $kind  question, report, answer, help or error
+     * @param  string  $kind  question, report, answer, godmode, help or error
      * @param  array<string, mixed>|null  $markup  Buttons under the message or a request for a reply
      */
     public function __construct(
@@ -89,7 +89,7 @@ final class SendTelegramMessage implements ShouldQueue
 
         $conversation->remember($ids, $this->kind, $this->issue, $this->stage);
 
-        if (in_array($this->kind, ['answer', 'question', 'report'], true)) {
+        if (in_array($this->kind, ['answer', 'question', 'report', 'godmode'], true)) {
             $conversation->addHistory('bot', $this->text, $this->issue);
         }
     }
